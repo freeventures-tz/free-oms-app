@@ -12,6 +12,12 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
+# E2E fixture accounts, including their temporary passwords. Generated per run, never committed.
+/e2e/.fixtures.json
 
 # next.js
 /.next/
@@ -62,3 +68,6 @@ supabase/.branches/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Integration-test Director fixture, including its password. Generated per run.
+/tests/.director.json

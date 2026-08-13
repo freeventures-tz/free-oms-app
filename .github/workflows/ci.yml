@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# The order below is deliberate: the cheapest checks that can fail run first, and every test that
+# touches a database runs against a stack started FROM THIS REPOSITORY'S config.toml. Auth settings
+# and exposed schemas are configuration, not migrations — a stack started before the config is in
+# place proves the wrong thing.
+jobs:
+  static:
+    name: Lint · Types · Unit · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+
+  database:
+    name: Migrations · pgTAP · Advisors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
+          # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
+          version: 2.113.0
+      - name: Start Supabase
+        run: supabase start
+      - name: Migrations apply from a clean database
+        run: supabase db reset
+      - name: pgTAP
+        run: supabase test db
+      - name: Database lint
+        run: supabase db lint --level warning
+      - name: Database advisors
+        # `db lint` is a plpgsql checker, not the advisors. The CLI has no advisors command, so the
+        # rules live in supabase/advisors.sql and this step fails on any blocking finding.
+        run: node scripts/run-advisors.mjs
+
+  integration:
+    name: Auth & Data API integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
+          # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
+          version: 2.113.0
+      - name: Start Supabase
+        run: supabase start
+      - name: Write local environment
+        run: |
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(supabase status -o env | grep '^PUBLISHABLE_KEY=' | cut -d= -f2- | tr -d '\"')"
+            echo "SUPABASE_SECRET_KEY=$(supabase status -o env | grep '^SECRET_KEY=' | cut -d= -f2- | tr -d '\"')"
+          } > .env.test.local
+      - run: npm run test:integration
+
+  e2e:
+    name: Responsive authentication E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
+          # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
+          version: 2.113.0
+      - name: Start Supabase
+        run: supabase start
+      - name: Write local environment
+        run: |
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(supabase status -o env | grep '^PUBLISHABLE_KEY=' | cut -d= -f2- | tr -d '\"')"
+            echo "SUPABASE_SECRET_KEY=$(supabase status -o env | grep '^SECRET_KEY=' | cut -d= -f2- | tr -d '\"')"
+          } > .env.local
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
