@@ -1,0 +1,173 @@
+{
+  "common": {
+    "appName": "Free Ventures",
+    "signOut": "Toka",
+    "cancel": "Ghairi",
+    "close": "Funga",
+    "copy": "Nakili",
+    "copied": "Imenakiliwa",
+    "loading": "Inafanya kazi…",
+    "language": "Lugha",
+    "english": "Kiingereza",
+    "swahili": "Kiswahili",
+    "menu": "Menyu",
+    "signedInAs": "Umeingia kama {name}"
+  },
+  "auth": {
+    "signIn": {
+      "title": "Ingia",
+      "phonePrompt": "Tumia namba yako ya simu kuingia",
+      "phoneHelp": "Mfano 0712 345 678",
+      "normalisedAs": "Itahifadhiwa kama {phone}",
+      "passwordPrompt": "Andika nenosiri lako",
+      "continue": "Endelea",
+      "changeNumber": "Badilisha namba hii",
+      "submit": "Ingia",
+      "failed": "Hatujaweza kukuingiza. Angalia namba na nenosiri, kisha jaribu tena."
+    },
+    "password": {
+      "show": "Onyesha nenosiri",
+      "hide": "Ficha nenosiri",
+      "ruleMet": "imekamilika",
+      "ruleUnmet": "bado haijakamilika"
+    },
+    "firstLogin": {
+      "title": "Weka nenosiri jipya",
+      "description": "Akaunti yako ina nenosiri la muda. Weka lako mwenyewe kabla ya kuendelea.",
+      "policyTitle": "Nenosiri lako linahitaji",
+      "policyLength": "Herufi 12 au zaidi",
+      "policyUpper": "Herufi moja kubwa",
+      "policyLower": "Herufi moja ndogo",
+      "policyDigit": "Namba moja",
+      "newPassword": "Nenosiri jipya",
+      "confirmPassword": "Liandike tena",
+      "submit": "Hifadhi na uendelee",
+      "failed": "Hatujaweza kuhifadhi nenosiri jipya. Jaribu tena.",
+      "blocked": "Huwezi kutumia mfumo mpaka umalize hapa.",
+      "finishTitle": "Maliza kuweka akaunti",
+      "alreadyChanged": "Nenosiri lako jipya limehifadhiwa. Imebaki hatua moja tu.",
+      "finish": "Maliza na uendelee",
+      "notRecorded": "Nenosiri lako jipya limehifadhiwa, lakini hatukumaliza. Ingia tena kwa nenosiri lako jipya ili kuendelea."
+    },
+    "errors": {
+      "phone": {
+        "empty": "Andika namba yako ya simu.",
+        "not_tanzanian": "Andika namba ya Tanzania.",
+        "wrong_length": "Namba ya Tanzania ina tarakimu 9 baada ya 255.",
+        "invalid_characters": "Tumia namba pekee."
+      },
+      "password": {
+        "required": "Andika nenosiri lako.",
+        "tooShort": "Tumia herufi 12 au zaidi.",
+        "needsUpper": "Ongeza herufi moja kubwa.",
+        "needsLower": "Ongeza herufi moja ndogo.",
+        "needsDigit": "Ongeza namba moja.",
+        "mismatch": "Manenosiri mawili hayafanani.",
+        "sameAsCurrent": "Hilo ndilo nenosiri unalotumia sasa. Chagua tofauti."
+      }
+    }
+  },
+  "access": {
+    "noRole": {
+      "title": "Bado huna wadhifa",
+      "body": "Akaunti yako bado haijapewa kazi. Muombe Mkurugenzi akupe wadhifa."
+    },
+    "inactive": {
+      "title": "Akaunti yako imesimamishwa",
+      "body": "Muombe Mkurugenzi airudishe akaunti yako."
+    },
+    "denied": {
+      "title": "Huna ruhusa ya ukurasa huu",
+      "body": "Ukurasa huu unahitaji ruhusa nyingine.",
+      "goHome": "Nenda ukurasa wangu wa mwanzo"
+    }
+  },
+  "nav": {
+    "orders": "Oda",
+    "payments": "Malipo na utoaji",
+    "dashboard": "Dashibodi",
+    "accounts": "Akaunti za watumiaji"
+  },
+  "landing": {
+    "orders": {
+      "title": "Oda",
+      "description": "Oda ulizotengeneza na hatua zake.",
+      "primaryAction": "Tengeneza oda mpya",
+      "empty": "Bado hakuna oda."
+    },
+    "payments": {
+      "title": "Malipo na utoaji",
+      "description": "Kazi inayosubiri malipo na kutolewa.",
+      "empty": "Hakuna kinachosubiri."
+    },
+    "dashboard": {
+      "title": "Dashibodi",
+      "description": "Kazi za leo na vitu vinavyosubiri idhini.",
+      "empty": "Hakuna cha kupitia."
+    },
+    "comingSoon": "Sehemu hii ya mfumo bado haijajengwa."
+  },
+  "admin": {
+    "accounts": {
+      "title": "Akaunti za watumiaji",
+      "description": "Fungua akaunti za wafanyakazi na simamia zilizopo. Kila kitendo hapa kinarekodiwa.",
+      "create": "Fungua akaunti",
+      "fullName": "Jina kamili",
+      "phone": "Namba ya simu",
+      "role": "Wadhifa",
+      "status": "Hali",
+      "actions": "Vitendo",
+      "active": "Inatumika",
+      "inactive": "Imesimamishwa",
+      "gated": "Lazima abadilishe nenosiri",
+      "resetPassword": "Weka nenosiri jipya",
+      "deactivate": "Simamisha",
+      "reactivate": "Rudisha",
+      "changeRole": "Badilisha wadhifa",
+      "changePhone": "Badilisha namba ya simu",
+      "changePhoneWarning": "Hii inabadilisha namba anayotumia kuingia.",
+      "deactivateWarning": "Atatolewa nje na hataweza kuingia tena.",
+      "empty": "Bado hakuna akaunti.",
+      "created": "Akaunti ya {name} imefunguliwa.",
+      "updated": "Imehifadhiwa.",
+      "temporaryPasswordTitle": "Nenosiri la muda",
+      "temporaryPasswordWarning": "Hili linaonyeshwa mara moja tu. Liandike au linakili sasa, kisha mpe {name}. Atatakiwa kulibadilisha atakapoingia mara ya kwanza.",
+      "temporaryPasswordDone": "Nimeshampa",
+      "recoverExisting": "Weka nenosiri jipya kwa akaunti hii"
+    },
+    "roles": {
+      "director": "Mkurugenzi",
+      "manager": "Meneja",
+      "cashier": "Keshia",
+      "sales_rep": "Muuzaji"
+    },
+    "errors": {
+      "fullName": {
+        "tooShort": "Andika jina lake kamili.",
+        "tooLong": "Jina hilo ni refu sana."
+      },
+      "role": {
+        "required": "Chagua wadhifa mmoja."
+      },
+      "idempotencyKey": "Pakia ukurasa upya kisha jaribu tena.",
+      "not_permitted": "Huruhusiwi kufanya hivyo.",
+      "phone_in_use": "Namba hiyo tayari ni ya akaunti iliyopo.",
+      "last_active_director": "Lazima kuwe na Mkurugenzi mmoja anayetumika.",
+      "cannot_deactivate_self": "Huwezi kusimamisha akaunti yako mwenyewe.",
+      "attempt_in_progress": "Akaunti hii tayari inatengenezwa. Jaribu tena baada ya muda mfupi.",
+      "auth_create_failed": "Akaunti haikutengenezwa. Hakuna kilichobadilika.",
+      "already_bootstrapped": "Mkurugenzi tayari yupo.",
+      "generic": "Haikufanikiwa. Jaribu tena.",
+      "already_provisioned": "Akaunti hiyo tayari ipo. Ifungue hapa chini kisha weka nenosiri jipya ili umpe.",
+      "idempotency_key_conflict": "Pakia ukurasa upya kisha jaribu tena.",
+      "auth_identifier_update_failed": "Namba ya simu haikubadilishwa. Hakuna kilichobaki katikati.",
+      "auth_identifier_update_failed_unreverted": "Mabadiliko ya namba ya simu hayakukamilika. Fungua akaunti hii tena ili yakamilike.",
+      "already_completed": "Hilo lilishafanyika. Nenosiri lililoonyeshwa wakati ule haliwezi kuonyeshwa tena — weka jipya kama halikuandikwa.",
+      "already_settled": "Ombi hilo lilishakamilika au kutenguliwa. Anza jipya.",
+      "claimed_by_other": "Mtu mwingine tayari analifanya hili. Subiri kidogo kisha angalia akaunti.",
+      "change_already_in_flight": "Kuna mabadiliko yanayosubiri kwenye akaunti hii. Yamalize au pakia upya kwanza.",
+      "reset_unconfirmed": "Nenosiri limebadilishwa lakini hatukuweza kuthibitisha. Fungua akaunti uangalie kabla ya kumpa mtu chochote.",
+      "phone_change_unconfirmed": "Namba ya simu imebadilishwa lakini hatukuweza kuthibitisha. Fungua akaunti tena ili ikamilike."
+    }
+  }
+}

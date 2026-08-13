@@ -1,0 +1,173 @@
+{
+  "common": {
+    "appName": "Free Ventures",
+    "signOut": "Sign out",
+    "cancel": "Cancel",
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied",
+    "loading": "Working…",
+    "language": "Language",
+    "english": "English",
+    "swahili": "Kiswahili",
+    "menu": "Menu",
+    "signedInAs": "Signed in as {name}"
+  },
+  "auth": {
+    "signIn": {
+      "title": "Sign in",
+      "phonePrompt": "Use your phone number to sign in",
+      "phoneHelp": "For example 0712 345 678",
+      "normalisedAs": "Will be saved as {phone}",
+      "passwordPrompt": "Enter your password",
+      "continue": "Continue",
+      "changeNumber": "Change this number",
+      "submit": "Sign in",
+      "failed": "We couldn't sign you in. Check your details and try again."
+    },
+    "password": {
+      "show": "Show password",
+      "hide": "Hide password",
+      "ruleMet": "done",
+      "ruleUnmet": "not done yet"
+    },
+    "firstLogin": {
+      "title": "Choose a new password",
+      "description": "Your account uses a temporary password. Choose your own before you continue.",
+      "policyTitle": "Your password needs",
+      "policyLength": "At least 12 characters",
+      "policyUpper": "One capital letter",
+      "policyLower": "One small letter",
+      "policyDigit": "One number",
+      "newPassword": "New password",
+      "confirmPassword": "Type it again",
+      "submit": "Save and continue",
+      "failed": "We couldn't save your new password. Try again.",
+      "blocked": "You cannot use the system until this is done.",
+      "finishTitle": "Finish setting up",
+      "alreadyChanged": "Your new password was saved. There is one step left to finish.",
+      "finish": "Finish and continue",
+      "notRecorded": "Your new password was saved, but we could not finish. Sign in again with your new password to continue."
+    },
+    "errors": {
+      "phone": {
+        "empty": "Enter your phone number.",
+        "not_tanzanian": "Enter a Tanzanian number.",
+        "wrong_length": "A Tanzanian number has 9 digits after 255.",
+        "invalid_characters": "Use numbers only."
+      },
+      "password": {
+        "required": "Enter your password.",
+        "tooShort": "Use at least 12 characters.",
+        "needsUpper": "Add one capital letter.",
+        "needsLower": "Add one small letter.",
+        "needsDigit": "Add one number.",
+        "mismatch": "The two passwords are not the same.",
+        "sameAsCurrent": "That is the password you use now. Choose a different one."
+      }
+    }
+  },
+  "access": {
+    "noRole": {
+      "title": "You have no role yet",
+      "body": "Your account is not set up for any work yet. Ask a Director to give you a role."
+    },
+    "inactive": {
+      "title": "Your account is switched off",
+      "body": "Ask a Director to switch your account back on."
+    },
+    "denied": {
+      "title": "You don't have access to this page",
+      "body": "This page needs different permissions.",
+      "goHome": "Go to my home page"
+    }
+  },
+  "nav": {
+    "orders": "Orders",
+    "payments": "Payments & dispatch",
+    "dashboard": "Dashboard",
+    "accounts": "User accounts"
+  },
+  "landing": {
+    "orders": {
+      "title": "Orders",
+      "description": "Orders you have created and their progress.",
+      "primaryAction": "Create new order",
+      "empty": "No orders yet."
+    },
+    "payments": {
+      "title": "Payments & dispatch",
+      "description": "Work waiting for payment and for release.",
+      "empty": "Nothing is waiting."
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "description": "Today's operations and anything waiting for approval.",
+      "empty": "Nothing to review."
+    },
+    "comingSoon": "This part of the system is not built yet."
+  },
+  "admin": {
+    "accounts": {
+      "title": "User accounts",
+      "description": "Create staff accounts and manage the ones that exist. Every action here is recorded.",
+      "create": "Create account",
+      "fullName": "Full name",
+      "phone": "Phone number",
+      "role": "Role",
+      "status": "Status",
+      "actions": "Actions",
+      "active": "Active",
+      "inactive": "Switched off",
+      "gated": "Must change password",
+      "resetPassword": "Set a new password",
+      "deactivate": "Switch off",
+      "reactivate": "Switch on",
+      "changeRole": "Change role",
+      "changePhone": "Change phone number",
+      "changePhoneWarning": "This changes the number they sign in with.",
+      "deactivateWarning": "They will be signed out and cannot sign in again.",
+      "empty": "No accounts yet.",
+      "created": "Account created for {name}.",
+      "updated": "Saved.",
+      "temporaryPasswordTitle": "Temporary password",
+      "temporaryPasswordWarning": "This is shown once. Write it down or copy it now, then give it to {name}. They must change it when they first sign in.",
+      "temporaryPasswordDone": "I have given it to them",
+      "recoverExisting": "Set a new password for this account"
+    },
+    "roles": {
+      "director": "Director",
+      "manager": "Manager",
+      "cashier": "Cashier",
+      "sales_rep": "Sales Representative"
+    },
+    "errors": {
+      "fullName": {
+        "tooShort": "Enter their full name.",
+        "tooLong": "That name is too long."
+      },
+      "role": {
+        "required": "Choose one role."
+      },
+      "idempotencyKey": "Reload the page and try again.",
+      "not_permitted": "You are not allowed to do that.",
+      "phone_in_use": "That number already belongs to an account.",
+      "last_active_director": "There must always be one active Director.",
+      "cannot_deactivate_self": "You cannot switch off your own account.",
+      "attempt_in_progress": "This account is already being created. Try again in a moment.",
+      "auth_create_failed": "The account could not be created. Nothing was changed.",
+      "already_bootstrapped": "A Director already exists.",
+      "generic": "That did not work. Try again.",
+      "already_provisioned": "That account already exists. Open it below and set a new password to give them one.",
+      "idempotency_key_conflict": "Reload the page and try again.",
+      "auth_identifier_update_failed": "The phone number was not changed. Nothing was left half-done.",
+      "auth_identifier_update_failed_unreverted": "The phone number change did not finish. Open this account again to let it finish.",
+      "already_completed": "That was already done. The password shown at the time cannot be shown again — set a new one if it was not written down.",
+      "already_settled": "That request has already been finished or undone. Start a new one.",
+      "claimed_by_other": "Someone is already doing this. Wait a moment and check the account.",
+      "change_already_in_flight": "There is already a change waiting on this account. Finish or refresh it first.",
+      "reset_unconfirmed": "The password was changed but we could not confirm it. Open the account and check before giving anything out.",
+      "phone_change_unconfirmed": "The phone number was changed but we could not confirm it. Open the account again to let it finish."
+    }
+  }
+}
