@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useRef, useState, useTransition } from "react";
 
 import {
   createAccountAction,
@@ -30,6 +30,22 @@ import { APP_ROLES } from "@/lib/auth/roles";
  * `phone_in_use` before any Auth user is created. The key protects the in-flight submission; the
  * phone protects the account.
  */
+/**
+ * A displayed temporary password is the ONLY copy that exists — it is stored in no table, no job
+ * row and no log. So once one is on screen, nothing that lacks one may replace it.
+ *
+ * Named and exported because it is an invariant rather than a detail: the two guards in front of it
+ * (a disabled control and a stable idempotency key) mean a second in-flight reset should never
+ * happen, and this is what holds if one ever does. Losing a displayed credential would leave the
+ * account on a password nobody knows.
+ */
+export function keepIssuedCredential(
+  previous: AdminActionState,
+  next: AdminActionState,
+): AdminActionState {
+  return previous.temporaryPassword ? previous : next;
+}
+
 export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }) {
   const t = useTranslations();
   const [state, formAction, pending] = useActionState<AdminActionState, FormData>(
@@ -39,6 +55,27 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
   const [phone, setPhone] = useState("");
   const [recovery, setRecovery] = useState<AdminActionState>({});
   const [isRecovering, startTransition] = useTransition();
+
+  /**
+   * ONE idempotency key per recoverable account, minted on first use and reused afterwards.
+   *
+   * A fresh key on every click made every click a NEW reset command, so two of them issued two
+   * different temporary passwords — and the first, already read out to the member of staff, stopped
+   * working the moment the second landed. That is the same failure `memory.md` §6 records for
+   * repeated resets, arriving through the interface instead of the database.
+   *
+   * With a stable key the second request resolves to the SAME command, so at most one password can
+   * ever be minted for this recovery. Minted in the click handler rather than during render, so
+   * there is no server/client hydration mismatch to defeat it.
+   */
+  const recoveryKeyRef = useRef<{ userId: string; key: string } | null>(null);
+
+  function recoveryKeyFor(userId: string): string {
+    if (recoveryKeyRef.current?.userId !== userId) {
+      recoveryKeyRef.current = { userId, key: crypto.randomUUID() };
+    }
+    return recoveryKeyRef.current.key;
+  }
 
   const normalised = previewNormalisation(phone);
 
@@ -80,15 +117,21 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
           <Button
             type="button"
             variant="secondary"
-            disabled={pending}
+            // `isRecovering` was missing here while the submit button below already had it. A
+            // second click during the request started a second reset.
+            disabled={pending || isRecovering}
             onClick={() => {
+              const userId = state.recoverableUserId!;
               const data = new FormData();
-              data.set("userId", state.recoverableUserId!);
-              data.set("idempotencyKey", crypto.randomUUID());
-              startTransition(async () => setRecovery(await resetPasswordAction({}, data)));
+              data.set("userId", userId);
+              data.set("idempotencyKey", recoveryKeyFor(userId));
+              startTransition(async () => {
+                const result = await resetPasswordAction({}, data);
+                setRecovery((previous) => keepIssuedCredential(previous, result));
+              });
             }}
           >
-            {t("admin.accounts.recoverExisting")}
+            {isRecovering ? t("common.loading") : t("admin.accounts.recoverExisting")}
           </Button>
         ) : null}
 
