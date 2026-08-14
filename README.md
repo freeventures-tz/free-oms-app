@@ -10,9 +10,9 @@ record, and when something goes missing there is no reliable way to find out whe
 agreed to it.
 
 **This system replaces that paper, and makes every movement of goods and money traceable.** Each
-sale, payment, delivery, brick batch and cash advance is recorded against the person who did it and
-the person who approved it. Totals are worked out by the system rather than typed, so the numbers
-cannot quietly drift. Nothing is ever deleted — the history stays.
+action records who did it. When approval is required, the system also records who approved it.
+Important business history is retained so changes remain traceable. Totals are worked out by the
+system rather than typed, so the numbers cannot quietly drift.
 
 ---
 
@@ -51,15 +51,16 @@ Everyone has exactly one role, and sees only the work that role does.
 ## How it fits together
 
 A Sales Representative creates an order for a customer, and the system produces the quotation and
-then the invoice from it — nobody retypes the figures. A Cashier records the payment. Only then can
-the goods be released, and the moment they are, stock falls by exactly what left the yard.
+then the invoice from it — nobody retypes the figures. A Cashier records money received. A fully
+paid sale — or a partial-payment or credit sale approved under the company's rules — can then move
+to dispatch. Stock falls only after the customer signs and the Manager confirms the release.
 
 Bricks made in the yard enter stock the same way deliveries from suppliers do, so there is one
 answer to "how much do we have" rather than several.
 
-Cash for running costs is advanced, spent, and accounted for against receipts. At the end of the
-day, what the system says should be there is compared with what is actually there, and any
-difference has to be explained by someone.
+Cash for running costs is accounted for with receipts, or with a recorded reason when no receipt is
+available. At the end of the day, what the system says should be there is compared with what is
+actually there, and any difference has to be explained by someone.
 
 Anything that needs a second pair of eyes waits for approval before it takes effect, and both the
 request and the decision are kept.
