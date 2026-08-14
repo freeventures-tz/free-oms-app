@@ -153,7 +153,8 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
               onClick={() => {
                 const data = new FormData();
                 data.set("userId", account.id);
-                data.set("fullName", account.fullName);
+                // No `fullName`: the server reads the name from the database, so the client
+                // cannot decide whose name appears beside a live credential.
                 data.set("idempotencyKey", resetKey);
                 run(resetPasswordAction, data);
               }}
