@@ -89,6 +89,11 @@
     "dashboard": "Dashboard",
     "accounts": "User accounts"
   },
+  "unavailable": {
+    "title": "This page could not be loaded",
+    "body": "The system could not be reached just now. Nothing you did was lost, and nothing was changed. Try again in a moment.",
+    "retry": "Try again"
+  },
   "landing": {
     "orders": {
       "title": "Orders",

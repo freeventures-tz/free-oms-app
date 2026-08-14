@@ -89,6 +89,11 @@
     "dashboard": "Dashibodi",
     "accounts": "Akaunti za watumiaji"
   },
+  "unavailable": {
+    "title": "Ukurasa huu haukuweza kupakiwa",
+    "body": "Mfumo haukupatikana kwa sasa. Hakuna ulichofanya kilichopotea, na hakuna kilichobadilishwa. Jaribu tena baada ya muda mfupi.",
+    "retry": "Jaribu tena"
+  },
   "landing": {
     "orders": {
       "title": "Oda",

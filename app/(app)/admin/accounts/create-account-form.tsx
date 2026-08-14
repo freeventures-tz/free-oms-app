@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useActionState, useRef, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 
 import {
   createAccountAction,
@@ -78,15 +78,49 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
   ): Promise<AdminActionState> {
     if (issuedCredential.current) return issuedCredential.current;
 
-    const result = await createAccountAction(previous, data);
-    if (result.temporaryPassword) issuedCredential.current = result;
-    return result;
+    try {
+      const result = await createAccountAction(previous, data);
+      if (result.temporaryPassword) issuedCredential.current = result;
+      return result;
+    } catch {
+      // Thrown, not returned: the request never reached a verdict. Left uncaught it escapes the
+      // form action into the shell's error boundary, which replaces the whole screen and takes the
+      // typed details with it. It belongs inline, on the form, with everything still filled in.
+      return { error: "admin.errors.generic" };
+    }
   }
 
   const [state, formAction, pending] = useActionState<AdminActionState, FormData>(createOnce, {});
+
+  /**
+   * Held in state rather than left to the DOM, so a refusal does not empty the form.
+   *
+   * React resets an uncontrolled field after a form action completes — including when it completes
+   * with an error. A Director who mistyped a phone number, or hit an outage, would find the name
+   * they had typed gone and have to enter it again. §12.5 requires entered data to survive a
+   * failure, and this is what makes that true rather than aspirational.
+   */
+  const [fullName, setFullName] = useState("");
+  const [role, setRole] = useState<string>("sales_rep");
   const [phone, setPhone] = useState("");
+
+  /**
+   * A `<select>` needs putting back by hand after that reset, and an `<input>` does not.
+   *
+   * React restores a controlled text field itself, so the name and the number survive. It does not
+   * do the same for a select: the DOM reverts to the first option — Director, the most privileged
+   * role in the system — while React still believes the chosen value is current, so nothing
+   * re-renders and nothing corrects it. A Director who chose "Cashier" and hit an outage would be
+   * looking at a form that now says "Director".
+   */
+  const roleField = useRef<HTMLSelectElement>(null);
+
   const [recovery, setRecovery] = useState<AdminActionState>({});
   const [isRecovering, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (roleField.current && roleField.current.value !== role) roleField.current.value = role;
+  }, [state, role]);
 
   /**
    * ONE idempotency key per recoverable account, minted on first use and reused afterwards.
@@ -171,6 +205,13 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
                 try {
                   const result = await resetPasswordAction({}, data);
                   setRecovery((previous) => keepIssuedCredential(previous, result));
+                } catch {
+                  // The request never reached a verdict. Say so, and leave the control offered:
+                  // `recoveryKeyFor` returns the same key for this account, so trying again
+                  // addresses the same reset command rather than minting a second password.
+                  setRecovery((previous) =>
+                    keepIssuedCredential(previous, { error: "admin.errors.generic" }),
+                  );
                 } finally {
                   recoveryInFlight.current = false;
                 }
@@ -183,7 +224,15 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
 
         <Field>
           <Label htmlFor="fullName">{t("admin.accounts.fullName")}</Label>
-          <Input id="fullName" name="fullName" required disabled={pending} autoComplete="off" />
+          <Input
+            id="fullName"
+            name="fullName"
+            required
+            disabled={pending}
+            autoComplete="off"
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
+          />
           <FieldError>{state.fieldErrors?.fullName ? t(state.fieldErrors.fullName) : null}</FieldError>
         </Field>
 
@@ -212,10 +261,17 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
         <Field>
           <Label htmlFor="role">{t("admin.accounts.role")}</Label>
           {/* Exactly one active role per user, so this is a single select — never multi-select. */}
-          <Select id="role" name="role" defaultValue="sales_rep" disabled={pending}>
-            {APP_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {t(`admin.roles.${role}`)}
+          <Select
+            ref={roleField}
+            id="role"
+            name="role"
+            value={role}
+            onChange={(event) => setRole(event.target.value)}
+            disabled={pending}
+          >
+            {APP_ROLES.map((value) => (
+              <option key={value} value={value}>
+                {t(`admin.roles.${value}`)}
               </option>
             ))}
           </Select>

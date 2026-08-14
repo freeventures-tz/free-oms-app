@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/surface";
 import { resumePendingPhoneChanges } from "@/lib/admin/accounts";
 import { requireAccess } from "@/lib/auth/guard";
 import type { AppRole } from "@/lib/auth/roles";
+import { requireRows } from "@/lib/supabase/query";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 /**
@@ -25,7 +26,7 @@ export default async function AccountsPage() {
 
   const supabase = await createServerSupabase();
 
-  const [{ data: profiles }, { data: roles }] = await Promise.all([
+  const [profileRows, roleRows] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name, phone_e164, is_active, must_change_password")
@@ -33,11 +34,16 @@ export default async function AccountsPage() {
     supabase.from("user_roles").select("user_id, role"),
   ]);
 
+  // A read that FAILED is not a business with no staff. Taking `data ?? []` here would have shown a
+  // Director "No accounts yet" during a database outage — see `requireRows`.
+  const profiles = requireRows(profileRows, "admin.accounts.profiles");
+  const roles = requireRows(roleRows, "admin.accounts.user_roles");
+
   const roleByUser = new Map<string, AppRole>(
-    (roles ?? []).map((row) => [row.user_id as string, row.role as AppRole]),
+    roles.map((row) => [row.user_id as string, row.role as AppRole]),
   );
 
-  const accounts: AccountSummary[] = (profiles ?? []).map((row) => ({
+  const accounts: AccountSummary[] = profiles.map((row) => ({
     id: row.id as string,
     fullName: row.full_name as string,
     phoneE164: row.phone_e164 as string,

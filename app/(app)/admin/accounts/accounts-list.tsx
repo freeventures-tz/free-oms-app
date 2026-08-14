@@ -117,6 +117,22 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
           setPhoneKey(crypto.randomUUID());
           setAttempt(null);
         }
+      } catch {
+        /**
+         * The action did not RETURN a refusal — it never got there. A dropped connection, a
+         * server that went away mid-request, a Server Action that threw.
+         *
+         * `finally` alone released the guard but left the screen showing nothing at all: the
+         * spinner stopped, the control came back, and the Director was told neither that it had
+         * failed nor that it could be tried again. Silence after a tap is the same failure this
+         * whole change exists to remove, arriving by a different route.
+         *
+         * `attempt` is deliberately NOT cleared, so the retry below reuses this exact FormData —
+         * and therefore this exact idempotency key. If the request did reach the server before
+         * the connection dropped, retrying addresses the SAME command rather than starting a
+         * second one. Everything typed into the row is React state and is untouched.
+         */
+        setResult({ error: "admin.errors.generic" });
       } finally {
         inFlight.current = false;
         setRunning(null);
