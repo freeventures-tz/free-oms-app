@@ -10,7 +10,12 @@ enabled = true
 port = 54321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
-schemas = ["public", "graphql_public"]
+#
+# `api` is exposed deliberately (architecture.md §5.5): it holds FUNCTIONS ONLY, each granted by
+# name to exactly one role. `private` is NEVER listed here — its functions must stay unreachable
+# through PostgREST. Exposing `api` is what makes the service-only bridge callable at all; before
+# this, a secret-key RPC returned PGRST106 / HTTP 406 because the schema was not exposed.
+schemas = ["public", "graphql_public", "api"]
 # Extra schemas to add to the search_path of every request.
 extra_search_path = ["public", "extensions"]
 # The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
@@ -162,7 +167,10 @@ site_url = "http://127.0.0.1:3000"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = ["https://127.0.0.1:3000"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
-jwt_expiry = 3600
+# 15 minutes — the approved access-token lifetime (architecture.md §20). Staleness is not an
+# authorization risk here because every policy reads live database state, but a short lifetime
+# keeps the routing hint close to reality.
+jwt_expiry = 900
 # JWT issuer URL. If not set, defaults to auth.external_url.
 # jwt_issuer = ""
 # Path to JWT signing key. DO NOT commit your signing keys file to git.
@@ -173,16 +181,20 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-enable_signup = true
+# FALSE — there is no public signup (product.md §17.1, architecture.md §7.1). Accounts exist only
+# because a Director created them. This is disabled AT THE AUTH PROVIDER, not merely hidden in the
+# UI: the /auth/v1/signup endpoint itself refuses. Administrative creation via the Auth Admin API
+# and the secret key is unaffected.
+enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
-minimum_password_length = 6
+minimum_password_length = 12
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
-password_requirements = ""
+password_requirements = "lower_upper_letters_digits"
 
 # Configure passkey sign-ins.
 # [auth.passkey]
@@ -204,7 +216,16 @@ anonymous_users = 30
 # Number of sessions that can be refreshed in a 5 minute interval per IP address.
 token_refresh = 150
 # Number of sign up and sign-in requests that can be made in a 5 minute interval per IP address (excludes anonymous users).
-sign_in_sign_ups = 30
+#
+# Raised from the default 30. Every member of staff at this business reaches Supabase from the SAME
+# public IP, because the yard is behind one NAT connection — so a per-IP limit is a per-BUSINESS
+# limit here. At the start of a shift, twenty people signing in, mistyping, and signing in again
+# would exhaust 30 in minutes, and the failure would look exactly like a wrong password.
+#
+# 120 in five minutes is 24 a minute, which is still far below what credential stuffing needs and
+# well above what an office of this size produces. Passwords are 12+ characters with mixed case and
+# digits, and there is no public signup, so this is not the primary control against guessing.
+sign_in_sign_ups = 120
 # Number of OTP / Magic link verifications that can be made in a 5 minute interval per IP address.
 token_verifications = 30
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
@@ -218,6 +239,19 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
+#
+# MUST STAY TRUE, and this is not a weakening. In the Supabase CLI this key does not mean "allow
+# email signup" — it is mapped to GOTRUE_EXTERNAL_EMAIL_ENABLED, which enables or disables the email
+# PROVIDER as a whole. Setting it to false answers every password grant with
+#
+#     422 { "error_code": "email_provider_disabled", "msg": "Email logins are disabled" }
+#
+# which locks out every member of staff, because the phone is a derived email identifier
+# (`lib/auth/phone-identity.ts`). Verified against the running stack, after it locked out the test
+# suite exactly that way.
+#
+# Signup is refused by the GLOBAL [auth] enable_signup = false above, which is a separate control
+# (GOTRUE_DISABLE_SIGNUP) and is proven by tests/integration/api-boundaries.test.ts.
 enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
@@ -256,6 +290,11 @@ otp_expiry = 3600
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
+# FALSE — and by the mapping described under [auth.email], this also disables the phone PROVIDER,
+# which is exactly what is wanted: the product forbids SMS, OTP and phone verification entirely
+# (architecture.md §7.1). Supabase Auth therefore answers a phone password grant with
+# `phone_provider_disabled`, which is why the phone is a derived login identifier rather than an
+# Auth phone credential — see `lib/auth/phone-identity.ts`.
 enable_signup = false
 # If enabled, users need to confirm their phone number before signing in.
 enable_confirmations = false
@@ -281,9 +320,11 @@ max_frequency = "5s"
 # uri = "pg-functions://postgres/auth/before-user-created-hook"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
-# [auth.hook.custom_access_token]
-# enabled = true
-# uri = "pg-functions://<database>/<schema>/<hook_name>"
+# Adds a `user_role` ROUTING HINT to the JWT. It is never an authorization source:
+# private.authorize() reads live database state and ignores this claim entirely.
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/private/custom_access_token_hook"
 
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
 [auth.sms.twilio]
