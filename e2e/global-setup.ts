@@ -19,6 +19,8 @@ export type GatedCredentials = Credentials & { userId: string };
 
 export type E2EFixtures = {
   director: Credentials;
+  /** Reads Products & prices and must find no way to change one (design.md §4.3). */
+  manager: Credentials;
   salesRep: Credentials;
   cashier: Credentials;
   /**
@@ -156,6 +158,7 @@ export default async function globalSetup(): Promise<void> {
 
   const salesRep = await makeLiveAccount(directorApi, "sales_rep", "E2E Sales Rep");
   const cashier = await makeLiveAccount(directorApi, "cashier", "E2E Cashier");
+  const manager = await makeLiveAccount(directorApi, "manager", "E2E Manager");
 
   // Genuinely gated accounts: provisioned and never completed. One per device project, per journey.
   const gatedCrashEntries = await Promise.all(
@@ -180,6 +183,7 @@ export default async function globalSetup(): Promise<void> {
 
   const fixtures: E2EFixtures = {
     director: { phone: directorPhone, password: directorPassword },
+    manager,
     salesRep,
     cashier,
     gated: Object.fromEntries(gatedEntries) as E2EFixtures["gated"],

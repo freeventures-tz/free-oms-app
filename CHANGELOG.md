@@ -4,7 +4,32 @@ What each release of Free Ventures OMS adds, in plain language.
 
 ## [Unreleased]
 
-Nothing yet.
+### Products and prices
+
+- **The catalogue is in the system.** All 21 products Free Ventures sells are there, each with the
+  unit it is sold by — pieces, 12 ft pieces, 50 kg bags, 20-litre buckets, sheets and bars.
+- **Grade is part of what a product is.** Nondo 12 mm BS 300 and Nondo 12 mm BS 500 are two
+  separate products, not one product with a note attached, so they can never be priced or counted
+  as if they were the same thing.
+- **A Director can set and change a selling price**, in whole shillings. Every change asks why, and
+  keeps the answer.
+- **Price history cannot be edited or deleted by anyone.** Each entry shows the price, the price it
+  replaced, who set it and when. A price you quoted last year still reads exactly as it was set.
+- **A product with no price says so.** It never shows a price of zero, and nothing can be sold at a
+  figure no Director approved.
+- **A Manager can see every product, every price and the full history**, and has no way to change
+  one — there is no greyed-out button and no explanation of what they cannot do.
+- Adding a product and setting a price are separate decisions. A new product arrives with no price
+  until a Director sets one.
+- Everything on these screens is in English and Swahili.
+
+### Everywhere
+
+- Tapping something answers **immediately**, without waiting for the system. Pages that are loading
+  show the shape of what is coming rather than a blank screen, buttons that are working say so
+  without changing size, and pressing one twice still does the job once.
+- If something cannot be reached, the screen says so and offers to try again — rather than showing
+  an empty list as though there were nothing there.
 
 ## [0.0.1] — 2026-08-14
 

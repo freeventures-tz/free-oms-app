@@ -12,7 +12,8 @@
     "english": "English",
     "swahili": "Kiswahili",
     "menu": "Menu",
-    "signedInAs": "Signed in as {name}"
+    "signedInAs": "Signed in as {name}",
+    "actionFailed": "That did not work. Try again."
   },
   "auth": {
     "signIn": {
@@ -87,7 +88,8 @@
     "orders": "Orders",
     "payments": "Payments & dispatch",
     "dashboard": "Dashboard",
-    "accounts": "User accounts"
+    "accounts": "User accounts",
+    "products": "Products & prices"
   },
   "unavailable": {
     "title": "This page could not be loaded",
@@ -174,6 +176,84 @@
       "change_already_in_flight": "There is already a change waiting on this account. Finish or refresh it first.",
       "reset_unconfirmed": "The password was changed but we could not confirm it. Open the account and check before giving anything out.",
       "phone_change_unconfirmed": "The phone number was changed but we could not confirm it. Open the account again to let it finish."
+    }
+  },
+  "catalogue": {
+    "title": "Products & prices",
+    "description": "The products Free Ventures sells, and what each one costs.",
+    "descriptionManager": "The products Free Ventures sells, and what each one costs. Only a Director can change a price.",
+    "unitLabel": "Sold by",
+    "priceLabel": "Selling price",
+    "noPrice": "No price set",
+    "noPriceHelp": "This product cannot be sold until a Director sets its price.",
+    "empty": "No products yet.",
+    "productCount": "{count} products",
+    "units": {
+      "piece": "piece",
+      "piece_12ft": "12 ft piece",
+      "bag_50kg": "50 kg bag",
+      "bucket_20l": "20-litre bucket",
+      "sheet": "sheet",
+      "bar": "bar"
+    },
+    "add": {
+      "heading": "Add a product",
+      "name": "Product name",
+      "nameHelp": "For example Timber 2 × 4.",
+      "specification": "Grade or specification",
+      "specificationHelp": "Only if the grade is part of what it is, like BS 300. Leave empty otherwise.",
+      "unit": "Sold by",
+      "submit": "Add product",
+      "added": "{name} added. It has no price yet."
+    },
+    "price": {
+      "set": "Set price",
+      "change": "Change price",
+      "heading": "Selling price",
+      "amount": "Price in TZS",
+      "amountHelp": "Whole shillings only, no cents.",
+      "reason": "Why is it changing?",
+      "reasonHelp": "Recorded permanently beside the price.",
+      "submit": "Save price",
+      "cancel": "Cancel",
+      "saved": "Price saved.",
+      "history": "Price history",
+      "historyEmpty": "No price has been set yet.",
+      "historyShow": "Price history",
+      "historyEntry": "{price}, set by {who}",
+      "historyFrom": "was {price}",
+      "historyFirst": "first price",
+      "setBy": "Set by {who}"
+    }
+  },
+  "catalogueErrors": {
+    "generic": "That did not work. Try again.",
+    "not_permitted": "You are not allowed to do that.",
+    "product_exists": "That product is already in the catalogue.",
+    "unknown_unit": "Choose how the product is sold.",
+    "no_product": "That product no longer exists. Reload the page.",
+    "price_unchanged": "That is already the price. Enter a different figure or cancel.",
+    "price_required": "Enter a price in whole shillings.",
+    "reason_required": "Say why the price is changing.",
+    "name_required": "Enter the product name.",
+    "idempotency_key_conflict": "Reload the page and try again.",
+    "name": {
+      "tooShort": "Enter the product name.",
+      "tooLong": "That name is too long."
+    },
+    "specification": {
+      "tooLong": "That grade is too long."
+    },
+    "unit": {
+      "required": "Choose how the product is sold."
+    },
+    "price": {
+      "invalid": "Enter a price in whole shillings, with no cents.",
+      "tooLarge": "That price looks too large. Check it."
+    },
+    "reason": {
+      "tooShort": "Say why the price is changing.",
+      "tooLong": "That reason is too long."
     }
   }
 }

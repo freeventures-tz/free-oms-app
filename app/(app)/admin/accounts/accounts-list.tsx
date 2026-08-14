@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useRef, useState, useTransition } from "react";
+import { useState } from "react";
 
 import {
   changePhoneAction,
@@ -16,6 +16,7 @@ import { Field, FieldError, FormError, Help, Input, Label, Select } from "@/comp
 import { Card, StatusChip } from "@/components/ui/surface";
 import { formatPhoneForDisplay } from "@/lib/auth/phone-identity";
 import { APP_ROLES, type AppRole } from "@/lib/auth/roles";
+import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
 export type AccountSummary = {
   id: string;
@@ -58,33 +59,14 @@ export function AccountsList({
   );
 }
 
-type AdminAction = (prev: AdminActionState, data: FormData) => Promise<AdminActionState>;
-
 /** Which control was activated, so the pending state belongs to THAT button and not to the row. */
 type ActionName = "reset" | "active" | "role" | "phone";
 
 function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: boolean }) {
   const t = useTranslations();
-  const [pending, startTransition] = useTransition();
-  const [running, setRunning] = useState<ActionName | null>(null);
-  const [attempt, setAttempt] = useState<{
-    name: ActionName;
-    action: AdminAction;
-    data: FormData;
-  } | null>(null);
-  const [result, setResult] = useState<AdminActionState>({});
   const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState<AppRole>(account.role ?? "sales_rep");
-
-  /**
-   * The guard that does not wait for a render.
-   *
-   * `disabled` closes the control, but only once React has committed the pending state. A ref is
-   * written synchronously inside the handler, so two activations dispatched in the same tick — a
-   * fast double-tap, a stuck key, an assistive tool firing twice — cannot both get through.
-   */
-  const inFlight = useRef(false);
 
   /**
    * One key per INTERACTION, held in state — not one per click.
@@ -96,49 +78,29 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
   const [resetKey, setResetKey] = useState(() => crypto.randomUUID());
   const [phoneKey, setPhoneKey] = useState(() => crypto.randomUUID());
 
-  function run(name: ActionName, action: AdminAction, data: FormData) {
-    if (inFlight.current) return;
-    inFlight.current = true;
-
-    setRunning(name);
-    setResult({});
-    // Held so a refusal can be retried with the SAME FormData — and therefore the same idempotency
-    // key, addressing the same command rather than starting a second one.
-    setAttempt({ name, action, data });
-
-    startTransition(async () => {
-      try {
-        const outcome = await action({}, data);
-        setResult(outcome);
-        // A finished interaction gets fresh keys, so the NEXT deliberate action is a new command
-        // rather than a replay of the one just settled.
-        if (outcome.temporaryPassword || outcome.successKey) {
-          setResetKey(crypto.randomUUID());
-          setPhoneKey(crypto.randomUUID());
-          setAttempt(null);
-        }
-      } catch {
-        /**
-         * The action did not RETURN a refusal — it never got there. A dropped connection, a
-         * server that went away mid-request, a Server Action that threw.
-         *
-         * `finally` alone released the guard but left the screen showing nothing at all: the
-         * spinner stopped, the control came back, and the Director was told neither that it had
-         * failed nor that it could be tried again. Silence after a tap is the same failure this
-         * whole change exists to remove, arriving by a different route.
-         *
-         * `attempt` is deliberately NOT cleared, so the retry below reuses this exact FormData —
-         * and therefore this exact idempotency key. If the request did reach the server before
-         * the connection dropped, retrying addresses the SAME command rather than starting a
-         * second one. Everything typed into the row is React state and is untouched.
-         */
-        setResult({ error: "admin.errors.generic" });
-      } finally {
-        inFlight.current = false;
-        setRunning(null);
+  /**
+   * The single-flight guard, the per-control pending state, the thrown-failure catch and the
+   * same-request retry all come from here — the shared contract, not a copy of it
+   * (design.md §12.7). This row is where those rules were worked out; keeping its own version
+   * would mean the next screen inherits a snapshot rather than the rule.
+   *
+   * `admin.errors.generic` rather than the shared default, because that is also the message the
+   * server returns for a mapped refusal on this screen, and one wording is less confusing than
+   * two for the same outcome.
+   */
+  const action = useGuardedAction<ActionName, AdminActionState>({
+    failureKey: "admin.errors.generic",
+    onSettled: (outcome) => {
+      // A finished interaction gets fresh keys, so the NEXT deliberate action is a new command
+      // rather than a replay of the one just settled.
+      if (outcome.temporaryPassword || outcome.successKey) {
+        setResetKey(crypto.randomUUID());
+        setPhoneKey(crypto.randomUUID());
       }
-    });
-  }
+    },
+  });
+
+  const { pending, running, result } = action;
 
   if (result.temporaryPassword) {
     return (
@@ -188,16 +150,15 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
       {result.error ? (
         <div className="mt-4 flex flex-col gap-3">
           <FormError>{t(result.error)}</FormError>
-          {attempt ? (
+          {action.retry ? (
             <div>
               <Button
                 type="button"
                 variant="secondary"
                 size="small"
-                pending={running === attempt.name}
+                pending={pending}
                 pendingLabel={t("common.loading")}
-                disabled={pending}
-                onClick={() => run(attempt.name, attempt.action, attempt.data)}
+                onClick={action.retry}
               >
                 {t("common.retry")}
               </Button>
@@ -224,7 +185,7 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
                 // No `fullName`: the server reads the name from the database, so the client
                 // cannot decide whose name appears beside a live credential.
                 data.set("idempotencyKey", resetKey);
-                run("reset", resetPasswordAction, data);
+                action.run("reset", resetPasswordAction, data);
               }}
             >
               {t("admin.accounts.resetPassword")}
@@ -242,7 +203,7 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
                   const data = new FormData();
                   data.set("userId", account.id);
                   data.set("isActive", account.isActive ? "false" : "true");
-                  run("active", setActiveAction, data);
+                  action.run("active", setActiveAction, data);
                 }}
               >
                 {account.isActive
@@ -284,7 +245,7 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
                   const data = new FormData();
                   data.set("userId", account.id);
                   data.set("role", role);
-                  run("role", changeRoleAction, data);
+                  action.run("role", changeRoleAction, data);
                 }}
               >
                 {t("admin.accounts.changeRole")}
@@ -315,7 +276,7 @@ function AccountRow({ account, isSelf }: { account: AccountSummary; isSelf: bool
                   data.set("userId", account.id);
                   data.set("phone", phone);
                   data.set("idempotencyKey", phoneKey);
-                  run("phone", changePhoneAction, data);
+                  action.run("phone", changePhoneAction, data);
                 }}
               >
                 {t("admin.accounts.changePhone")}

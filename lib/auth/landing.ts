@@ -25,6 +25,14 @@ export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   { prefix: "/dashboard", roles: ["manager", "director"] },
   { prefix: "/payments", roles: ["cashier", "manager", "director"] },
   { prefix: "/orders", roles: ["sales_rep", "cashier", "manager", "director"] },
+
+  // Products & prices: Manager and Director only (design.md §4.2). A Manager reaches it to LOOK —
+  // the price is read-only for them and the editing controls are absent, not greyed (§4.3).
+  //
+  // This is the SCREEN, not the data. Every live role may read the catalogue and its prices in the
+  // database, because a Sales Representative cannot write an order without knowing what a thing
+  // costs. Restricting the route is a navigation decision; nothing here is a secret.
+  { prefix: "/settings/products", roles: ["manager", "director"] },
 ];
 
 export function rolesAllowedFor(pathname: string): readonly AppRole[] | null {
