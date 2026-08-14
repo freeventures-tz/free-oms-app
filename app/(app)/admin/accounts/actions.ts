@@ -11,6 +11,7 @@ import {
 import { provisionAccountAsDirector } from "@/lib/admin/provisioning";
 import { requireRole } from "@/lib/auth/guard";
 import type { AppRole } from "@/lib/auth/roles";
+import { createServerSupabase } from "@/lib/supabase/server";
 import {
   changePhoneSchema,
   changeRoleSchema,
@@ -130,8 +131,32 @@ export async function resetPasswordAction(
   return {
     successKey: "admin.accounts.updated",
     temporaryPassword: result.temporaryPassword,
-    temporaryPasswordFor: String(formData.get("fullName") ?? ""),
+    temporaryPasswordFor: await accountName(parsed.data.userId),
   };
+}
+
+/**
+ * The name shown beside a temporary password, read from the DATABASE rather than taken from the
+ * form that asked for it.
+ *
+ * It used to be whatever the client sent. On the recovery path — where a Director tried to create
+ * an account and the phone number was already taken — nothing was sent, so the warning read "then
+ * give it to ." Sending the typed name instead would have been worse than blank: `phone_in_use`
+ * means the number belongs to SOMEONE ELSE, so the screen could have named the person the Director
+ * meant to create while handing over the credential of the person who actually owns that number.
+ *
+ * Reading it here removes both problems, and removes the client's say in whose name appears next to
+ * a live credential. The Director's own session performs the read, so RLS still applies.
+ */
+async function accountName(userId: string): Promise<string> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return (data?.full_name as string | undefined) ?? "";
 }
 
 export async function setActiveAction(

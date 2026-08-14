@@ -161,11 +161,20 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+#
+# This file is pushed to the HOSTED project with `supabase config push`, so a localhost value here
+# becomes a localhost value in production. Nothing in this application currently uses `site_url` —
+# there is no email confirmation, password-reset link, magic link, OTP or OAuth flow anywhere, so
+# it is an allow-list with nothing to allow. It is set to the deployed origin regardless, because
+# the day any of those is switched on, a redirect allow-list pointing at a developer's laptop is a
+# defect nobody would think to look for.
+site_url = "https://free-oms.vercel.app"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Local development, so `supabase start` still works against a machine-local app. The deployed
+# origin is `site_url` above and does not need repeating here.
+additional_redirect_urls = ["http://127.0.0.1:3000", "http://localhost:3000"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 # 15 minutes — the approved access-token lifetime (architecture.md §20). Staleness is not an
 # authorization risk here because every policy reads live database state, but a short lifetime
