@@ -105,6 +105,76 @@ revoke execute on function private.refuse_price_history_edit()
   from public, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
+-- What a presented idempotency key MEANS.
+--
+-- A key on its own says nothing. A review reused one key for a different product and was answered
+-- `ok: replayed`, handed the FIRST product's price entry while the second product stayed unpriced —
+-- a success reported for a change that never happened. That is the worst shape a bug can take on a
+-- screen that sets prices.
+--
+-- So a key is bound to the command it was claimed for: the operation, the acting Director, and the
+-- canonical arguments. All three must match for a call to be a replay. Anything else is a conflict,
+-- and a conflict changes nothing.
+--
+-- Used by BOTH paths in both functions — the key that already existed when we looked, and the key
+-- another transaction claimed while we were working — so the two cannot drift apart.
+-- ---------------------------------------------------------------------------
+create or replace function private.classify_idempotency_key(
+  p_key       text,
+  p_operation text,
+  p_actor     uuid,
+  p_request   jsonb
+)
+returns jsonb
+language plpgsql
+-- VOLATILE, deliberately, and not an oversight.
+--
+-- A STABLE function reuses the calling statement's snapshot. In the lost-race path this function is
+-- called immediately after an `on conflict do nothing` that BLOCKED on another transaction and then
+-- found the key taken — and a snapshot taken before that transaction committed cannot see the row
+-- it wrote. The caller was then told `idempotency_key_conflict` for a request identical to the one
+-- that had just succeeded. Six concurrent identical requests reproduced it.
+--
+-- VOLATILE takes a fresh snapshot per command, which is exactly what reading a row another
+-- transaction just committed requires.
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_key public.idempotency_keys%rowtype;
+begin
+  select * into v_key from public.idempotency_keys where key = p_key;
+
+  if not found then
+    return jsonb_build_object('status', 'unclaimed');
+  end if;
+
+  if v_key.operation   is distinct from p_operation
+     or v_key.created_by is distinct from p_actor
+     or v_key.request    is distinct from p_request then
+    return jsonb_build_object('status', 'conflict');
+  end if;
+
+  return jsonb_build_object('status', 'replay', 'result_ref', v_key.result_ref);
+end;
+$$;
+
+comment on function private.classify_idempotency_key(text, text, uuid, jsonb) is
+  'Decides whether a presented key is unclaimed, a true replay of the same command by the same '
+  'Director, or a conflict. A conflict must never be reported as a replay: that tells the caller a '
+  'change happened that did not.';
+
+alter function private.classify_idempotency_key(text, text, uuid, jsonb) owner to fv_definer_owner;
+
+revoke execute on function private.normalise_label(text)
+  from public, anon, authenticated, service_role;
+revoke execute on function private.canonical_identity(text)
+  from public, anon, authenticated, service_role;
+revoke execute on function private.classify_idempotency_key(text, text, uuid, jsonb)
+  from public, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
 -- api.admin_add_product
 -- ---------------------------------------------------------------------------
 create or replace function api.admin_add_product(
@@ -120,23 +190,34 @@ set search_path = ''
 as $$
 declare
   v_actor      uuid := private.acting_director();
-  v_name       text := btrim(coalesce(p_name, ''));
-  v_spec       text := nullif(btrim(coalesce(p_specification, '')), '');
+
+  -- Stored in the display form: internal whitespace collapsed, case preserved.
+  v_name       text := private.normalise_label(p_name);
+  v_spec       text := nullif(private.normalise_label(p_specification), '');
+
   v_corr       uuid := gen_random_uuid();
   v_product_id uuid := gen_random_uuid();
   v_product    public.products%rowtype;
-  v_key        public.idempotency_keys%rowtype;
+  v_class      jsonb;
   v_claimed    integer;
+
+  -- The request this key stands for, in canonical form, so "Nondo 12 mm" and "nondo  12 mm" are
+  -- recognised as the same request rather than as a conflict.
+  v_request    jsonb := jsonb_build_object(
+    'name',          private.canonical_identity(v_name),
+    'specification', private.canonical_identity(coalesce(v_spec, '')),
+    'unit_code',     p_unit_code
+  );
 begin
-  -- A key that already exists is a REPLAY: return what the first call produced rather than
-  -- doing the work again. Read without a lock — `select ... for update` needs an UPDATE privilege
-  -- this role deliberately does not hold, and the claim below settles the race on its own.
-  select * into v_key from public.idempotency_keys where key = p_idempotency_key;
-  if found then
-    if v_key.operation <> 'catalogue.add_product' then
-      return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
-    end if;
-    select * into v_product from public.products where id = v_key.result_ref;
+  v_class := private.classify_idempotency_key(
+    p_idempotency_key, 'catalogue.add_product', v_actor, v_request);
+
+  if v_class ->> 'status' = 'conflict' then
+    return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
+  end if;
+
+  if v_class ->> 'status' = 'replay' then
+    select * into v_product from public.products where id = (v_class ->> 'result_ref')::uuid;
     return jsonb_build_object('ok', true, 'reason', 'replayed', 'product', to_jsonb(v_product));
   end if;
 
@@ -151,12 +232,13 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'unknown_unit');
   end if;
 
-  -- Identity is name + specification, compared the way the unique index compares it, so the
-  -- refusal is a sentence the Director can act on rather than a constraint violation.
+  -- Identity compared through the same canonical form the unique index uses, so the refusal is a
+  -- sentence the Director can act on rather than a constraint violation.
   if exists (
     select 1 from public.products p
-     where lower(btrim(p.name)) = lower(v_name)
-       and lower(coalesce(btrim(p.specification), '')) = lower(coalesce(v_spec, ''))
+     where private.canonical_identity(p.name) = private.canonical_identity(v_name)
+       and private.canonical_identity(coalesce(p.specification, ''))
+         = private.canonical_identity(coalesce(v_spec, ''))
   ) then
     return jsonb_build_object('ok', false, 'reason', 'product_exists');
   end if;
@@ -164,18 +246,23 @@ begin
   -- Claimed by inserting it, carrying the id the product is about to be given. One statement
   -- decides the winner and records the result, so there is no second update to forget. Everything
   -- below is one transaction: a later failure unclaims the key along with it.
-  insert into public.idempotency_keys (key, operation, result_ref, created_by)
-  values (p_idempotency_key, 'catalogue.add_product', v_product_id, v_actor)
+  insert into public.idempotency_keys (key, operation, result_ref, created_by, request)
+  values (p_idempotency_key, 'catalogue.add_product', v_product_id, v_actor, v_request)
   on conflict (key) do nothing;
 
   get diagnostics v_claimed = row_count;
 
   if v_claimed = 0 then
-    select * into v_key from public.idempotency_keys where key = p_idempotency_key;
-    if v_key.operation <> 'catalogue.add_product' then
+    -- Another transaction claimed this key while we were working. Same question, same answer:
+    -- only an identical command by the same Director is a replay.
+    v_class := private.classify_idempotency_key(
+      p_idempotency_key, 'catalogue.add_product', v_actor, v_request);
+
+    if v_class ->> 'status' <> 'replay' then
       return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
     end if;
-    select * into v_product from public.products where id = v_key.result_ref;
+
+    select * into v_product from public.products where id = (v_class ->> 'result_ref')::uuid;
     return jsonb_build_object('ok', true, 'reason', 'replayed', 'product', to_jsonb(v_product));
   end if;
 
@@ -218,23 +305,32 @@ set search_path = ''
 as $$
 declare
   v_actor    uuid := private.acting_director();
-  v_reason   text := btrim(coalesce(p_reason, ''));
+  v_reason   text := private.normalise_label(p_reason);
   v_corr     uuid := gen_random_uuid();
   v_entry_id uuid := gen_random_uuid();
   v_current  public.product_prices%rowtype;
   v_entry    public.product_prices%rowtype;
-  v_key      public.idempotency_keys%rowtype;
+  v_class    jsonb;
   v_claimed  integer;
+
+  -- The command this key stands for. The PRODUCT is part of it: presenting the same key for a
+  -- different product is a mistake, and answering "replayed" would report a price change on a
+  -- product that was never touched.
+  v_request  jsonb := jsonb_build_object(
+    'product_id', p_product_id,
+    'price_tzs',  p_price_tzs,
+    'reason',     v_reason
+  );
 begin
-  -- A key that already exists is a REPLAY: hand back the entry the first call wrote. Checked
-  -- before anything else, so a repeated request can never append a second price to permanent
-  -- history.
-  select * into v_key from public.idempotency_keys where key = p_idempotency_key;
-  if found then
-    if v_key.operation <> 'catalogue.set_price' then
-      return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
-    end if;
-    select * into v_entry from public.product_prices where id = v_key.result_ref;
+  v_class := private.classify_idempotency_key(
+    p_idempotency_key, 'catalogue.set_price', v_actor, v_request);
+
+  if v_class ->> 'status' = 'conflict' then
+    return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
+  end if;
+
+  if v_class ->> 'status' = 'replay' then
+    select * into v_entry from public.product_prices where id = (v_class ->> 'result_ref')::uuid;
     return jsonb_build_object('ok', true, 'reason', 'replayed', 'price', to_jsonb(v_entry));
   end if;
 
@@ -268,22 +364,39 @@ begin
 
   -- Re-approving the same number is not a price change, and writing it would put an entry in the
   -- history that reads as a decision nobody made.
+  --
+  -- Unless the price matches because THIS command already made it. Six concurrent identical
+  -- requests reproduced that: one wins and commits 7 700, the rest wake from the advisory lock,
+  -- read 7 700, and would report "that is already the price" for the change they themselves asked
+  -- for. Ask whose change it was before calling it no change.
   if found and v_current.price_tzs = p_price_tzs then
+    v_class := private.classify_idempotency_key(
+      p_idempotency_key, 'catalogue.set_price', v_actor, v_request);
+
+    if v_class ->> 'status' = 'replay' then
+      select * into v_entry from public.product_prices where id = (v_class ->> 'result_ref')::uuid;
+      return jsonb_build_object('ok', true, 'reason', 'replayed', 'price', to_jsonb(v_entry));
+    end if;
+
     return jsonb_build_object('ok', false, 'reason', 'price_unchanged');
   end if;
 
-  insert into public.idempotency_keys (key, operation, result_ref, created_by)
-  values (p_idempotency_key, 'catalogue.set_price', v_entry_id, v_actor)
+  insert into public.idempotency_keys (key, operation, result_ref, created_by, request)
+  values (p_idempotency_key, 'catalogue.set_price', v_entry_id, v_actor, v_request)
   on conflict (key) do nothing;
 
   get diagnostics v_claimed = row_count;
 
   if v_claimed = 0 then
-    select * into v_key from public.idempotency_keys where key = p_idempotency_key;
-    if v_key.operation <> 'catalogue.set_price' then
+    -- Claimed by another transaction while we held the lock. Same question, same answer.
+    v_class := private.classify_idempotency_key(
+      p_idempotency_key, 'catalogue.set_price', v_actor, v_request);
+
+    if v_class ->> 'status' <> 'replay' then
       return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
     end if;
-    select * into v_entry from public.product_prices where id = v_key.result_ref;
+
+    select * into v_entry from public.product_prices where id = (v_class ->> 'result_ref')::uuid;
     return jsonb_build_object('ok', true, 'reason', 'replayed', 'price', to_jsonb(v_entry));
   end if;
 

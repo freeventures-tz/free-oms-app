@@ -19,11 +19,15 @@ import {
  */
 
 let director: Fixture;
+let secondDirector: Fixture;
 let manager: Fixture;
 let salesRep: Fixture;
 
 beforeAll(async () => {
   director = await ensureDirector();
+  // Either Director may act independently (product.md §4) — and a key one of them claimed must not
+  // be replayable by the other.
+  secondDirector = await createLiveStaff(director, "director");
   manager = await createLiveStaff(director, "manager");
   salesRep = await createLiveStaff(director, "sales_rep");
 });
@@ -290,6 +294,151 @@ describe("selling prices", () => {
       .select("price_tzs")
       .eq("product_id", productId);
     expect(history?.[0].price_tzs).toBe(8800);
+  });
+});
+
+/**
+ * Found in review, over real HTTP, and worth keeping there.
+ *
+ * A key on its own is not an operation. Presenting one for a different command was answered
+ * `ok: replayed` with the FIRST command's result — a success reported for a change that never
+ * happened, on the screen that sets prices.
+ */
+describe("an idempotency key is bound to its command", () => {
+  it("refuses the same key for a different product, and changes nothing", async () => {
+    const first = await freshProduct(`Bound Key A ${randomUUID().slice(0, 8)}`);
+    const second = await freshProduct(`Bound Key B ${randomUUID().slice(0, 8)}`);
+    const key = randomUUID();
+
+    const priced = await director.api.rpc("admin_set_product_price", {
+      p_product_id: first,
+      p_price_tzs: 4500,
+      p_reason: "Opening price",
+      p_idempotency_key: key,
+    });
+    expect(priced.data?.reason).toBe("set");
+
+    const reused = await director.api.rpc("admin_set_product_price", {
+      p_product_id: second,
+      p_price_tzs: 9999,
+      p_reason: "a different product entirely",
+      p_idempotency_key: key,
+    });
+
+    expect(reused.data?.ok).toBe(false);
+    expect(reused.data?.reason).toBe("idempotency_key_conflict");
+
+    // The product it named was NOT priced. This is the assertion the defect would have failed.
+    const { data: prices } = await director.read
+      .from("product_prices")
+      .select("id")
+      .eq("product_id", second);
+    expect(prices).toEqual([]);
+  });
+
+  it("refuses the same key for a different price, reason or Director", async () => {
+    const productId = await freshProduct(`Bound Key C ${randomUUID().slice(0, 8)}`);
+    const key = randomUUID();
+    const original = {
+      p_product_id: productId,
+      p_price_tzs: 5000,
+      p_reason: "Opening price",
+      p_idempotency_key: key,
+    };
+
+    expect((await director.api.rpc("admin_set_product_price", original)).data?.reason).toBe("set");
+
+    for (const [what, args] of [
+      ["price", { ...original, p_price_tzs: 6000 }],
+      ["reason", { ...original, p_reason: "some other justification" }],
+    ] as const) {
+      const result = await director.api.rpc("admin_set_product_price", args);
+      expect(result.data?.reason, `a different ${what} was accepted as a replay`).toBe(
+        "idempotency_key_conflict",
+      );
+    }
+
+    // The other Director, asking for the identical thing under a key they did not claim.
+    const other = await secondDirector.api.rpc("admin_set_product_price", original);
+    expect(other.data?.reason).toBe("idempotency_key_conflict");
+
+    // The same Director asking the same thing is still a valid replay.
+    const replay = await director.api.rpc("admin_set_product_price", original);
+    expect(replay.data?.reason).toBe("replayed");
+
+    const { data: history } = await director.read
+      .from("product_prices")
+      .select("id")
+      .eq("product_id", productId);
+    expect(history?.length, "a refused replay appended to history").toBe(1);
+  });
+
+  it("refuses an add key presented for different product details", async () => {
+    const key = randomUUID();
+    const name = `Bound Add ${randomUUID().slice(0, 8)}`;
+
+    const added = await director.api.rpc("admin_add_product", {
+      p_name: name,
+      p_specification: null,
+      p_unit_code: "piece",
+      p_idempotency_key: key,
+    });
+    expect(added.data?.reason).toBe("added");
+
+    const reused = await director.api.rpc("admin_add_product", {
+      p_name: `${name} Different`,
+      p_specification: "Grade Q",
+      p_unit_code: "sheet",
+      p_idempotency_key: key,
+    });
+    expect(reused.data?.reason).toBe("idempotency_key_conflict");
+
+    const { data: rows } = await director.read
+      .from("products")
+      .select("id")
+      .eq("name", `${name} Different`);
+    expect(rows).toEqual([]);
+  });
+});
+
+describe("product identity ignores case and spacing", () => {
+  it("cannot be duplicated by typing it differently", async () => {
+    const stem = `Spacing ${randomUUID().slice(0, 8)}`;
+
+    const first = await director.api.rpc("admin_add_product", {
+      p_name: stem,
+      p_specification: "Grade A",
+      p_unit_code: "piece",
+      p_idempotency_key: randomUUID(),
+    });
+    expect(first.data?.reason).toBe("added");
+
+    // A doubled internal space is an ordinary thing to type on a phone keyboard. It must not make
+    // a second catalogue entry for one thing — separately priced, separately counted.
+    for (const [name, specification] of [
+      [stem.replace(" ", "  "), "Grade  A"],
+      [`  ${stem.toLowerCase()}  `, " grade a "],
+      [stem.toUpperCase(), "GRADE A"],
+    ]) {
+      const duplicate = await director.api.rpc("admin_add_product", {
+        p_name: name,
+        p_specification: specification,
+        p_unit_code: "piece",
+        p_idempotency_key: randomUUID(),
+      });
+      expect(duplicate.data?.reason, `"${name}" was accepted as a new product`).toBe(
+        "product_exists",
+      );
+    }
+
+    const { data: rows } = await director.read
+      .from("products")
+      .select("name, specification")
+      .ilike("name", `%${stem.split(" ")[1]}%`);
+
+    expect(rows?.length).toBe(1);
+    // Stored in the canonical display form: collapsed spacing, original capitalisation.
+    expect(rows?.[0]).toMatchObject({ name: stem, specification: "Grade A" });
   });
 });
 

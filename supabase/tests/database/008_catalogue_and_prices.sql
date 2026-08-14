@@ -11,7 +11,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(40);
+select plan(54);
 
 create schema if not exists tests;
 
@@ -33,16 +33,21 @@ $$;
 select tests.mk_user('c0000000-0000-0000-0000-000000000001'::uuid);  -- Director
 select tests.mk_user('c0000000-0000-0000-0000-000000000002'::uuid);  -- Manager
 select tests.mk_user('c0000000-0000-0000-0000-000000000003'::uuid);  -- Sales Rep
+-- A SECOND Director, because either may act independently (product.md §4) — and because a key
+-- claimed by one must not be replayable by the other.
+select tests.mk_user('c0000000-0000-0000-0000-000000000004'::uuid);
 
 insert into public.profiles (id, full_name, phone_e164, is_active, must_change_password) values
   ('c0000000-0000-0000-0000-000000000001', 'Catalogue Director', '+255700000091', true, false),
   ('c0000000-0000-0000-0000-000000000002', 'Catalogue Manager',  '+255700000092', true, false),
-  ('c0000000-0000-0000-0000-000000000003', 'Catalogue Rep',      '+255700000093', true, false);
+  ('c0000000-0000-0000-0000-000000000003', 'Catalogue Rep',      '+255700000093', true, false),
+  ('c0000000-0000-0000-0000-000000000004', 'Second Director',    '+255700000094', true, false);
 
 insert into public.user_roles (user_id, role) values
   ('c0000000-0000-0000-0000-000000000001', 'director'),
   ('c0000000-0000-0000-0000-000000000002', 'manager'),
-  ('c0000000-0000-0000-0000-000000000003', 'sales_rep');
+  ('c0000000-0000-0000-0000-000000000003', 'sales_rep'),
+  ('c0000000-0000-0000-0000-000000000004', 'director');
 
 -- ---------------------------------------------------------------------------
 -- The seed is the approved catalogue, and nothing more
@@ -239,9 +244,11 @@ select is((select count(*)::int from public.product_prices), 2,
 -- ---------------------------------------------------------------------------
 -- Idempotency: the same key is the same operation, not a second one
 -- ---------------------------------------------------------------------------
+-- The SAME request under the same key. Anything else is a conflict, which the section further
+-- down proves one argument at a time.
 select is(
   (api.admin_set_product_price(
-     (select id from public.products where name = 'Sand'), 9999, 'replay of an earlier request',
+     (select id from public.products where name = 'Sand'), 5200, 'Cement supplier raised prices',
      'catalogue-price-key-2') ->> 'reason'),
   'replayed',
   'a replayed key returns the original entry rather than writing a second one');
@@ -250,7 +257,7 @@ select is(
   (select count(*)::int from public.product_prices
     where product_id = (select id from public.products where name = 'Sand')),
   2,
-  'and the replay wrote nothing: still two entries, and no price of 9999');
+  'and the replay wrote nothing: still exactly two entries');
 
 -- ---------------------------------------------------------------------------
 -- Adding a product, attributed and audited
@@ -301,6 +308,107 @@ select is(
     where action = 'product_price_changed'),
   '4500',
   'the audit entry for a price change carries the price it replaced');
+
+-- ---------------------------------------------------------------------------
+-- A key is bound to the COMMAND, not just to itself
+--
+-- Found in review: the same key presented for a different product answered `ok: replayed` and
+-- handed back the FIRST product's price entry, while the second product stayed unpriced. A success
+-- reported for a change that never happened is the worst shape a bug can take on this screen.
+-- ---------------------------------------------------------------------------
+select is(
+  (api.admin_set_product_price(
+     (select id from public.products where name = 'Aggregate'), 9999, 'Opening price for the season',
+     'catalogue-price-key-2') ->> 'reason'),
+  'idempotency_key_conflict',
+  'the same key presented for a DIFFERENT product is a conflict, never a replay');
+
+select is(
+  (select count(*)::int from public.product_prices pp
+     join public.products p on p.id = pp.product_id where p.name = 'Aggregate'),
+  0,
+  'and the product it named was not priced — the refusal changed nothing');
+
+select is(
+  (api.admin_set_product_price(
+     (select id from public.products where name = 'Sand'), 6100, 'Cement supplier raised prices',
+     'catalogue-price-key-2') ->> 'reason'),
+  'idempotency_key_conflict',
+  'the same key with a different PRICE is a conflict');
+
+select is(
+  (api.admin_set_product_price(
+     (select id from public.products where name = 'Sand'), 5200, 'a different reason entirely',
+     'catalogue-price-key-2') ->> 'reason'),
+  'idempotency_key_conflict',
+  'the same key with a different REASON is a conflict — the reason is part of the record');
+
+select is(
+  (select count(*)::int from public.product_prices
+    where product_id = (select id from public.products where name = 'Sand')),
+  2,
+  'none of those refusals appended anything to permanent history');
+
+-- The other Director now presents a key the first one claimed.
+select tests.acting_as('c0000000-0000-0000-0000-000000000004'::uuid);
+
+select is(
+  (api.admin_set_product_price(
+     (select id from public.products where name = 'Sand'), 5200, 'Cement supplier raised prices',
+     'catalogue-price-key-2') ->> 'reason'),
+  'idempotency_key_conflict',
+  'a key claimed by one Director is not replayable by the other, even for the identical request');
+
+select tests.acting_as('c0000000-0000-0000-0000-000000000001'::uuid);
+
+select is(
+  (api.admin_set_product_price(
+     (select id from public.products where name = 'Sand'), 5200, 'Cement supplier raised prices',
+     'catalogue-price-key-2') ->> 'reason'),
+  'replayed',
+  'the SAME Director asking the SAME thing under that key still replays, as it should');
+
+select is(
+  (api.admin_add_product('Something Else', 'Grade B', 'sheet', 'catalogue-add-key-1') ->> 'reason'),
+  'idempotency_key_conflict',
+  'an add key presented for different product details is a conflict');
+
+select is((select count(*)::int from public.products where name = 'Something Else'), 0,
+  'and no product was created by that refusal');
+
+-- ---------------------------------------------------------------------------
+-- Identity really is case- AND whitespace-insensitive
+--
+-- Also found in review: `btrim` strips the ends and leaves the middle, so "Review Spacing" and
+-- "Review  Spacing" were accepted as two products. On a phone keyboard a doubled space is not an
+-- unusual thing to type, and the result is two catalogue entries for one thing — each separately
+-- priced, separately counted, separately sold.
+-- ---------------------------------------------------------------------------
+select is(
+  (api.admin_add_product('Review Spacing', 'Grade A', 'piece', 'catalogue-space-1') ->> 'reason'),
+  'added',
+  'a product with a single internal space is added');
+
+select is(
+  (api.admin_add_product('Review  Spacing', 'Grade  A', 'piece', 'catalogue-space-2') ->> 'reason'),
+  'product_exists',
+  'the same product typed with a DOUBLED internal space is refused as a duplicate');
+
+select is(
+  (api.admin_add_product('  review   spacing  ', E'	grade a ', 'piece', 'catalogue-space-3')
+     ->> 'reason'),
+  'product_exists',
+  'and so is any mixture of case, padding and tabs');
+
+select is(
+  (select count(*)::int from public.products where name ilike '%spacing%'),
+  1,
+  'exactly one Review Spacing exists, however it was typed');
+
+select is(
+  (select name || ' / ' || specification from public.products where name ilike '%spacing%'),
+  'Review Spacing / Grade A',
+  'and it is STORED in the canonical display form — collapsed spacing, original capitalisation');
 
 select * from finish();
 rollback;

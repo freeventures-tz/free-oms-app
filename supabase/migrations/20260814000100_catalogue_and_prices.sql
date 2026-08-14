@@ -17,6 +17,65 @@
 begin;
 
 -- ---------------------------------------------------------------------------
+-- Canonical identity — ONE definition, used by storage, by the duplicate check and by the unique
+-- constraint, so all three agree on when two products are the same product.
+--
+-- `btrim` alone is not enough and a review proved it: it strips the ends and leaves the middle, so
+-- "Review Spacing" and "Review  Spacing" were accepted as two products. On a phone keyboard a
+-- doubled space is not an unusual thing to type, and the result would be two catalogue entries for
+-- one thing — each separately priced, separately counted, and separately sold.
+--
+-- Non-breaking spaces are folded first: phone keyboards and pasted spreadsheet cells produce them,
+-- and `\s` does not reliably match one.
+-- ---------------------------------------------------------------------------
+create or replace function private.normalise_label(p_value text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select btrim(regexp_replace(replace(coalesce(p_value, ''), U&'\00A0', ' '), '\s+', ' ', 'g'));
+$$;
+
+comment on function private.normalise_label(text) is
+  'The DISPLAY form: outer whitespace trimmed and internal runs collapsed to one space. Case is '
+  'preserved, because "Nondo 12 mm" is how it should read on screen.';
+
+create or replace function private.canonical_identity(p_value text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select lower(private.normalise_label(p_value));
+$$;
+
+comment on function private.canonical_identity(text) is
+  'The COMPARISON form: the display form, lowercased. Two products are the same product when their '
+  '(name, specification) canonical forms match.';
+
+alter function private.normalise_label(text)    owner to fv_definer_owner;
+alter function private.canonical_identity(text) owner to fv_definer_owner;
+
+-- ---------------------------------------------------------------------------
+-- Idempotency keys carry the request they belong to.
+--
+-- Additive: one nullable column on a Stage 8A table that nothing currently writes to, so the
+-- deployed application cannot notice it.
+--
+-- It exists because a key alone is not an operation. A review reused one key for a different
+-- product and was told `ok: replayed` — handed back the FIRST product's price entry while the
+-- second product remained unpriced. The caller had every reason to believe the change had been
+-- made. A replay is only a replay when the same actor asks for the same thing.
+-- ---------------------------------------------------------------------------
+alter table public.idempotency_keys
+  add column request jsonb;
+
+comment on column public.idempotency_keys.request is
+  'The canonical request this key was claimed for. A later call presenting the same key with a '
+  'different actor or different arguments is a conflict, never a replay.';
+
+-- ---------------------------------------------------------------------------
 -- units — the approved units of measure, exactly those product.md §6 uses.
 --
 -- A code, not a label. Every word a user reads is a translation key (design.md §8.2), so the
@@ -69,10 +128,14 @@ comment on table public.products is
   'The sellable catalogue (product.md §6). Grade is part of identity: Nondo 12 mm BS 300 and '
   'Nondo 12 mm BS 500 are two rows, not one row with an attribute.';
 
--- Identity is the pair, compared case- and space-insensitively so "nondo 12 mm / bs 300" cannot be
+-- Identity is the pair, through the ONE canonical form defined at the top of this file — so
+-- "nondo 12 mm / bs 300" and "Nondo  12 mm / BS 300" are the same product, and neither can be
 -- entered a second time in different clothes.
 create unique index products_identity_idx
-  on public.products (lower(btrim(name)), lower(coalesce(btrim(specification), '')));
+  on public.products (
+    private.canonical_identity(name),
+    private.canonical_identity(coalesce(specification, ''))
+  );
 
 create index products_unit_idx       on public.products (unit_code);
 create index products_created_by_idx on public.products (created_by);
