@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useActionState, useRef, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 
 import {
   createAccountAction,
@@ -48,13 +48,79 @@ export function keepIssuedCredential(
 
 export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }) {
   const t = useTranslations();
-  const [state, formAction, pending] = useActionState<AdminActionState, FormData>(
-    createAccountAction,
-    {},
-  );
+
+  /**
+   * The credential this form has already produced, remembered outside React state.
+   *
+   * A burst of taps raises a burst of submissions, and the obvious guards do not stop the second
+   * one. `disabled={pending}` closes the button only after React has COMMITTED the pending state.
+   * An `onSubmit` handler is delegated at the root, so React's own submit listener on the form has
+   * already run by the time it sees the event. Guarding on the `previous` argument fails too:
+   * React hands each queued action the state as it was at DISPATCH, so the duplicate is told the
+   * form is still empty.
+   *
+   * React runs queued form actions ONE AT A TIME — measured, by removing each candidate guard in
+   * turn and re-running the delayed-action test. So the duplicate arrives after the first has
+   * settled, which is precisely when an in-flight latch has already released. Only a record of
+   * what was issued survives that gap, and there is deliberately no in-flight latch beside it: a
+   * guard that can never fire is a liability, not defence in depth.
+   *
+   * What it prevents: the second submission returned `phone_in_use` — correctly, the first had
+   * just created the account — and that refusal replaced the temporary password already on screen.
+   * The account existed and nobody had its password. Same rule as `keepIssuedCredential`
+   * (memory.md §6), on the creation path.
+   */
+  const issuedCredential = useRef<AdminActionState | null>(null);
+
+  async function createOnce(
+    previous: AdminActionState,
+    data: FormData,
+  ): Promise<AdminActionState> {
+    if (issuedCredential.current) return issuedCredential.current;
+
+    try {
+      const result = await createAccountAction(previous, data);
+      if (result.temporaryPassword) issuedCredential.current = result;
+      return result;
+    } catch {
+      // Thrown, not returned: the request never reached a verdict. Left uncaught it escapes the
+      // form action into the shell's error boundary, which replaces the whole screen and takes the
+      // typed details with it. It belongs inline, on the form, with everything still filled in.
+      return { error: "admin.errors.generic" };
+    }
+  }
+
+  const [state, formAction, pending] = useActionState<AdminActionState, FormData>(createOnce, {});
+
+  /**
+   * Held in state rather than left to the DOM, so a refusal does not empty the form.
+   *
+   * React resets an uncontrolled field after a form action completes — including when it completes
+   * with an error. A Director who mistyped a phone number, or hit an outage, would find the name
+   * they had typed gone and have to enter it again. §12.5 requires entered data to survive a
+   * failure, and this is what makes that true rather than aspirational.
+   */
+  const [fullName, setFullName] = useState("");
+  const [role, setRole] = useState<string>("sales_rep");
   const [phone, setPhone] = useState("");
+
+  /**
+   * A `<select>` needs putting back by hand after that reset, and an `<input>` does not.
+   *
+   * React restores a controlled text field itself, so the name and the number survive. It does not
+   * do the same for a select: the DOM reverts to the first option — Director, the most privileged
+   * role in the system — while React still believes the chosen value is current, so nothing
+   * re-renders and nothing corrects it. A Director who chose "Cashier" and hit an outage would be
+   * looking at a form that now says "Director".
+   */
+  const roleField = useRef<HTMLSelectElement>(null);
+
   const [recovery, setRecovery] = useState<AdminActionState>({});
   const [isRecovering, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (roleField.current && roleField.current.value !== role) roleField.current.value = role;
+  }, [state, role]);
 
   /**
    * ONE idempotency key per recoverable account, minted on first use and reused afterwards.
@@ -69,6 +135,12 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
    * there is no server/client hydration mismatch to defeat it.
    */
   const recoveryKeyRef = useRef<{ userId: string; key: string } | null>(null);
+
+  /**
+   * A fourth guard, and the only one that does not wait for a render: `disabled` closes the control
+   * once React commits `isRecovering`, and this closes it in the same tick as the first click.
+   */
+  const recoveryInFlight = useRef(false);
 
   function recoveryKeyFor(userId: string): string {
     if (recoveryKeyRef.current?.userId !== userId) {
@@ -119,25 +191,48 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
             variant="secondary"
             // `isRecovering` was missing here while the submit button below already had it. A
             // second click during the request started a second reset.
+            pending={isRecovering}
+            pendingLabel={t("common.loading")}
             disabled={pending || isRecovering}
             onClick={() => {
+              if (recoveryInFlight.current) return;
+              recoveryInFlight.current = true;
               const userId = state.recoverableUserId!;
               const data = new FormData();
               data.set("userId", userId);
               data.set("idempotencyKey", recoveryKeyFor(userId));
               startTransition(async () => {
-                const result = await resetPasswordAction({}, data);
-                setRecovery((previous) => keepIssuedCredential(previous, result));
+                try {
+                  const result = await resetPasswordAction({}, data);
+                  setRecovery((previous) => keepIssuedCredential(previous, result));
+                } catch {
+                  // The request never reached a verdict. Say so, and leave the control offered:
+                  // `recoveryKeyFor` returns the same key for this account, so trying again
+                  // addresses the same reset command rather than minting a second password.
+                  setRecovery((previous) =>
+                    keepIssuedCredential(previous, { error: "admin.errors.generic" }),
+                  );
+                } finally {
+                  recoveryInFlight.current = false;
+                }
               });
             }}
           >
-            {isRecovering ? t("common.loading") : t("admin.accounts.recoverExisting")}
+            {t("admin.accounts.recoverExisting")}
           </Button>
         ) : null}
 
         <Field>
           <Label htmlFor="fullName">{t("admin.accounts.fullName")}</Label>
-          <Input id="fullName" name="fullName" required disabled={pending} autoComplete="off" />
+          <Input
+            id="fullName"
+            name="fullName"
+            required
+            disabled={pending}
+            autoComplete="off"
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
+          />
           <FieldError>{state.fieldErrors?.fullName ? t(state.fieldErrors.fullName) : null}</FieldError>
         </Field>
 
@@ -166,18 +261,30 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
         <Field>
           <Label htmlFor="role">{t("admin.accounts.role")}</Label>
           {/* Exactly one active role per user, so this is a single select — never multi-select. */}
-          <Select id="role" name="role" defaultValue="sales_rep" disabled={pending}>
-            {APP_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {t(`admin.roles.${role}`)}
+          <Select
+            ref={roleField}
+            id="role"
+            name="role"
+            value={role}
+            onChange={(event) => setRole(event.target.value)}
+            disabled={pending}
+          >
+            {APP_ROLES.map((value) => (
+              <option key={value} value={value}>
+                {t(`admin.roles.${value}`)}
               </option>
             ))}
           </Select>
           <FieldError>{state.fieldErrors?.role ? t(state.fieldErrors.role) : null}</FieldError>
         </Field>
 
-        <Button type="submit" disabled={pending || isRecovering}>
-          {pending ? t("common.loading") : t("admin.accounts.create")}
+        <Button
+          type="submit"
+          pending={pending}
+          pendingLabel={t("common.loading")}
+          disabled={pending || isRecovering}
+        >
+          {t("admin.accounts.create")}
         </Button>
       </form>
     </Card>

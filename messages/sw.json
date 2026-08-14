@@ -6,6 +6,7 @@
     "close": "Funga",
     "copy": "Nakili",
     "copied": "Imenakiliwa",
+    "retry": "Jaribu tena",
     "loading": "Inafanya kazi…",
     "language": "Lugha",
     "english": "Kiingereza",
@@ -87,6 +88,11 @@
     "payments": "Malipo na utoaji",
     "dashboard": "Dashibodi",
     "accounts": "Akaunti za watumiaji"
+  },
+  "unavailable": {
+    "title": "Ukurasa huu haukuweza kupakiwa",
+    "body": "Mfumo haukupatikana kwa sasa. Hakuna ulichofanya kilichopotea, na hakuna kilichobadilishwa. Jaribu tena baada ya muda mfupi.",
+    "retry": "Jaribu tena"
   },
   "landing": {
     "orders": {

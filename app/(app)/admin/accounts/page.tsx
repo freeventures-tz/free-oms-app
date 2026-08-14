@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Suspense } from "react";
 
 import { getTranslations } from "next-intl/server";
 
@@ -8,6 +9,7 @@ import { PageHeader } from "@/components/ui/surface";
 import { resumePendingPhoneChanges } from "@/lib/admin/accounts";
 import { requireAccess } from "@/lib/auth/guard";
 import type { AppRole } from "@/lib/auth/roles";
+import { requireRows } from "@/lib/supabase/query";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 /**
@@ -22,14 +24,9 @@ export default async function AccountsPage() {
   const viewer = await requireAccess("/admin/accounts");
   const t = await getTranslations("admin.accounts");
 
-  // Finish any phone change that reached this database but never reached Supabase Auth — the state
-  // a crash between the two systems leaves behind. Idempotent, and it runs where a Director will
-  // see the result, so the two systems converge without anyone having to notice the gap.
-  await resumePendingPhoneChanges();
-
   const supabase = await createServerSupabase();
 
-  const [{ data: profiles }, { data: roles }] = await Promise.all([
+  const [profileRows, roleRows] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name, phone_e164, is_active, must_change_password")
@@ -37,11 +34,16 @@ export default async function AccountsPage() {
     supabase.from("user_roles").select("user_id, role"),
   ]);
 
+  // A read that FAILED is not a business with no staff. Taking `data ?? []` here would have shown a
+  // Director "No accounts yet" during a database outage — see `requireRows`.
+  const profiles = requireRows(profileRows, "admin.accounts.profiles");
+  const roles = requireRows(roleRows, "admin.accounts.user_roles");
+
   const roleByUser = new Map<string, AppRole>(
-    (roles ?? []).map((row) => [row.user_id as string, row.role as AppRole]),
+    roles.map((row) => [row.user_id as string, row.role as AppRole]),
   );
 
-  const accounts: AccountSummary[] = (profiles ?? []).map((row) => ({
+  const accounts: AccountSummary[] = profiles.map((row) => ({
     id: row.id as string,
     fullName: row.full_name as string,
     phoneE164: row.phone_e164 as string,
@@ -55,6 +57,32 @@ export default async function AccountsPage() {
       <PageHeader title={t("title")} description={t("description")} />
       <CreateAccountForm idempotencyKey={randomUUID()} />
       <AccountsList accounts={accounts} currentUserId={viewer.userId} />
+      <Suspense fallback={null}>
+        <ResumePendingPhoneChanges />
+      </Suspense>
     </>
   );
+}
+
+/**
+ * Finishes any phone change that reached this database but never reached Supabase Auth — the state
+ * a crash between the two systems leaves behind. Idempotent, and it still runs on every visit a
+ * Director makes to this screen, so the two systems converge without anyone having to notice.
+ *
+ * It sits behind its own boundary because it was measured on the critical path: a whole serial
+ * round trip that every render waited for, in front of a screen that does not display anything it
+ * produces. The sweep converges Supabase AUTH; the list below is read from `profiles`, which the
+ * database has already updated — so nothing rendered here was ever waiting on this answer.
+ *
+ * Failure is swallowed on purpose. Convergence is a background duty, it is retried on the next
+ * visit, and now that it resolves AFTER the page is on screen an exception would replace a screen
+ * the Director is already reading with an error page.
+ */
+async function ResumePendingPhoneChanges() {
+  try {
+    await resumePendingPhoneChanges();
+  } catch {
+    // Retried the next time a Director opens this screen.
+  }
+  return null;
 }

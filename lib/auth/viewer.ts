@@ -40,11 +40,22 @@ export const getViewer = cache(async (): Promise<Viewer> => {
   const userId = claimsData?.claims?.sub;
   if (!userId || typeof userId !== "string") return { state: "anonymous" };
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, full_name, phone_e164, locale, is_active, must_change_password")
-    .eq("id", userId)
-    .maybeSingle();
+  // Issued TOGETHER, because neither depends on the other: both are keyed by the `userId` the
+  // verified token already supplied. Awaiting them one after the other cost a second full round
+  // trip to the database on every request in the application — see the Stage 10 Part A measurement.
+  //
+  // The order of the CHECKS below is unchanged, and so is every state this returns. The one
+  // difference is that a gated or deactivated user now also has their role row read, which the
+  // sequential version would have skipped. It is the caller's own row under the caller's own
+  // session, RLS applies to it exactly as before, and nothing reads the result on those paths.
+  const [{ data: profile }, { data: roleRow }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name, phone_e164, locale, is_active, must_change_password")
+      .eq("id", userId)
+      .maybeSingle(),
+    supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
+  ]);
 
   if (!profile) return { state: "blocked", userId, reason: "no_profile" };
 
@@ -65,12 +76,6 @@ export const getViewer = cache(async (): Promise<Viewer> => {
       locale,
     };
   }
-
-  const { data: roleRow } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle();
 
   const role = roleRow?.role as AppRole | undefined;
   if (!role) return { state: "blocked", userId, reason: "no_role" };
