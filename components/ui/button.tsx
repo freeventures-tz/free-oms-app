@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Loader2 } from "lucide-react";
 import { Slot } from "radix-ui";
 
 import { cn } from "@/lib/utils";
@@ -34,21 +35,76 @@ const buttonVariants = cva(
   },
 );
 
+/**
+ * `pending` is the interaction feedback contract in one prop (design.md §12.7 rules 1, 4).
+ *
+ * Three things have to be true at once, and each of them is a separate failure if it is missing:
+ *
+ *   the button must not change size — the label stays in the layout and is hidden with
+ *   `invisible`, and the indicator is laid over it, so a row of controls cannot reflow under
+ *   someone's thumb mid-tap;
+ *
+ *   the state must not be carried by colour — `aria-busy`, a spinner, and a word are all present,
+ *   because a faded surface says nothing to a screen reader and nothing under stopped animation
+ *   (§11.5, §12.7 rule 6);
+ *
+ *   a second activation must not reach the handler — `disabled` refuses it at the browser, which
+ *   is the guard that does not depend on any of our own code being correct. It is the first of the
+ *   layers that stopped one double-click issuing two credentials (memory.md §6).
+ *
+ * `pendingLabel` is required whenever `pending` can be true, because "Working…" has to exist in
+ * both languages rather than be improvised at the call site.
+ */
 function Button({
   className,
   variant,
   size,
   asChild = false,
+  pending = false,
+  pendingLabel,
+  disabled,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean;
+    pending?: boolean;
+    pendingLabel?: string;
+  }) {
   const Comp = asChild ? Slot.Root : "button";
+
+  // `asChild` hands rendering to someone else's element, so there is nothing here to overlay.
+  if (asChild) {
+    return (
+      <Comp
+        data-slot="button"
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      >
+        {children}
+      </Comp>
+    );
+  }
+
   return (
-    <Comp
+    <button
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      data-pending={pending || undefined}
+      aria-busy={pending || undefined}
+      disabled={disabled || pending}
+      className={cn("relative", buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      <span className={cn("inline-flex items-center gap-2", pending && "invisible")}>
+        {children}
+      </span>
+      {pending ? (
+        <span className="absolute inset-0 inline-flex items-center justify-center gap-2">
+          <Loader2 aria-hidden className="size-4 animate-spin motion-reduce:animate-none" />
+          <span className="sr-only">{pendingLabel}</span>
+        </span>
+      ) : null}
+    </button>
   );
 }
 

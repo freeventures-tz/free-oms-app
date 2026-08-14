@@ -266,6 +266,62 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   The interaction feedback contract (design.md §12.7).
+
+   Two pieces of it are CSS: the skeleton that stands in for content while a
+   route loads, and the hint that says a navigation is under way. Both are
+   drawn so that removing the motion removes nothing you needed to know —
+   the skeleton is still a visible placeholder, and the tapped destination
+   is still marked selected by colour AND carries a word for a screen reader.
+   --------------------------------------------------------------------------- */
+
+.fv-skeleton {
+  background-color: color-mix(in srgb, var(--fv-twilight) 8%, transparent);
+  border-radius: 6px;
+  animation: fv-skeleton-pulse 1600ms ease-in-out infinite;
+}
+
+/* Fixed size and reserved space in BOTH states, so starting a navigation cannot reflow the item
+   under the thumb that is still on it. */
+.fv-nav-hint {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: auto;
+  border-radius: 9999px;
+  background: currentColor;
+  visibility: hidden;
+  opacity: 0;
+}
+
+.fv-nav-hint[data-pending] {
+  visibility: visible;
+  /* Delayed, so a navigation that completes quickly never flashes a hint at anyone. The selected
+     surface underneath is immediate; only this second-order detail waits. */
+  animation:
+    fv-hint-in 160ms ease 90ms forwards,
+    fv-hint-pulse 1200ms ease-in-out 250ms infinite;
+}
+
+@keyframes fv-skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes fv-hint-in {
+  to {
+    opacity: 0.9;
+  }
+}
+
+@keyframes fv-hint-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fv-auth-card,
   .fv-step,
@@ -276,5 +332,16 @@
   }
   .fv-entry-input {
     transition: none;
+  }
+
+  /* Nothing moves, and nothing is lost: the skeleton stays a visible placeholder, and the pending
+     hint becomes a static mark beside a destination that is already marked selected. */
+  .fv-skeleton {
+    animation: none;
+  }
+  .fv-nav-hint[data-pending] {
+    animation: none;
+    visibility: visible;
+    opacity: 0.9;
   }
 }

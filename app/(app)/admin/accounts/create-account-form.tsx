@@ -48,10 +48,42 @@ export function keepIssuedCredential(
 
 export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }) {
   const t = useTranslations();
-  const [state, formAction, pending] = useActionState<AdminActionState, FormData>(
-    createAccountAction,
-    {},
-  );
+
+  /**
+   * The credential this form has already produced, remembered outside React state.
+   *
+   * A burst of taps raises a burst of submissions, and the obvious guards do not stop the second
+   * one. `disabled={pending}` closes the button only after React has COMMITTED the pending state.
+   * An `onSubmit` handler is delegated at the root, so React's own submit listener on the form has
+   * already run by the time it sees the event. Guarding on the `previous` argument fails too:
+   * React hands each queued action the state as it was at DISPATCH, so the duplicate is told the
+   * form is still empty.
+   *
+   * React runs queued form actions ONE AT A TIME — measured, by removing each candidate guard in
+   * turn and re-running the delayed-action test. So the duplicate arrives after the first has
+   * settled, which is precisely when an in-flight latch has already released. Only a record of
+   * what was issued survives that gap, and there is deliberately no in-flight latch beside it: a
+   * guard that can never fire is a liability, not defence in depth.
+   *
+   * What it prevents: the second submission returned `phone_in_use` — correctly, the first had
+   * just created the account — and that refusal replaced the temporary password already on screen.
+   * The account existed and nobody had its password. Same rule as `keepIssuedCredential`
+   * (memory.md §6), on the creation path.
+   */
+  const issuedCredential = useRef<AdminActionState | null>(null);
+
+  async function createOnce(
+    previous: AdminActionState,
+    data: FormData,
+  ): Promise<AdminActionState> {
+    if (issuedCredential.current) return issuedCredential.current;
+
+    const result = await createAccountAction(previous, data);
+    if (result.temporaryPassword) issuedCredential.current = result;
+    return result;
+  }
+
+  const [state, formAction, pending] = useActionState<AdminActionState, FormData>(createOnce, {});
   const [phone, setPhone] = useState("");
   const [recovery, setRecovery] = useState<AdminActionState>({});
   const [isRecovering, startTransition] = useTransition();
@@ -69,6 +101,12 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
    * there is no server/client hydration mismatch to defeat it.
    */
   const recoveryKeyRef = useRef<{ userId: string; key: string } | null>(null);
+
+  /**
+   * A fourth guard, and the only one that does not wait for a render: `disabled` closes the control
+   * once React commits `isRecovering`, and this closes it in the same tick as the first click.
+   */
+  const recoveryInFlight = useRef(false);
 
   function recoveryKeyFor(userId: string): string {
     if (recoveryKeyRef.current?.userId !== userId) {
@@ -119,19 +157,27 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
             variant="secondary"
             // `isRecovering` was missing here while the submit button below already had it. A
             // second click during the request started a second reset.
+            pending={isRecovering}
+            pendingLabel={t("common.loading")}
             disabled={pending || isRecovering}
             onClick={() => {
+              if (recoveryInFlight.current) return;
+              recoveryInFlight.current = true;
               const userId = state.recoverableUserId!;
               const data = new FormData();
               data.set("userId", userId);
               data.set("idempotencyKey", recoveryKeyFor(userId));
               startTransition(async () => {
-                const result = await resetPasswordAction({}, data);
-                setRecovery((previous) => keepIssuedCredential(previous, result));
+                try {
+                  const result = await resetPasswordAction({}, data);
+                  setRecovery((previous) => keepIssuedCredential(previous, result));
+                } finally {
+                  recoveryInFlight.current = false;
+                }
               });
             }}
           >
-            {isRecovering ? t("common.loading") : t("admin.accounts.recoverExisting")}
+            {t("admin.accounts.recoverExisting")}
           </Button>
         ) : null}
 
@@ -176,8 +222,13 @@ export function CreateAccountForm({ idempotencyKey }: { idempotencyKey: string }
           <FieldError>{state.fieldErrors?.role ? t(state.fieldErrors.role) : null}</FieldError>
         </Field>
 
-        <Button type="submit" disabled={pending || isRecovering}>
-          {pending ? t("common.loading") : t("admin.accounts.create")}
+        <Button
+          type="submit"
+          pending={pending}
+          pendingLabel={t("common.loading")}
+          disabled={pending || isRecovering}
+        >
+          {t("admin.accounts.create")}
         </Button>
       </form>
     </Card>

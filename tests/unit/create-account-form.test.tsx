@@ -93,6 +93,23 @@ describe("account recovery, activated twice in quick succession", () => {
     expect(await screen.findByText("Qm7rTk2pVx9Ldb4Z")).toBeInTheDocument();
   });
 
+  it("issues at most one reset when the whole burst lands in a single tick", async () => {
+    // `disabled` closes the control only once React has committed the pending state. Clicks
+    // dispatched natively in one tick — the impatient double-tap — all arrive before that commit,
+    // which is the window the row's ref latch exists to close.
+    const first = deferred<Record<string, unknown>>();
+    resetPasswordAction.mockImplementation(() => first.promise);
+
+    const { recover } = await reachRecoveryOffer();
+    for (let i = 0; i < 5; i++) recover.click();
+
+    await waitFor(() => expect(recover).toBeDisabled());
+    expect(resetPasswordAction).toHaveBeenCalledTimes(1);
+
+    first.resolve({ temporaryPassword: "Qm7rTk2pVx9Ldb4Z", temporaryPasswordFor: "Asha Mushi" });
+    expect(await screen.findByText("Qm7rTk2pVx9Ldb4Z")).toBeInTheDocument();
+  });
+
   it("reuses one idempotency key, so two requests can only ever resolve to one command", async () => {
     // Proves the guarantee directly rather than through the disabled state: even if two requests
     // DO reach the server, they carry the same key and therefore address the same reset command.

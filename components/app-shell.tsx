@@ -1,12 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { cn } from "@/lib/utils";
+import { NavLink, type NavLinkVariant } from "@/components/nav-link";
 
 export type NavItem = { href: string; labelKey: string };
 
@@ -35,30 +34,40 @@ export function AppShell({
   const t = useTranslations();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  /**
+   * The drawer closes on ARRIVAL, not on tap (design.md §12.7 rules 1–2).
+   *
+   * Closing it in the click handler took the acknowledgement away at the exact moment it was owed:
+   * on a phone the menu vanished, the previous page stayed, and nothing anywhere said a tap had
+   * registered until the new page arrived. That is the two seconds of silence Part A exists to
+   * remove, and it was worst on the tier most of the staff actually use.
+   *
+   * Keeping it open costs nothing when the route commits at once — the pathname changes in the same
+   * frame and this closes it — and on a slow connection it is the only place the pending
+   * destination is visible.
+   */
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+
   // ONE nav element per region, restyled by breakpoint rather than duplicated. Two copies of the
   // same destinations in the DOM is how a "hidden" link becomes reachable by accident, and it makes
   // every assertion about navigation ambiguous.
-  const nav = (variant: "rail" | "full") => (
+  const nav = (variant: NavLinkVariant) => (
     <nav className="flex flex-col gap-1" aria-label={t("common.menu")}>
       {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (
-          <Link
+          <NavLink
             key={item.href}
             href={item.href}
-            onClick={() => setDrawerOpen(false)}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "flex min-h-11 items-center rounded-full px-4 text-sm font-medium transition-colors",
-              variant === "rail" &&
-                "justify-center px-2 text-center text-[11px] leading-tight xl:justify-start xl:px-4 xl:text-left xl:text-sm",
-              active
-                ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                : "text-sidebar-foreground hover:bg-sidebar-accent",
-            )}
-          >
-            {t(item.labelKey)}
-          </Link>
+            label={t(item.labelKey)}
+            active={active}
+            variant={variant}
+            // Tapping where you already are produces no pathname change, so nothing would close
+            // the drawer. That one case still closes on tap.
+            onNavigate={active ? () => setDrawerOpen(false) : undefined}
+          />
         );
       })}
     </nav>
