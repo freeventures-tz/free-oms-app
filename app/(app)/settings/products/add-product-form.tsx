@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 
 import { addProductAction, type CatalogueActionState } from "@/app/(app)/settings/products/actions";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,17 @@ import type { Unit } from "@/lib/catalogue/catalogue";
  * A new product arrives with NO PRICE, deliberately. Asking for a price here would make the two
  * decisions one, and they are not: product.md §4 makes pricing a separate Director act with its own
  * immutable record and its own required reason. The product list says "No price set" until then.
+ *
+ * This outer component exists for one reason: to prepare the NEXT product without a page reload.
+ *
+ * The fields below carry state that must be genuinely empty for a new product — the entered values,
+ * the guard that remembers a product was already added, and `useActionState`, which has no reset.
+ * A remount is the only honest way to clear all three, so the fields are keyed on a generation this
+ * component owns and bumps once a fresh idempotency key has actually arrived from the server.
+ *
+ * Keying them on the idempotency key itself would look simpler and be wrong: the Server Action
+ * revalidates this route, so a new key arrives the moment the add succeeds — and the confirmation
+ * the Director is still reading would vanish before they had read it.
  */
 export function AddProductForm({
   units,
@@ -25,15 +37,97 @@ export function AddProductForm({
   idempotencyKey: string;
 }) {
   const t = useTranslations();
+  const router = useRouter();
+
+  const [generation, setGeneration] = useState(0);
+  const [preparing, startPreparing] = useTransition();
+  const [prepareFailed, setPrepareFailed] = useState(false);
 
   /**
-   * The same guard Stage 10 Part A arrived at for account creation, and for the same reason.
+   * The key we asked the server to replace. `null` when nothing was asked for.
    *
-   * React queues form actions and runs them one at a time, handing each the state as it was at
-   * DISPATCH — so a burst of taps is not stopped by `disabled`, by an `onSubmit` handler, or by
-   * checking the `previous` argument. Only a record of what already succeeded survives that gap.
-   * Here the consequence of a second submission is a duplicate product rather than a lost
-   * credential, but the mechanism is identical.
+   * Also the single-flight guard: written synchronously inside the handler, before React has
+   * committed anything, so a burst of taps in one tick cannot start two refreshes. `disabled`
+   * closes the control only after that commit — the same gap Stage 10 Part A found on the account
+   * screens.
+   */
+  const requestedFrom = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (preparing) return;
+    if (requestedFrom.current === null) return;
+
+    if (requestedFrom.current !== idempotencyKey) {
+      // A fresh key arrived: the refresh landed, and the catalogue below now includes the product
+      // that was just added. Give the Director an empty form to type the next one into.
+      requestedFrom.current = null;
+      setPrepareFailed(false);
+      setGeneration((value) => value + 1);
+    } else {
+      // The transition finished and the key is unchanged, so the server was never reached. Say so,
+      // and leave the control offered: pressing it again is the whole remedy.
+      requestedFrom.current = null;
+      setPrepareFailed(true);
+    }
+  }, [preparing, idempotencyKey]);
+
+  function prepareAnother() {
+    if (requestedFrom.current !== null) return;
+    requestedFrom.current = idempotencyKey;
+    setPrepareFailed(false);
+
+    // Inside the transition, so `preparing` stays true until the new tree has actually committed —
+    // which is what makes the pending state honest rather than decorative.
+    startPreparing(() => {
+      router.refresh();
+    });
+  }
+
+  return (
+    <AddProductFields
+      key={generation}
+      units={units}
+      idempotencyKey={idempotencyKey}
+      preparing={preparing}
+      prepareFailed={prepareFailed}
+      onPrepareAnother={prepareAnother}
+      addAnotherLabel={t("catalogue.add.another")}
+      pendingLabel={t("common.loading")}
+      prepareFailedMessage={t("catalogueErrors.generic")}
+    />
+  );
+}
+
+function AddProductFields({
+  units,
+  idempotencyKey,
+  preparing,
+  prepareFailed,
+  onPrepareAnother,
+  addAnotherLabel,
+  pendingLabel,
+  prepareFailedMessage,
+}: {
+  units: Unit[];
+  idempotencyKey: string;
+  preparing: boolean;
+  prepareFailed: boolean;
+  onPrepareAnother: () => void;
+  addAnotherLabel: string;
+  pendingLabel: string;
+  prepareFailedMessage: string;
+}) {
+  const t = useTranslations();
+
+  /**
+   * The product this form has already added, remembered outside React state.
+   *
+   * A burst of taps raises a burst of submissions, and the obvious guards do not stop the second
+   * one. React queues form actions and hands each the state as it was at DISPATCH, so checking the
+   * `previous` argument is told the form is still empty; `disabled` closes the button only after
+   * React commits; an `onSubmit` handler is delegated at the root and runs too late. Only a record
+   * of what already succeeded survives that gap — the same conclusion Stage 10 Part A reached for
+   * account creation, where the cost was a lost credential rather than a duplicate product.
    */
   const added = useRef(false);
 
@@ -82,16 +176,23 @@ export function AddProductForm({
         <p className="text-sm text-success">
           {t(state.successKey, { name: state.successName ?? "" })}
         </p>
+
+        {prepareFailed ? (
+          <div className="mt-3">
+            <FormError>{prepareFailedMessage}</FormError>
+          </div>
+        ) : null}
+
         <Button
           type="button"
           variant="secondary"
           size="small"
           className="mt-3"
-          // A fresh idempotency key is needed for the next product, and it is minted on the server
-          // so the two sides cannot disagree about it.
-          onClick={() => window.location.reload()}
+          pending={preparing}
+          pendingLabel={pendingLabel}
+          onClick={onPrepareAnother}
         >
-          {t("catalogue.add.heading")}
+          {addAnotherLabel}
         </Button>
       </Card>
     );

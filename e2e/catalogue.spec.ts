@@ -215,6 +215,103 @@ test.describe("adding a product", () => {
     await expect(page.getByLabel(/grade or specification/i)).toHaveValue("bs 300");
     await expect(page.locator("#productUnit")).toHaveValue("bar");
   });
+
+  test("preparing another product answers at once and hands back a clean form", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const name = `E2E Another ${testInfo.project.name}`;
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.getByLabel(/grade or specification/i).fill("Grade Y");
+    await page.selectOption("#productUnit", "bar");
+    await page.getByRole("button", { name: /^add product$/i }).click();
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toBeVisible({ timeout: 15_000 });
+
+    // Count the refreshes this button actually causes. A guard that only hides the control is not
+    // a guard, and the old implementation was a full `window.location.reload()` with none at all.
+    const refreshes: string[] = [];
+    page.on("request", (request) => {
+      const headers = request.headers();
+      if (
+        request.method() === "GET" &&
+        headers["rsc"] &&
+        !headers["next-router-prefetch"] &&
+        request.url().includes("/settings/products")
+      ) {
+        refreshes.push(request.url());
+      }
+    });
+
+    // Slow the refresh so the pending state is observable rather than instantaneous.
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "GET") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+      await route.continue();
+    });
+
+    const another = page.getByRole("button", { name: /add another product/i });
+    const before = await another.boundingBox();
+
+    // Stamp, inside the page, how long after the tap anything says the tap registered.
+    await page.evaluate(() => {
+      const state = { t0: performance.now(), busyAt: null as number | null };
+      const check = () => {
+        if (state.busyAt === null && document.querySelector('button[aria-busy="true"]')) {
+          state.busyAt = performance.now() - state.t0;
+        }
+      };
+      new MutationObserver(check).observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+      });
+      (window as unknown as { __fvBusy: typeof state }).__fvBusy = state;
+    });
+
+    // Dispatched natively in one tick, bypassing every actionability check Playwright applies.
+    await another.evaluate((node: HTMLButtonElement) => {
+      for (let i = 0; i < 6; i++) node.click();
+    });
+
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(
+            () => (window as unknown as { __fvBusy: { busyAt: number | null } }).__fvBusy.busyAt,
+          ),
+        { timeout: 5000 },
+      )
+      .toBeLessThan(ACKNOWLEDGEMENT_BUDGET_MS);
+
+    // Working, saying so in words, and the same size as before (§12.7 rule 4).
+    const busy = page.locator("button[data-slot='button'][aria-busy='true']");
+    await expect(busy).toContainText(/working/i);
+    const during = await busy.boundingBox();
+    expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
+
+    // A clean form comes back — empty fields, and no leftover confirmation.
+    await expect(page.getByLabel(/product name/i)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel(/product name/i)).toHaveValue("");
+    await expect(page.getByLabel(/grade or specification/i)).toHaveValue("");
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toHaveCount(0);
+
+    // Exactly one refresh, however many times it was pressed.
+    expect(refreshes, "more than one refresh was issued").toHaveLength(1);
+
+    // …and the catalogue below now shows the product that was just added.
+    await expect(productCard(page, `${name} Grade Y`)).toBeVisible();
+
+    // The clean form is usable: it adds a SECOND product under a fresh idempotency key.
+    await page.unroute(/\/settings\/products/);
+    await page.getByLabel(/product name/i).fill(`${name} Two`);
+    await page.getByRole("button", { name: /^add product$/i }).click();
+    await expect(page.getByText(new RegExp(`${name} Two added`, "i"))).toBeVisible({
+      timeout: 15_000,
+    });
+  });
 });
 
 test.describe("the interaction contract on this screen", () => {

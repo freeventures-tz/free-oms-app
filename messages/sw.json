@@ -204,7 +204,8 @@
       "specificationHelp": "Weka tu kama daraja ni sehemu ya utambulisho, kama BS 300. Acha wazi kama halipo.",
       "unit": "Inauzwa kwa",
       "submit": "Ongeza bidhaa",
-      "added": "{name} imeongezwa. Bado haina bei."
+      "added": "{name} imeongezwa. Bado haina bei.",
+      "another": "Ongeza bidhaa nyingine"
     },
     "price": {
       "set": "Weka bei",

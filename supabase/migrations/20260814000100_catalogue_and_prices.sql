@@ -1,8 +1,13 @@
 -- Stage 10 Part B · Catalogue: units, locations, products, and immutable selling prices
 --
--- ADDITIVE ONLY. Nothing here alters or drops an existing object, so the deployed application —
--- which knows none of these tables — keeps working unchanged after this migration is applied.
--- That is what lets the migration ship before the code that uses it.
+-- ADDITIVE. Nothing is dropped, no type is changed and no column is removed, so the deployed
+-- application — which knows none of these tables — keeps working unchanged after this migration is
+-- applied. That is what lets the migration ship before the code that uses it.
+--
+-- There IS one `alter table`: a nullable `request` column on `idempotency_keys`, the Stage 8A table
+-- that nothing currently writes to. An earlier version of this header claimed nothing was altered
+-- at all, which stopped being true when that column was added and is corrected here rather than
+-- left standing.
 --
 -- The shape follows product.md rather than convenience:
 --

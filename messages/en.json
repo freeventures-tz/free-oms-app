@@ -204,7 +204,8 @@
       "specificationHelp": "Only if the grade is part of what it is, like BS 300. Leave empty otherwise.",
       "unit": "Sold by",
       "submit": "Add product",
-      "added": "{name} added. It has no price yet."
+      "added": "{name} added. It has no price yet.",
+      "another": "Add another product"
     },
     "price": {
       "set": "Set price",
