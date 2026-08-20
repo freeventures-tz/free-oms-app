@@ -7,6 +7,9 @@
 -- with a sentence naming what broke. A post-migration query that only proves rows currently exist
 -- would pass just as happily against a database that had been emptied and re-seeded, which is the
 -- failure this file exists to catch.
+--
+-- Runs in BOTH fixtures, the one with prices and the one without, because none of what it asserts
+-- depends on a price existing. The price row's survival is 02b_assert_price_survived.sql.
 
 \set ON_ERROR_STOP on
 
@@ -16,9 +19,9 @@ declare
   v_gained      integer;
   v_renamed     integer;
   v_wrong       integer;
-  v_price       record;
-  v_now         record;
   v_untouched   integer;
+  v_active      integer;
+  v_retired     integer;
   v_stranded    integer;
 begin
   -- -------------------------------------------------------------------------
@@ -91,42 +94,33 @@ begin
   end if;
 
   -- -------------------------------------------------------------------------
-  -- 4. The price row written BEFORE the migration still exists, with the same id, still pointing
-  --    at the same product.
+  -- 4. The units on offer are the approved ones, and the package-specific rows are retired
   --
-  -- The single most consequential thing to get wrong. A price a Director handed to a customer must
-  -- still be readable afterwards, attached to the product it was set for.
+  -- Counted rather than eyeballed, because "the picker looks right" is what a Director will do and
+  -- it is not evidence. Five generic units a new product may be counted in, three retired rows kept
+  -- only so an old value can still be read back.
   -- -------------------------------------------------------------------------
-  select * into v_price from migration_chain.price_before;
+  select count(*) into v_active  from public.units where is_active;
+  select count(*) into v_retired from public.units where not is_active;
 
-  select id, product_id, price_tzs into v_now
-    from public.product_prices where id = v_price.price_id;
-
-  if not found then
+  if v_active <> 5 or v_retired <> 3 then
     raise exception
-      'the price row written before migration 22 (%) no longer exists', v_price.price_id;
+      'expected 5 active and 3 retired counting units after migration 22, found % active and % '
+      'retired', v_active, v_retired;
   end if;
 
-  if v_now.product_id is distinct from v_price.product_id then
-    raise exception
-      'price row % now points at product % instead of the product it was written for (%)',
-      v_price.price_id, v_now.product_id, v_price.product_id;
-  end if;
-
-  if v_now.price_tzs is distinct from v_price.price_tzs then
-    raise exception 'price row % changed value from % to %',
-      v_price.price_id, v_price.price_tzs, v_now.price_tzs;
-  end if;
-
-  -- And the product it points at is one of the products that MOVED, so this proves the reference
-  -- survived a real transformation rather than an untouched row.
-  if not exists (
-    select 1 from public.products p
-     where p.id = v_price.product_id and p.unit_code = 'bucket' and p.unit_content = '20 litres'
+  if exists (
+    select 1 from public.units
+     where is_active and code not in ('bag', 'bar', 'bucket', 'piece', 'sheet')
   ) then
-    raise exception
-      'the priced product did not receive the approved counting unit and content, so the surviving '
-      'reference proves nothing';
+    raise exception 'a counting unit outside the approved set is on offer after migration 22';
+  end if;
+
+  if exists (
+    select 1 from public.units
+     where not is_active and code not in ('bag_50kg', 'bucket_20l', 'piece_12ft')
+  ) then
+    raise exception 'a unit was retired that migration 22 was not supposed to retire';
   end if;
 
   -- -------------------------------------------------------------------------
@@ -142,9 +136,9 @@ begin
 
   raise notice 'migration-chain: % products kept their ids, names and specifications',
     (select count(*) from migration_chain.products_before);
-  raise notice 'migration-chain: price row % still points at product %',
-    v_price.price_id, v_price.product_id;
+  raise notice 'migration-chain: % counting units on offer, % retired, 0 stranded products',
+    v_active, v_retired;
 end
 $$;
 
-\echo 'migration-chain: PASS — every product id, name, specification and price reference survived migration 22'
+\echo 'migration-chain: every product id, name and specification survived, and the units are the approved ones'

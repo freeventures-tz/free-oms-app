@@ -12,6 +12,12 @@
 --
 -- The snapshot lives in its own schema, not in `public`. A table in `public` without RLS is exactly
 -- what the database advisors refuse, and a test fixture must not be able to fail an unrelated check.
+--
+-- This file makes the database ONLY. It writes no price, because the harness runs it twice: once
+-- with a real price row written on top of it by 01b_write_price.sql, and once with none at all.
+-- Production currently holds zero prices, so the empty case is the one the release gate will
+-- actually meet, and a gate proved only against a non-empty table is a gate proved against the
+-- wrong database.
 
 begin;
 
@@ -87,42 +93,6 @@ begin
 end
 $$;
 
--- ---------------------------------------------------------------------------
--- A real price, written by the real command, against a product that already exists
---
--- Sand is chosen deliberately: it is one of the products migration 22 MOVES, from the
--- package-specific `bucket_20l` to the generic `bucket` plus content `20 litres`. A price row
--- attached to a product that does not move would prove much less.
--- ---------------------------------------------------------------------------
-select set_config(
-  'request.jwt.claims',
-  json_build_object('sub', 'e0000000-0000-0000-0000-000000000001', 'role', 'authenticated')::text,
-  true);
-
-create table migration_chain.price_before as
-select
-  (result -> 'price' ->> 'id')::uuid          as price_id,
-  (result -> 'price' ->> 'product_id')::uuid  as product_id,
-  (result -> 'price' ->> 'price_tzs')::bigint as price_tzs
-from (
-  select api.admin_set_product_price(
-    (select id from public.products where name = 'Sand'),
-    4500,
-    'Opening price, written before the counting-unit migration',
-    'migration-chain-price-key-1'
-  ) as result
-) as issued;
-
-do $$
-declare v_id uuid;
-begin
-  select price_id into v_id from migration_chain.price_before;
-  if v_id is null then
-    raise exception 'the price fixture did not produce a price row; the harness has nothing to prove';
-  end if;
-end
-$$;
-
 commit;
 
-\echo 'migration-chain: captured 21 products, 6 units and one real price row before migration 22'
+\echo 'migration-chain: captured 21 products and 6 units before migration 22'
