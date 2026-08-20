@@ -280,7 +280,9 @@ test.describe("adding a product", () => {
       await route.continue();
     });
 
-    const another = page.getByRole("button", { name: /add another product/i });
+    // By id, not by accessible name: a pending Button swaps its label for "Working…", so a
+    // role+name locator stops matching exactly when the pending state needs asserting.
+    const another = page.locator("#addAnother");
     const before = await another.boundingBox();
 
     // Stamp, inside the page, how long after the tap anything says the tap registered.
@@ -314,10 +316,11 @@ test.describe("adding a product", () => {
       )
       .toBeLessThan(ACKNOWLEDGEMENT_BUDGET_MS);
 
-    // Working, saying so in words, and the same size as before (§12.7 rule 4).
-    const busy = page.locator("button[data-slot='button'][aria-busy='true']");
-    await expect(busy).toContainText(/working/i);
-    const during = await busy.boundingBox();
+    // Working, saying so in words, and the same size as before (§12.7 rule 4) — asserted on the
+    // control that was pressed, so a busy control elsewhere cannot stand in for it.
+    await expect(another).toHaveAttribute("aria-busy", "true");
+    await expect(another).toContainText(/working/i);
+    const during = await another.boundingBox();
     expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
 
     // A clean form comes back — empty fields, and no leftover confirmation.
@@ -493,14 +496,24 @@ async function measureTapToPending(button: Locator, clicks = 6): Promise<number>
 
         function check() {
           if (settled) return;
-          if (!document.querySelector('button[aria-busy="true"]')) return;
+          // THIS node, not "any busy button on the page". A page-wide query would report a
+          // stranger's pending state as this button's acknowledgement, and would keep passing if
+          // the control a Director actually pressed never responded at all.
+          if (node.getAttribute("aria-busy") !== "true") return;
           settled = true;
           observer.disconnect();
           resolve(performance.now() - t0);
         }
 
         const observer = new MutationObserver(check);
-        observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+        // Watching the button itself is not enough: React re-renders the pending state as a new
+        // element in some trees, so the subtree the button lives in is the honest thing to observe.
+        observer.observe(node.parentElement ?? document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["aria-busy"],
+        });
 
         const t0 = performance.now();
         for (let i = 0; i < clickCount; i++) node.click();
@@ -511,7 +524,7 @@ async function measureTapToPending(button: Locator, clicks = 6): Promise<number>
           if (settled) return;
           settled = true;
           observer.disconnect();
-          reject(new Error("no pending state appeared within 5s of the tap"));
+          reject(new Error("the button pressed never entered a pending state within 5s of the tap"));
         }, 5000);
       }),
     clicks,
@@ -536,6 +549,38 @@ function idempotencyKeyIn(payload: string): string {
 }
 
 test.describe("counting units", () => {
+  /**
+   * The measurement itself, under test.
+   *
+   * Every timing assertion below rests on `measureTapToPending`, so it has to be measuring the
+   * right thing. A page-wide "is any button busy?" query would report a stranger's pending state as
+   * this button's acknowledgement — and would keep passing if the control a Director actually
+   * pressed never responded at all, which is the exact defect the contract exists to catch.
+   */
+  test("the measurement ignores a busy control that is not the one pressed", async ({ page }) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+
+    // A decoy that is busy from the start and never stops. Nothing about it belongs to the control
+    // measured below.
+    await page.evaluate(() => {
+      const decoy = document.createElement("button");
+      decoy.setAttribute("data-slot", "button");
+      decoy.setAttribute("aria-busy", "true");
+      decoy.textContent = "Working…";
+      document.body.append(decoy);
+    });
+
+    // Cancel closes the panel and never enters a pending state, so the only busy button on the page
+    // is the decoy. The measurement must time out rather than report the decoy's state as Cancel's.
+    const cancel = page.getByRole("button", { name: /^cancel$/i }).first();
+
+    await expect(measureTapToPending(cancel, 1)).rejects.toThrow(/never entered a pending state/i);
+  });
+
+
   test("a Director creates one and uses it without the page reloading", async ({
     page,
   }, testInfo) => {
@@ -610,7 +655,8 @@ test.describe("counting units", () => {
       await route.continue();
     });
 
-    const save = page.getByRole("button", { name: /save counting unit/i });
+    // By id — see the note on `#addAnother` above.
+    const save = page.locator("#saveUnit");
     const before = await save.boundingBox();
 
     const tapToPending = await measureTapToPending(save);
@@ -774,7 +820,8 @@ test.describe("counting units", () => {
       await route.continue();
     });
 
-    const add = page.getByRole("button", { name: /^add product$/i });
+    // By id — see the note on `#addAnother` above.
+    const add = page.locator("#addProduct");
     const before = await add.boundingBox();
 
     const tapToPending = await measureTapToPending(add);
@@ -783,10 +830,10 @@ test.describe("counting units", () => {
     );
 
     // The pending state belongs to the control that was pressed, says so in words, and does not
-    // change width under the thumb still resting on it (§12.7 rule 4).
-    const busy = page.locator("button[data-slot='button'][aria-busy='true']");
-    await expect(busy).toContainText(/working/i);
-    const during = await busy.boundingBox();
+    // change width under the thumb still resting on it (§12.7 rule 4). Asserted on `add` itself.
+    await expect(add).toHaveAttribute("aria-busy", "true");
+    await expect(add).toContainText(/working/i);
+    const during = await add.boundingBox();
     expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
 
     await expect(page.getByText(new RegExp(`${name} added`, "i"))).toBeVisible({ timeout: 20_000 });
