@@ -285,11 +285,14 @@ test.describe("adding a product", () => {
     const another = page.locator("#addAnother");
     const before = await another.boundingBox();
 
-    // Stamp, inside the page, how long after the tap anything says the tap registered.
+    // Stamp, inside the page, how long after the tap THIS control says the tap registered. Scoped
+    // to the button by id rather than asking whether anything on the page is busy: the decoy test
+    // in "counting units" exists to condemn that query, and a sibling case should not still use it.
     await page.evaluate(() => {
       const state = { t0: performance.now(), busyAt: null as number | null };
       const check = () => {
-        if (state.busyAt === null && document.querySelector('button[aria-busy="true"]')) {
+        const target = document.querySelector("#addAnother");
+        if (state.busyAt === null && target?.getAttribute("aria-busy") === "true") {
           state.busyAt = performance.now() - state.t0;
         }
       };
@@ -450,6 +453,10 @@ test.describe("the interaction contract on this screen", () => {
     });
 
     // The pending state belongs to the control that was pressed, and says so in words.
+    //
+    // This one still asks the page rather than the control, unlike the counting-unit case above.
+    // Narrowing it needs a stable id on the price button, and `product-list.tsx` is outside the
+    // files this correction round may touch — so it is reported rather than half-changed.
     await expect(page.locator("button[data-slot='button'][aria-busy='true']")).toContainText(
       /working/i,
     );
@@ -506,8 +513,9 @@ async function measureTapToPending(button: Locator, clicks = 6): Promise<number>
         }
 
         const observer = new MutationObserver(check);
-        // Watching the button itself is not enough: React re-renders the pending state as a new
-        // element in some trees, so the subtree the button lives in is the honest thing to observe.
+        // The parent subtree, so the attribute change on `node` is seen wherever React commits it.
+        // If the button were ever replaced by a different element rather than mutated, `check`
+        // would stop seeing it and this would time out — which is the safe direction to fail in.
         observer.observe(node.parentElement ?? document.body, {
           subtree: true,
           childList: true,
@@ -664,10 +672,12 @@ test.describe("counting units", () => {
       TAP_TO_PENDING_BUDGET_MS,
     );
 
-    // Working, saying so in words, and the same size as before (§12.7 rule 4).
-    const busy = page.locator("button[data-slot='button'][aria-busy='true']");
-    await expect(busy).toContainText(/working/i);
-    const during = await busy.boundingBox();
+    // Working, saying so in words, and the same size as before (§12.7 rule 4) — asserted on the
+    // control that was pressed. A page-wide "is any button busy?" query is the exact thing the
+    // decoy test above condemns, and it has no business in the case that test protects.
+    await expect(save).toHaveAttribute("aria-busy", "true");
+    await expect(save).toContainText(/working/i);
+    const during = await save.boundingBox();
     expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
 
     await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
