@@ -70,10 +70,19 @@ export function Field({ className, ...props }: React.ComponentProps<"div">) {
  * Only ever rendered from a result the server returned. Announcing a success before confirmation
  * would be the one thing design.md §12.7 rule 5 forbids outright.
  */
-export function FormSuccess({ className, children }: React.ComponentProps<"p">) {
+export function FormSuccess({ className, children, ...props }: React.ComponentProps<"p">) {
   if (!children) return null;
   return (
-    <p role="status" aria-live="polite" className={cn("text-sm text-success", className)}>
+    // The caller's props go on FIRST and the accessible semantics after, so an `id` or a `data-*`
+    // arrives as the declared type promises while `role` and `aria-live` stay the component's own.
+    // A caller reaching for `role="alert"` here would interrupt a screen-reader user to tell them
+    // something went right, which is the failure this primitive exists to prevent.
+    <p
+      {...props}
+      role="status"
+      aria-live="polite"
+      className={cn("text-sm text-success", className)}
+    >
       {children}
     </p>
   );
