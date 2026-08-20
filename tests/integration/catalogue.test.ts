@@ -57,11 +57,16 @@ describe("reading the catalogue", () => {
     }
   });
 
-  it("exposes the approved units and locations as reference data", async () => {
-    const units = await salesRep.read.from("units").select("code");
+  it("exposes the counting units and locations as reference data", async () => {
+    // What the units MEAN, and which are still on offer, is proved in counting-units.test.ts. What
+    // matters here is that a Sales Representative can read them at all: a product card that cannot
+    // name its own counting unit is unreadable to the person selling from it.
+    const units = await salesRep.read.from("units").select("code, label_en, label_sw");
     const locations = await salesRep.read.from("inventory_locations").select("code");
 
-    expect(units.data?.length).toBe(6);
+    expect(units.error).toBeNull();
+    expect((units.data ?? []).length).toBeGreaterThanOrEqual(5);
+
     expect((locations.data ?? []).map((row) => row.code).sort()).toEqual([
       "store",
       "warehouse",

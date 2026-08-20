@@ -182,30 +182,33 @@
     "title": "Products & prices",
     "description": "The products Free Ventures sells, and what each one costs.",
     "descriptionManager": "The products Free Ventures sells, and what each one costs. Only a Director can change a price.",
-    "unitLabel": "Sold by",
+    "unitLabel": "Counted by",
     "priceLabel": "Selling price",
     "noPrice": "No price set",
     "noPriceHelp": "This product cannot be sold until a Director sets its price.",
     "empty": "No products yet.",
     "productCount": "{count} products",
-    "units": {
-      "piece": "piece",
-      "piece_12ft": "12 ft piece",
-      "bag_50kg": "50 kg bag",
-      "bucket_20l": "20-litre bucket",
-      "sheet": "sheet",
-      "bar": "bar"
-    },
     "add": {
       "heading": "Add a product",
       "name": "Product name",
       "nameHelp": "For example Timber 2 × 4.",
       "specification": "Grade or specification",
       "specificationHelp": "Only if the grade is part of what it is, like BS 300. Leave empty otherwise.",
-      "unit": "Sold by",
+      "unit": "Counted by",
       "submit": "Add product",
       "added": "{name} added. It has no price yet.",
-      "another": "Add another product"
+      "another": "Add another product",
+      "unitHelp": "What the yard counts, receives and sells: a piece, a bag, a bucket.",
+      "content": "What one holds",
+      "contentHelp": "Optional. For example 50 kg, 20 litres or 12 ft. Leave empty if it does not apply.",
+      "newUnit": "Add a counting unit",
+      "newUnitHeading": "New counting unit",
+      "newUnitHelp": "Both names are needed. Everyone will read this word.",
+      "unitLabelEn": "In English",
+      "unitLabelSw": "In Swahili",
+      "unitSubmit": "Save counting unit",
+      "unitCancel": "Cancel",
+      "unitCreated": "Counting unit added and selected."
     },
     "price": {
       "set": "Set price",
@@ -225,13 +228,15 @@
       "historyFrom": "was {price}",
       "historyFirst": "first price",
       "setBy": "Set by {who}"
-    }
+    },
+    "contentLabel": "Each one holds",
+    "priceLabelPerUnit": "Price for one {unit}"
   },
   "catalogueErrors": {
     "generic": "That did not work. Try again.",
     "not_permitted": "You are not allowed to do that.",
     "product_exists": "That product is already in the catalogue.",
-    "unknown_unit": "Choose how the product is sold.",
+    "unknown_unit": "Choose how the product is counted.",
     "no_product": "That product no longer exists. Reload the page.",
     "price_unchanged": "That is already the price. Enter a different figure or cancel.",
     "price_required": "Enter a price in whole shillings.",
@@ -246,7 +251,7 @@
       "tooLong": "That grade is too long."
     },
     "unit": {
-      "required": "Choose how the product is sold."
+      "required": "Choose how the product is counted."
     },
     "price": {
       "invalid": "Enter a price in whole shillings, with no cents.",
@@ -255,6 +260,19 @@
     "reason": {
       "tooShort": "Say why the price is changing.",
       "tooLong": "That reason is too long."
+    },
+    "unit_exists": "There is already a counting unit with that name.",
+    "label_required": "Give the unit a name in both languages.",
+    "unitLabelEn": {
+      "tooShort": "Enter the unit name in English.",
+      "tooLong": "That name is too long."
+    },
+    "unitLabelSw": {
+      "tooShort": "Enter the unit name in Swahili.",
+      "tooLong": "That name is too long."
+    },
+    "unitContent": {
+      "tooLong": "That is too long. Keep it short, like 50 kg."
     }
   }
 }

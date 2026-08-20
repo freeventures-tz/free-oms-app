@@ -8,7 +8,8 @@ import { PriceHistory } from "@/app/(app)/settings/products/price-history";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FormError, Help, Input, Label } from "@/components/ui/field";
 import { Card, StatusChip } from "@/components/ui/surface";
-import type { CatalogueProduct, PriceHistoryEntry } from "@/lib/catalogue/catalogue";
+import type { CatalogueProduct, PriceHistoryEntry, Unit } from "@/lib/catalogue/catalogue";
+import { unitLabel } from "@/lib/catalogue/unit-label";
 import { formatTzs } from "@/lib/money";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
@@ -22,14 +23,19 @@ import { useGuardedAction } from "@/lib/ui/use-guarded-action";
  */
 export function ProductList({
   products,
+  units,
   history,
   canEdit,
 }: {
   products: CatalogueProduct[];
+  units: Unit[];
   history: Record<string, PriceHistoryEntry[]>;
   canEdit: boolean;
 }) {
   const t = useTranslations("catalogue");
+  // Every unit, including the retired ones. A card that could not name its own counting unit would
+  // be a worse answer than naming one nobody may choose again.
+  const unitsByCode = new Map(units.map((unit) => [unit.code, unit]));
 
   if (products.length === 0) {
     return (
@@ -46,6 +52,7 @@ export function ProductList({
         <ProductRow
           key={product.id}
           product={product}
+          unit={unitsByCode.get(product.unitCode) ?? null}
           history={history[product.id] ?? []}
           canEdit={canEdit}
         />
@@ -56,10 +63,12 @@ export function ProductList({
 
 function ProductRow({
   product,
+  unit,
   history,
   canEdit,
 }: {
   product: CatalogueProduct;
+  unit: Unit | null;
   history: PriceHistoryEntry[];
   canEdit: boolean;
 }) {
@@ -71,9 +80,13 @@ function ProductRow({
   // accessible name it gives a screen reader the context for every control inside it — "Set price"
   // on its own says nothing about which product — and it is what tells the two Nondo 12 mm rows
   // apart for anybody navigating by landmark.
-  const identity = product.specification
-    ? `${product.name} ${product.specification}`
-    : product.name;
+  const identity = [product.name, product.specification, product.unitContent]
+    .filter(Boolean)
+    .join(" ");
+
+  // The label the Director typed for this language. A unit that has somehow gone missing falls back
+  // to its code rather than to an empty line: an unreadable answer beats a silent one.
+  const unitName = unit ? unitLabel(unit, locale) : product.unitCode;
 
   return (
     <Card role="article" aria-label={identity}>
@@ -89,9 +102,18 @@ function ProductRow({
               </span>
             ) : null}
           </p>
+          {/* Two separate facts, shown separately (product.md §6, design.md §7.12a). What the yard
+              COUNTS is one line; what one of them HOLDS is another. Running them together as
+              "50 kg bag" is exactly the ambiguity this stage exists to remove — a movement of 40
+              against it reads as 40 bags or 2 000 kg depending on the reader. */}
           <p className="text-xs text-muted-foreground">
-            {t("catalogue.unitLabel")}: {t(`catalogue.units.${product.unitCode}`)}
+            {t("catalogue.unitLabel")}: {unitName}
           </p>
+          {product.unitContent ? (
+            <p className="text-xs text-muted-foreground">
+              {t("catalogue.contentLabel")}: {product.unitContent}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-col items-start gap-2 md:items-end">
@@ -100,9 +122,16 @@ function ProductRow({
             // Director approved, so the screen says so in words rather than showing "TZS 0".
             <StatusChip tone="attention">{t("catalogue.noPrice")}</StatusChip>
           ) : (
-            <p className="fv-numeric text-lg font-semibold">
-              {formatTzs(product.priceTzs, locale)}
-            </p>
+            <div className="flex flex-col items-start gap-0.5 md:items-end">
+              <p className="fv-numeric text-lg font-semibold">
+                {formatTzs(product.priceTzs, locale)}
+              </p>
+              {/* A price is the price of ONE counting unit (product.md §6.1 rule 1), and the screen
+                  says which one rather than leaving it to be assumed. */}
+              <p className="text-xs text-muted-foreground">
+                {t("catalogue.priceLabelPerUnit", { unit: unitName })}
+              </p>
+            </div>
           )}
 
           {/* Hidden from a Manager, not greyed out (design.md §4.3, §4.4). */}

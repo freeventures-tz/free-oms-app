@@ -2,10 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
-import { addProduct, setProductPrice } from "@/lib/catalogue/catalogue";
+import { addProduct, addUnit, setProductPrice, type Unit } from "@/lib/catalogue/catalogue";
 import { requireRole } from "@/lib/auth/guard";
 import { fieldErrors } from "@/lib/validation/auth";
-import { addProductSchema, setPriceSchema } from "@/lib/validation/catalogue";
+import { addProductSchema, addUnitSchema, setPriceSchema } from "@/lib/validation/catalogue";
 
 /**
  * Catalogue writes (product.md §4: Directors only, either Director independently).
@@ -26,6 +26,8 @@ const KNOWN_ERROR_KEYS = new Set([
   "reason_required",
   "name_required",
   "idempotency_key_conflict",
+  "unit_exists",
+  "label_required",
 ]);
 
 function errorKey(reason: string): string {
@@ -51,6 +53,7 @@ export async function addProductAction(
     name: formData.get("name"),
     specification: formData.get("specification") ?? "",
     unitCode: formData.get("unitCode"),
+    unitContent: formData.get("unitContent") ?? "",
     idempotencyKey: formData.get("idempotencyKey"),
   });
 
@@ -60,6 +63,7 @@ export async function addProductAction(
     name: parsed.data.name,
     specification: parsed.data.specification,
     unitCode: parsed.data.unitCode,
+    unitContent: parsed.data.unitContent,
     idempotencyKey: parsed.data.idempotencyKey,
   });
 
@@ -67,6 +71,44 @@ export async function addProductAction(
 
   revalidatePath("/settings/products");
   return { successKey: "catalogue.add.added", successName: parsed.data.name };
+}
+
+export type AddUnitActionState = CatalogueActionState & {
+  /** The unit that was created, so the form can select it without going back to the server. */
+  unit?: Unit;
+};
+
+/**
+ * Creating a counting unit (product.md §6.1 rule 5).
+ *
+ * `revalidatePath` is deliberately NOT called here. The Director is part-way through adding a
+ * product, and revalidating would re-render the form underneath them and discard the name,
+ * specification and content they have already typed. The new unit travels back in the result
+ * instead, and the next add-product submission carries it to the server by code.
+ */
+export async function addUnitAction(
+  _previous: AddUnitActionState,
+  formData: FormData,
+): Promise<AddUnitActionState> {
+  await requireRole(["director"]);
+
+  const parsed = addUnitSchema.safeParse({
+    labelEn: formData.get("labelEn"),
+    labelSw: formData.get("labelSw"),
+    idempotencyKey: formData.get("idempotencyKey"),
+  });
+
+  if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };
+
+  const result = await addUnit({
+    labelEn: parsed.data.labelEn,
+    labelSw: parsed.data.labelSw,
+    idempotencyKey: parsed.data.idempotencyKey,
+  });
+
+  if (!result.ok) return { error: errorKey(result.reason) };
+
+  return { successKey: "catalogue.add.unitCreated", unit: result.unit };
 }
 
 export async function setPriceAction(
