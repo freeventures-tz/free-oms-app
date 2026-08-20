@@ -262,7 +262,11 @@ begin
   -- hash to the same lock and wait for each other; that costs milliseconds and changes no answer.
   -- Held for the rest of the transaction and released with it, the same as the per-product lock in
   -- `api.admin_set_product_price`.
-  perform pg_advisory_xact_lock(hashtextextended(p_idempotency_key, 0));
+  --
+  -- `coalesce` because `pg_advisory_xact_lock` is strict: a null key would hash to null, take no
+  -- lock at all, and leave this comment describing something that did not happen. A null key is
+  -- refused a few lines further down by the primary key on `idempotency_keys`.
+  perform pg_advisory_xact_lock(hashtextextended(coalesce(p_idempotency_key, ''), 0));
 
   v_class := private.classify_idempotency_key(
     p_idempotency_key, 'catalogue.add_unit', v_actor, v_request);
@@ -394,19 +398,11 @@ declare
     'unit_content',  private.canonical_identity(coalesce(v_content, ''))
   );
 begin
-  -- Same key, same instant. An impatient double-tap arrives as several transactions that all begin
-  -- before any of them commits, so without this they classify the key as unclaimed TOGETHER, run
-  -- the duplicate check TOGETHER against a catalogue none of them has written to yet, and only then
-  -- race for the claim. The losers have already decided there is no duplicate — but by the time
-  -- they look again the winner has committed one, and they answer `product_exists` for the very
-  -- request that just succeeded. That is a refusal reported for a change that happened.
-  --
-  -- Serialised on the presented KEY, before the first classification, so the second transaction
-  -- reads the database the first one left behind and replays its result. Two unrelated keys may
-  -- hash to the same lock and wait for each other; that costs milliseconds and changes no answer.
-  -- Held for the rest of the transaction and released with it, the same as the per-product lock in
-  -- `api.admin_set_product_price`.
-  perform pg_advisory_xact_lock(hashtextextended(p_idempotency_key, 0));
+  -- Serialised on the presented KEY before anything reads the catalogue, for the reason set out at
+  -- length over `api.admin_add_unit` above: without it, concurrent identical requests all decide
+  -- there is no duplicate before any of them commits, and the losers then answer `product_exists`
+  -- for the request that just succeeded.
+  perform pg_advisory_xact_lock(hashtextextended(coalesce(p_idempotency_key, ''), 0));
 
   v_class := private.classify_idempotency_key(
     p_idempotency_key, 'catalogue.add_product', v_actor, v_request);

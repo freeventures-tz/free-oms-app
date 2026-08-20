@@ -6,13 +6,20 @@
  * are also the migration marking its own homework. pgTAP cannot check the claim either: it runs
  * after every migration has already applied, so there is no before-state left to compare against.
  *
+ * `supabase migration up` applies EVERYTHING after Part B, not one named file. Today that is
+ * migration 22 alone. A 23rd would be measured here too, and would fail loudly rather than quietly:
+ * one that changed a product name breaks the before/after comparison, and one that changed the
+ * units breaks the fixed counts in 02_assert_after.sql. What that needs is a fresh reading of those
+ * expectations, not a bug report.
+ *
  * This harness is the independent witness. For each fixture it walks the actual boundary:
  *
  *   1. reset the local database to migration 21 — Part B, before Part C exists;
  *   2. build the fixture: a Director, and in one of the two fixtures a REAL price row written
  *      through `api.admin_set_product_price` against a product the migration will move;
  *   3. run the release gate's own preservation query and keep the answer;
- *   4. apply migration 22 through the ordinary migration mechanism (`supabase migration up`);
+ *   4. apply everything after Part B through the ordinary migration mechanism
+ *      (`supabase migration up`), which today is migration 22 and nothing else;
  *   5. run that same query again and require the two answers to be IDENTICAL, character for
  *      character;
  *   6. assert the approved unit-and-content mapping, the active and retired unit counts, and that
@@ -202,7 +209,7 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
         }
       }
 
-      log("\n--- applying migration 22 the ordinary way ---");
+      log("\n--- applying everything after Part B the ordinary way ---");
       supabase(["migration", "up", "--local"]);
 
       log("\n--- running the same preservation query, after ---");
