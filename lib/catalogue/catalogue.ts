@@ -64,13 +64,32 @@ function toUnit(row: UnitRow | null | undefined): Unit | null {
   const code = typeof row.code === "string" && row.code.length > 0 ? row.code : null;
   const labelEn = typeof row.label_en === "string" && row.label_en.length > 0 ? row.label_en : null;
   const labelSw = typeof row.label_sw === "string" && row.label_sw.length > 0 ? row.label_sw : null;
-  const sortOrder = Number(row.sort_order);
 
-  if (code === null || labelEn === null || labelSw === null || !Number.isFinite(sortOrder)) {
+  // The TYPE is checked before the coercion, not after it. `Number(null)` is 0 — a perfectly finite
+  // number — so a row with no sort order would otherwise sort to the front of the picker.
+  const sortOrder =
+    typeof row.sort_order === "number"
+      ? row.sort_order
+      : typeof row.sort_order === "string" && row.sort_order.trim() !== ""
+        ? Number(row.sort_order)
+        : Number.NaN;
+
+  // `false` is an answer: the unit is retired. Missing, a string, or a number is NOT "retired" —
+  // it is a row nobody can vouch for, and reading it as `false` would launder a broken response
+  // into a plausible object that the picker then has to decide what to do with.
+  const isActive = typeof row.is_active === "boolean" ? row.is_active : null;
+
+  if (
+    code === null ||
+    labelEn === null ||
+    labelSw === null ||
+    isActive === null ||
+    !Number.isFinite(sortOrder)
+  ) {
     return null;
   }
 
-  return { code, sortOrder, labelEn, labelSw, isActive: row.is_active === true };
+  return { code, sortOrder, labelEn, labelSw, isActive };
 }
 
 export type CatalogueProduct = {

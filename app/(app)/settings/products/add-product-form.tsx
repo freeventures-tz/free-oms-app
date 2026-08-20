@@ -193,8 +193,12 @@ function AddProductFields({
     const byCode = new Map<string, Unit>();
     // Only ACTIVE units are offered. The retired package-specific rows still exist so old products
     // can name their unit, and must never be chosen again (product.md §6).
-    for (const unit of units) if (unit.isActive) byCode.set(unit.code, unit);
-    for (const unit of createdUnits) byCode.set(unit.code, unit);
+    // BOTH sources are filtered. A unit created during this interaction went through the same
+    // command and the same mapper as a loaded one, and gets the same question asked of it: a
+    // freshly created row that comes back inactive is not a shortcut past the filter.
+    for (const unit of [...units, ...createdUnits]) {
+      if (unit.isActive) byCode.set(unit.code, unit);
+    }
     return [...byCode.values()].sort(
       (a, b) => a.sortOrder - b.sortOrder || a.labelEn.localeCompare(b.labelEn),
     );
@@ -228,6 +232,7 @@ function AddProductFields({
         ) : null}
 
         <Button
+          id="addAnother"
           type="button"
           variant="secondary"
           size="small"
@@ -309,6 +314,9 @@ function AddProductFields({
           <NewUnitPanel
             disabled={pending}
             onCreated={(unit) => {
+              // Selecting a unit the picker will not offer would leave the form pointing at an
+              // option that is not there. Nothing that cannot be chosen gets chosen.
+              if (!unit.isActive) return;
               setCreatedUnits((existing) => [...existing, unit]);
               setUnitCode(unit.code);
             }}
@@ -331,7 +339,7 @@ function AddProductFields({
           </FieldError>
         </Field>
 
-        <Button type="submit" pending={pending} pendingLabel={t("common.loading")}>
+        <Button id="addProduct" type="submit" pending={pending} pendingLabel={t("common.loading")}>
           {t("catalogue.add.submit")}
         </Button>
       </form>
@@ -477,6 +485,7 @@ function NewUnitPanel({
 
       <div className="flex flex-col gap-3 md:flex-row">
         <Button
+          id="saveUnit"
           type="button"
           size="small"
           pending={pending}
