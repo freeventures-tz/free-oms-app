@@ -44,6 +44,11 @@ jobs:
         run: supabase start
       - name: Migrations apply from a clean database
         run: supabase db reset
+      - name: Migration chain preserves a real Part B database
+        # Independent of migration 22's own snapshot checks: resets to migration 21, writes a real
+        # price row through the real command, applies 22 the ordinary way, and proves every product
+        # id, name, specification and price reference survived. Restores the full database after.
+        run: npm run test:migration-chain
       - name: pgTAP
         run: supabase test db
       - name: Database lint

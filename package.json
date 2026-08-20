@@ -15,6 +15,7 @@
     "db:reset": "supabase db reset",
     "db:lint": "supabase db lint --level warning",
     "test:db": "supabase test db",
+    "test:migration-chain": "node scripts/migration-chain-check.mjs",
     "bootstrap:director": "tsx scripts/bootstrap-director.ts",
     "verify": "npm run lint && npm run typecheck && npm run test:unit && npm run build",
     "db:advisors": "supabase db lint --level warning && node scripts/run-advisors.mjs"
