@@ -37,6 +37,42 @@ export type Unit = {
   isActive: boolean;
 };
 
+/**
+ * The one place a database row becomes a `Unit`.
+ *
+ * Two callers need it and they receive the row differently: `loadCatalogue` gets it from PostgREST,
+ * and `addUnit` gets it as the `unit` object inside the command's jsonb result, where a bigint-ish
+ * column can arrive as a string. `Number()` is therefore deliberate rather than a cast — a cast
+ * would type-check happily and hand the picker a `sortOrder` of `"30"` to sort by.
+ *
+ * Returns `null` rather than a half-built unit. A row missing a label would otherwise render as a
+ * blank option in the counting-unit picker, which is worse than not being offered at all, and
+ * `is_active` defaults CLOSED: anything that does not positively say it is active is treated as
+ * retired and never offered for a new product.
+ */
+type UnitRow = {
+  code?: unknown;
+  sort_order?: unknown;
+  label_en?: unknown;
+  label_sw?: unknown;
+  is_active?: unknown;
+};
+
+function toUnit(row: UnitRow | null | undefined): Unit | null {
+  if (!row) return null;
+
+  const code = typeof row.code === "string" && row.code.length > 0 ? row.code : null;
+  const labelEn = typeof row.label_en === "string" && row.label_en.length > 0 ? row.label_en : null;
+  const labelSw = typeof row.label_sw === "string" && row.label_sw.length > 0 ? row.label_sw : null;
+  const sortOrder = Number(row.sort_order);
+
+  if (code === null || labelEn === null || labelSw === null || !Number.isFinite(sortOrder)) {
+    return null;
+  }
+
+  return { code, sortOrder, labelEn, labelSw, isActive: row.is_active === true };
+}
+
 export type CatalogueProduct = {
   id: string;
   name: string;
@@ -149,13 +185,9 @@ export async function loadCatalogue(): Promise<Catalogue> {
 
   return {
     history: historyByProduct,
-    units: units.map((row) => ({
-      code: row.code as string,
-      sortOrder: row.sort_order as number,
-      labelEn: row.label_en as string,
-      labelSw: row.label_sw as string,
-      isActive: row.is_active as boolean,
-    })),
+    // A row that cannot produce a whole unit is dropped rather than half-built. The product card
+    // then names its counting unit by code, which is an unhelpful answer but never a wrong one.
+    units: units.map(toUnit).filter((unit): unit is Unit => unit !== null),
     products: products.map((row) => {
       const current = priceByProduct.get(row.id as string);
       return {
@@ -249,20 +281,12 @@ export async function addUnit(
   if (error) return { ok: false, reason: mapDatabaseError(error.message) };
   if (!data?.ok) return { ok: false, reason: reasonOf(data, "generic") };
 
-  const row = data.unit as Record<string, unknown> | undefined;
-  if (!row?.code) return { ok: false, reason: "generic" };
+  // Same mapper as the catalogue read, so the unit the form selects and the unit the next page
+  // load shows cannot be built two different ways.
+  const unit = toUnit(data.unit as UnitRow | undefined);
+  if (!unit) return { ok: false, reason: "generic" };
 
-  return {
-    ok: true,
-    detail: reasonOf(data, "added"),
-    unit: {
-      code: row.code as string,
-      sortOrder: Number(row.sort_order),
-      labelEn: row.label_en as string,
-      labelSw: row.label_sw as string,
-      isActive: row.is_active as boolean,
-    },
-  };
+  return { ok: true, detail: reasonOf(data, "added"), unit };
 }
 
 export async function setProductPrice(

@@ -11,7 +11,16 @@ import {
   type CatalogueActionState,
 } from "@/app/(app)/settings/products/actions";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FormError, Help, Input, Label, Select } from "@/components/ui/field";
+import {
+  Field,
+  FieldError,
+  FormError,
+  FormSuccess,
+  Help,
+  Input,
+  Label,
+  Select,
+} from "@/components/ui/field";
 import { Card } from "@/components/ui/surface";
 import type { Unit } from "@/lib/catalogue/catalogue";
 import { unitLabel } from "@/lib/catalogue/unit-label";
@@ -352,11 +361,14 @@ function NewUnitPanel({
   const [labelSw, setLabelSw] = useState("");
 
   /**
-   * One key per unit, minted in an initialiser so the server and the client never disagree about
-   * it, and rotated only once a unit has actually been created. A retry after a failure therefore
-   * addresses the same unit rather than asking for a second one.
+   * One idempotency key per unit, minted in an initialiser so the server and the client never
+   * disagree about it, and rotated only once a unit has actually been created. A retry after a
+   * failure therefore addresses the same unit rather than asking for a second one.
+   *
+   * Named for what it is: `key` reads like React's list key three lines from a `map`, and this is
+   * the value that decides whether a second request creates a second unit.
    */
-  const [key, setKey] = useState(() => crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   const action = useGuardedAction<"createUnit", AddUnitActionState>({
     failureKey: "catalogueErrors.generic",
@@ -366,7 +378,9 @@ function NewUnitPanel({
       setOpen(false);
       setLabelEn("");
       setLabelSw("");
-      setKey(crypto.randomUUID());
+      // Rotated only here, after the server confirmed a unit exists. Rotating on failure would let
+      // a retry create a second one.
+      setIdempotencyKey(crypto.randomUUID());
     },
   });
   const { pending, result } = action;
@@ -375,17 +389,19 @@ function NewUnitPanel({
     const data = new FormData();
     data.set("labelEn", labelEn);
     data.set("labelSw", labelSw);
-    data.set("idempotencyKey", key);
+    data.set("idempotencyKey", idempotencyKey);
     action.run("createUnit", addUnitAction, data);
   }
 
   if (!open) {
     return (
       <div className="flex flex-col gap-2">
-        {/* Confirmation of the last unit created, shown beside the select it was added to. */}
-        {result.successKey ? (
-          <p className="text-xs text-success">{t(result.successKey)}</p>
-        ) : null}
+        {/* Confirmation of the last unit created, shown beside the select it was added to, and
+            announced politely so a screen-reader user learns the unit exists and is selected. It
+            is rendered only from a result the SERVER returned (§12.7 rule 5). */}
+        <FormSuccess className="text-xs">
+          {result.successKey ? t(result.successKey) : null}
+        </FormSuccess>
         <div>
           <Button
             type="button"
