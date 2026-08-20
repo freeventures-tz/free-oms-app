@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
 
@@ -17,7 +17,21 @@ import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
  */
 
 const SERVER_DELAY_MS = 3000;
+/**
+ * The budget for the two older checks below, which start their timer in one Playwright call and act
+ * in a later one. That gap is automation round-trip time, not interface time, so the number has to
+ * absorb it. Those tests are Part A and Part B work and are left as they are.
+ */
 const ACKNOWLEDGEMENT_BUDGET_MS = 500;
+
+/**
+ * design.md §12.7 rule 1 as actually written: ~100 ms, and BROWSER time.
+ *
+ * `measureTapToPending` instruments, clocks and clicks inside a single in-page evaluation, so
+ * nothing but the interface is being measured and the threshold can be the contract itself rather
+ * than the contract plus however long the automation took to get there.
+ */
+const TAP_TO_PENDING_BUDGET_MS = 100;
 const PRODUCTS_HREF = "/settings/products";
 
 async function signInAs(page: Page, who: "director" | "manager") {
@@ -457,6 +471,70 @@ test.describe("the interaction contract on this screen", () => {
  *
  * The three device projects share one database, so every label here carries its tier.
  */
+
+/**
+ * Tap-to-visible-pending, measured inside the page, in ONE evaluation.
+ *
+ * The instrumentation, the clock and the click burst all happen in the same in-page call on
+ * purpose. Starting the timer in one Playwright call and clicking in a later one measures the
+ * automation round trip as well as the interface, and the only way to keep such a test green is to
+ * loosen the threshold until it stops meaning anything. The contract is ~100 ms of BROWSER time
+ * (design.md §12.7 rule 1), so browser time is what this returns.
+ *
+ * The burst is dispatched natively in a single tick, bypassing every actionability check Playwright
+ * would otherwise apply — which is the point: a real thumb does not wait to be told the control is
+ * ready.
+ */
+async function measureTapToPending(button: Locator, clicks = 6): Promise<number> {
+  return button.evaluate(
+    (node: HTMLButtonElement, clickCount) =>
+      new Promise<number>((resolve, reject) => {
+        let settled = false;
+
+        function check() {
+          if (settled) return;
+          if (!document.querySelector('button[aria-busy="true"]')) return;
+          settled = true;
+          observer.disconnect();
+          resolve(performance.now() - t0);
+        }
+
+        const observer = new MutationObserver(check);
+        observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+
+        const t0 = performance.now();
+        for (let i = 0; i < clickCount; i++) node.click();
+        // In case the pending state committed synchronously and the observer has nothing to report.
+        check();
+
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          reject(new Error("no pending state appeared within 5s of the tap"));
+        }, 5000);
+      }),
+    clicks,
+  );
+}
+
+/** Every server-action request the page makes, in order, with the body it sent. */
+function recordServerActions(page: Page): string[] {
+  const payloads: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.headers()["next-action"]) {
+      payloads.push(request.postData() ?? "");
+    }
+  });
+  return payloads;
+}
+
+/** The idempotency key inside a server-action payload, which is the value that decides replay. */
+function idempotencyKeyIn(payload: string): string {
+  const match = payload.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return match ? match[0] : "";
+}
+
 test.describe("counting units", () => {
   test("a Director creates one and uses it without the page reloading", async ({
     page,
@@ -484,9 +562,10 @@ test.describe("counting units", () => {
     await page.locator("#unitLabelSw").fill(`ngoma ${tier}`);
     await page.getByRole("button", { name: /save counting unit/i }).click();
 
-    await expect(page.getByText(/counting unit added and selected/i)).toBeVisible({
-      timeout: 15_000,
-    });
+    // Announced politely, so a screen-reader user learns the unit exists and is selected.
+    const confirmation = page.getByRole("status").filter({ hasText: /counting unit added/i });
+    await expect(confirmation).toBeVisible({ timeout: 15_000 });
+    await expect(confirmation).toHaveAttribute("aria-live", "polite");
 
     expect(
       await page.evaluate(
@@ -517,58 +596,27 @@ test.describe("counting units", () => {
 
     const tier = testInfo.project.name;
     const unitEn = `crate ${tier}`;
-
-    const serverActions: string[] = [];
-    page.on("request", (request) => {
-      if (request.method() === "POST" && request.headers()["next-action"]) {
-        serverActions.push(request.url());
-      }
-    });
+    const serverActions = recordServerActions(page);
 
     await page.getByRole("button", { name: /add a counting unit/i }).click();
     await page.locator("#unitLabelEn").fill(unitEn);
     await page.locator("#unitLabelSw").fill(`kasha ${tier}`);
 
-    // Slowed so the burst genuinely overlaps a request in flight.
+    // Slowed so the burst genuinely overlaps a request in flight, and so the acknowledgement below
+    // cannot have been waiting on the server.
     await page.route(/\/settings\/products/, async (route, request) => {
       if (request.method() !== "POST") return route.continue();
       await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
       await route.continue();
     });
 
-    // Stamp, inside the page, how long after the tap anything says the tap registered.
-    await page.evaluate(() => {
-      const state = { t0: performance.now(), busyAt: null as number | null };
-      const check = () => {
-        if (state.busyAt === null && document.querySelector('button[aria-busy="true"]')) {
-          state.busyAt = performance.now() - state.t0;
-        }
-      };
-      new MutationObserver(check).observe(document.body, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-      });
-      (window as unknown as { __fvBusy: typeof state }).__fvBusy = state;
-    });
-
     const save = page.getByRole("button", { name: /save counting unit/i });
     const before = await save.boundingBox();
 
-    // Dispatched natively in one tick, bypassing every actionability check Playwright applies.
-    await save.evaluate((node: HTMLButtonElement) => {
-      for (let i = 0; i < 6; i++) node.click();
-    });
-
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(
-            () => (window as unknown as { __fvBusy: { busyAt: number | null } }).__fvBusy.busyAt,
-          ),
-        { timeout: 5000 },
-      )
-      .toBeLessThan(ACKNOWLEDGEMENT_BUDGET_MS);
+    const tapToPending = await measureTapToPending(save);
+    expect(tapToPending, "the tap was not acknowledged inside the contract").toBeLessThanOrEqual(
+      TAP_TO_PENDING_BUDGET_MS,
+    );
 
     // Working, saying so in words, and the same size as before (§12.7 rule 4).
     const busy = page.locator("button[data-slot='button'][aria-busy='true']");
@@ -576,7 +624,7 @@ test.describe("counting units", () => {
     const during = await busy.boundingBox();
     expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
 
-    await expect(page.getByText(/counting unit added and selected/i)).toBeVisible({
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
       timeout: 20_000,
     });
     expect(serverActions, "more than one request reached the server").toHaveLength(1);
@@ -589,9 +637,7 @@ test.describe("counting units", () => {
     ).toBe(1);
   });
 
-  test("a refused counting unit keeps everything typed, and retries the same command", async ({
-    page,
-  }, testInfo) => {
+  test("a business refusal keeps every entered value", async ({ page }, testInfo) => {
     await signInAs(page, "director");
     await page.goto(PRODUCTS_HREF);
 
@@ -615,7 +661,146 @@ test.describe("counting units", () => {
     await expect(page.locator("#unitLabelEn")).toHaveValue("  PIECE  ");
     await expect(page.locator("#unitLabelSw")).toHaveValue(`kitu ${tier}`);
     await expect(page.getByLabel(/product name/i)).toHaveValue(name);
-    await expect(page.getByText(/counting unit added and selected/i)).toHaveCount(0);
+    await expect(page.getByText(/counting unit added/i)).toHaveCount(0);
+  });
+
+  /**
+   * A request that never reaches a verdict, and the retry that resumes it.
+   *
+   * Distinct from the business refusal above, and the harder half: a refusal is the server
+   * answering, while this is the server never answering at all. The guarantee under test is that
+   * the retry carries the SAME idempotency key, so a request that did reach the database is
+   * resumed rather than duplicated into a second counting unit.
+   */
+  test("a failed unit request keeps every field and retries the identical command", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Retry ${tier}`;
+    const specification = `Grade R${tier.slice(0, 1).toUpperCase()}`;
+    const unitEn = `pallet ${tier}`;
+    const unitSw = `paleti ${tier}`;
+
+    const serverActions = recordServerActions(page);
+
+    // All four surrounding product values, entered before the unit is even attempted.
+    await page.getByLabel(/product name/i).fill(name);
+    await page.getByLabel(/grade or specification/i).fill(specification);
+    await page.selectOption("#productUnit", "bar");
+    await page.getByLabel(/what one holds/i).fill("8 ft");
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(unitSw);
+
+    // The first server action never reaches a verdict. Not a refusal — a dropped request.
+    let failedOnce = false;
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      if (!failedOnce) {
+        failedOnce = true;
+        return route.abort("failed");
+      }
+      return route.continue();
+    });
+
+    await page.getByRole("button", { name: /save counting unit/i }).click();
+
+    // Reported, not swallowed, and no success claimed for a request that never landed.
+    await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/counting unit added/i)).toHaveCount(0);
+
+    // All six entered values survive, including the counting unit already selected.
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.getByLabel(/grade or specification/i)).toHaveValue(specification);
+    await expect(page.locator("#productUnit")).toHaveValue("bar");
+    await expect(page.getByLabel(/what one holds/i)).toHaveValue("8 ft");
+    await expect(page.locator("#unitLabelEn")).toHaveValue(unitEn);
+    await expect(page.locator("#unitLabelSw")).toHaveValue(unitSw);
+
+    const retry = page.getByRole("button", { name: /try again/i });
+    await expect(retry).toBeVisible();
+    await retry.click();
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The retry addressed the SAME command: same labels, and the same idempotency key, which is
+    // what stops a resumed request becoming a second unit.
+    expect(serverActions.length, "the retry did not reach the server").toBe(2);
+    const [first, second] = serverActions;
+    expect(idempotencyKeyIn(second), "the retry minted a new idempotency key").toBe(
+      idempotencyKeyIn(first),
+    );
+    expect(idempotencyKeyIn(first)).not.toBe("");
+    for (const payload of serverActions) {
+      expect(payload).toContain(unitEn);
+      expect(payload).toContain(unitSw);
+    }
+
+    // One unit, selected, with the product still intact around it.
+    await page.unroute(/\/settings\/products/);
+    expect(
+      await page.locator("#productUnit option", { hasText: unitEn }).count(),
+      "the retry created a second counting unit",
+    ).toBe(1);
+    await expect(page.locator("#productUnit")).toHaveValue(`pallet_${tier}`);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.getByLabel(/grade or specification/i)).toHaveValue(specification);
+    await expect(page.getByLabel(/what one holds/i)).toHaveValue("8 ft");
+  });
+
+  test("adding a product repeatedly adds exactly one", async ({ page }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Once ${tier}`;
+    const serverActions = recordServerActions(page);
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.selectOption("#productUnit", "bag");
+    await page.getByLabel(/what one holds/i).fill("40 kg");
+
+    // Slowed so the burst overlaps a request in flight. Without this the first click could finish
+    // before the second is dispatched, and the test would prove nothing about repeat activation.
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+      await route.continue();
+    });
+
+    const add = page.getByRole("button", { name: /^add product$/i });
+    const before = await add.boundingBox();
+
+    const tapToPending = await measureTapToPending(add);
+    expect(tapToPending, "the tap was not acknowledged inside the contract").toBeLessThanOrEqual(
+      TAP_TO_PENDING_BUDGET_MS,
+    );
+
+    // The pending state belongs to the control that was pressed, says so in words, and does not
+    // change width under the thumb still resting on it (§12.7 rule 4).
+    const busy = page.locator("button[data-slot='button'][aria-busy='true']");
+    await expect(busy).toContainText(/working/i);
+    const during = await busy.boundingBox();
+    expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
+
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toBeVisible({ timeout: 20_000 });
+    expect(serverActions, "more than one request reached the server").toHaveLength(1);
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toHaveCount(1);
+
+    // One product in the catalogue, however many times the button was pressed, and the card states
+    // the two measurement facts separately.
+    await page.unroute(/\/settings\/products/);
+    await page.goto(PRODUCTS_HREF);
+    const card = productCard(page, `${name} 40 kg`);
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText(/counted by:\s*bag/i);
+    await expect(card).toContainText(/each one holds:\s*40 kg/i);
   });
 
   test("a Director adds the same product in two sizes", async ({ page }, testInfo) => {
