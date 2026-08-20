@@ -250,6 +250,20 @@ declare
     'label_sw', private.canonical_identity(v_label_sw)
   );
 begin
+  -- Same key, same instant. An impatient double-tap arrives as several transactions that all begin
+  -- before any of them commits, so without this they classify the key as unclaimed TOGETHER, run
+  -- the duplicate check TOGETHER against a catalogue none of them has written to yet, and only then
+  -- race for the claim. The losers have already decided there is no duplicate — but by the time
+  -- they look again the winner has committed one, and they answer `unit_exists` for the very
+  -- request that just succeeded. That is a refusal reported for a change that happened.
+  --
+  -- Serialised on the presented KEY, before the first classification, so the second transaction
+  -- reads the database the first one left behind and replays its result. Two unrelated keys may
+  -- hash to the same lock and wait for each other; that costs milliseconds and changes no answer.
+  -- Held for the rest of the transaction and released with it, the same as the per-product lock in
+  -- `api.admin_set_product_price`.
+  perform pg_advisory_xact_lock(hashtextextended(p_idempotency_key, 0));
+
   v_class := private.classify_idempotency_key(
     p_idempotency_key, 'catalogue.add_unit', v_actor, v_request);
 
@@ -380,6 +394,20 @@ declare
     'unit_content',  private.canonical_identity(coalesce(v_content, ''))
   );
 begin
+  -- Same key, same instant. An impatient double-tap arrives as several transactions that all begin
+  -- before any of them commits, so without this they classify the key as unclaimed TOGETHER, run
+  -- the duplicate check TOGETHER against a catalogue none of them has written to yet, and only then
+  -- race for the claim. The losers have already decided there is no duplicate — but by the time
+  -- they look again the winner has committed one, and they answer `product_exists` for the very
+  -- request that just succeeded. That is a refusal reported for a change that happened.
+  --
+  -- Serialised on the presented KEY, before the first classification, so the second transaction
+  -- reads the database the first one left behind and replays its result. Two unrelated keys may
+  -- hash to the same lock and wait for each other; that costs milliseconds and changes no answer.
+  -- Held for the rest of the transaction and released with it, the same as the per-product lock in
+  -- `api.admin_set_product_price`.
+  perform pg_advisory_xact_lock(hashtextextended(p_idempotency_key, 0));
+
   v_class := private.classify_idempotency_key(
     p_idempotency_key, 'catalogue.add_product', v_actor, v_request);
 

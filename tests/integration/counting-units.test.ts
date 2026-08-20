@@ -6,6 +6,7 @@ import {
   callApiRpc,
   createLiveStaff,
   ensureDirector,
+  summariseBurst,
   type Fixture,
 } from "@/tests/integration/helpers";
 
@@ -213,10 +214,26 @@ describe("creating a counting unit", () => {
     const results = await Promise.all(
       Array.from({ length: 6 }, () => director.api.rpc("admin_add_unit", request)),
     );
-    for (const result of results) expect(result.data?.ok, JSON.stringify(result.data)).toBe(true);
+
+    // Not "they all said ok". Exactly one of them DID the work and the other five were handed that
+    // same work back. A caller told `unit_exists` because a sibling won the race is a refusal for a
+    // request that succeeded, and a caller handed a different row is a success for a unit nobody
+    // asked for; the counts below separate all three outcomes.
+    const burst = summariseBurst(results, "unit");
+    expect(burst, JSON.stringify(burst)).toMatchObject({ ok: 6, added: 1, replayed: 5 });
+    expect(burst.ids, "the six callers were not handed one shared unit").toHaveLength(1);
 
     const { data: rows } = await director.read.from("units").select("code").eq("label_en", labelEn);
     expect(rows?.length, "a repeated request created more than one unit").toBe(1);
+
+    // One operation means one entry in the permanent record, too. Six would read as six decisions.
+    const { data: events } = await director.read
+      .from("audit_events")
+      .select("action")
+      .eq("entity_id", burst.ids[0]);
+    expect(events, "a repeated request wrote more than one audit event").toEqual([
+      { action: "unit_added" },
+    ]);
 
     // The same key for different labels is a conflict, and changes nothing.
     const reused = await director.api.rpc("admin_add_unit", {
@@ -236,6 +253,46 @@ describe("creating a counting unit", () => {
     const other = await secondDirector.api.rpc("admin_add_unit", request);
     expect(other.data?.reason).toBe("idempotency_key_conflict");
   });
+
+  it("replays the one committed unit in every one of twenty concurrent bursts", async () => {
+    // One burst passing is a coin landing heads. The race this proves absent is a window of a few
+    // milliseconds between classifying an unclaimed key and claiming it, so it needs enough
+    // independent attempts that a surviving window shows up rather than hides.
+    //
+    // Twenty bursts, each with its own labels and its own key, so no burst can be rescued by
+    // another burst's row. Sequential bursts of six rather than 120 requests at once: the point is
+    // to collide on ONE key, and 120 open connections would only prove the pool has a limit.
+    for (let batch = 0; batch < 20; batch++) {
+      const labelEn = `pallet ${randomUUID().slice(0, 8)}`;
+      const request = {
+        p_label_en: labelEn,
+        p_label_sw: `${labelEn} sw`,
+        p_idempotency_key: randomUUID(),
+      };
+
+      const burst = summariseBurst(
+        await Promise.all(
+          Array.from({ length: 6 }, () => director.api.rpc("admin_add_unit", request)),
+        ),
+        "unit",
+      );
+
+      // Reported with the batch number and the reasons, because "expected 1, got 0" on batch 14 of
+      // 20 is a fact somebody has to be able to act on.
+      expect(burst, `batch ${batch}: ${burst.reasons.join(", ")}`).toMatchObject({
+        ok: 6,
+        added: 1,
+        replayed: 5,
+      });
+      expect(burst.ids, `batch ${batch} handed out more than one unit`).toHaveLength(1);
+
+      const { data: rows } = await director.read
+        .from("units")
+        .select("id")
+        .eq("label_en", labelEn);
+      expect(rows?.length, `batch ${batch} created more than one unit row`).toBe(1);
+    }
+  }, 120_000);
 });
 
 describe("what one counting unit contains", () => {

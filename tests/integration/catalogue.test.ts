@@ -6,6 +6,7 @@ import {
   callApiRpc,
   createLiveStaff,
   ensureDirector,
+  summariseBurst,
   type Fixture,
 } from "@/tests/integration/helpers";
 
@@ -88,6 +89,74 @@ describe("writing the catalogue", () => {
     // The one that matters: a new product is priceless until a Director decides otherwise.
     expect(prices).toEqual([]);
   });
+
+  it("performs one operation however many times the same request arrives", async () => {
+    const name = `Idempotent Product ${randomUUID().slice(0, 8)}`;
+    const key = randomUUID();
+    const request = {
+      p_name: name,
+      p_specification: null,
+      p_unit_code: "piece",
+      p_idempotency_key: key,
+    };
+
+    // Six identical requests at once: the impatient double-tap, arriving over the wire.
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => director.api.rpc("admin_add_product", request)),
+    );
+
+    // Exactly one of them added the product and the other five were handed that same product back.
+    // A caller told `product_exists` because a sibling won the race has been refused for a request
+    // that succeeded, which is the interface telling a Director their product is not there when it
+    // is.
+    const burst = summariseBurst(results, "product");
+    expect(burst, JSON.stringify(burst)).toMatchObject({ ok: 6, added: 1, replayed: 5 });
+    expect(burst.ids, "the six callers were not handed one shared product").toHaveLength(1);
+
+    const { data: rows } = await director.read.from("products").select("id").eq("name", name);
+    expect(rows?.length, "a repeated request created more than one product").toBe(1);
+
+    const { data: events } = await director.read
+      .from("audit_events")
+      .select("action")
+      .eq("entity_id", burst.ids[0]);
+    expect(events, "a repeated request wrote more than one audit event").toEqual([
+      { action: "product_added" },
+    ]);
+  });
+
+  it("replays the one committed product in every one of twenty concurrent bursts", async () => {
+    // The same proof as the counting-unit burst above, for the same reason: the window between
+    // classifying an unclaimed key and claiming it is a few milliseconds wide, and one passing
+    // burst does not show it is closed. Twenty independent bursts, each with its own name and its
+    // own key, run sequentially so the collision is on ONE key rather than on the connection pool.
+    for (let batch = 0; batch < 20; batch++) {
+      const name = `Burst Product ${randomUUID().slice(0, 8)}`;
+      const request = {
+        p_name: name,
+        p_specification: null,
+        p_unit_code: "piece",
+        p_idempotency_key: randomUUID(),
+      };
+
+      const burst = summariseBurst(
+        await Promise.all(
+          Array.from({ length: 6 }, () => director.api.rpc("admin_add_product", request)),
+        ),
+        "product",
+      );
+
+      expect(burst, `batch ${batch}: ${burst.reasons.join(", ")}`).toMatchObject({
+        ok: 6,
+        added: 1,
+        replayed: 5,
+      });
+      expect(burst.ids, `batch ${batch} handed out more than one product`).toHaveLength(1);
+
+      const { data: rows } = await director.read.from("products").select("id").eq("name", name);
+      expect(rows?.length, `batch ${batch} created more than one product row`).toBe(1);
+    }
+  }, 120_000);
 
   it("refuses a Manager and a Sales Representative, at the database", async () => {
     const productId = await freshProduct(`Refusal Product ${randomUUID().slice(0, 8)}`);
