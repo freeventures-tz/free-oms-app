@@ -19,11 +19,13 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/dashboard", labelKey: "nav.dashboard" },
     { href: "/orders", labelKey: "nav.orders" },
     { href: "/payments", labelKey: "nav.payments" },
+    { href: "/settings/products", labelKey: "nav.products" },
   ],
   director: [
     { href: "/dashboard", labelKey: "nav.dashboard" },
     { href: "/orders", labelKey: "nav.orders" },
     { href: "/payments", labelKey: "nav.payments" },
+    { href: "/settings/products", labelKey: "nav.products" },
     { href: "/admin/accounts", labelKey: "nav.accounts" },
   ],
 };

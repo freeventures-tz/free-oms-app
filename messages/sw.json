@@ -12,7 +12,8 @@
     "english": "Kiingereza",
     "swahili": "Kiswahili",
     "menu": "Menyu",
-    "signedInAs": "Umeingia kama {name}"
+    "signedInAs": "Umeingia kama {name}",
+    "actionFailed": "Haikufanikiwa. Jaribu tena."
   },
   "auth": {
     "signIn": {
@@ -87,7 +88,8 @@
     "orders": "Oda",
     "payments": "Malipo na utoaji",
     "dashboard": "Dashibodi",
-    "accounts": "Akaunti za watumiaji"
+    "accounts": "Akaunti za watumiaji",
+    "products": "Bidhaa na bei"
   },
   "unavailable": {
     "title": "Ukurasa huu haukuweza kupakiwa",
@@ -174,6 +176,85 @@
       "change_already_in_flight": "Kuna mabadiliko yanayosubiri kwenye akaunti hii. Yamalize au pakia upya kwanza.",
       "reset_unconfirmed": "Nenosiri limebadilishwa lakini hatukuweza kuthibitisha. Fungua akaunti uangalie kabla ya kumpa mtu chochote.",
       "phone_change_unconfirmed": "Namba ya simu imebadilishwa lakini hatukuweza kuthibitisha. Fungua akaunti tena ili ikamilike."
+    }
+  },
+  "catalogue": {
+    "title": "Bidhaa na bei",
+    "description": "Bidhaa ambazo Free Ventures inauza, na bei ya kila moja.",
+    "descriptionManager": "Bidhaa ambazo Free Ventures inauza, na bei ya kila moja. Ni Mkurugenzi pekee anayeweza kubadilisha bei.",
+    "unitLabel": "Inauzwa kwa",
+    "priceLabel": "Bei ya kuuza",
+    "noPrice": "Bei haijawekwa",
+    "noPriceHelp": "Bidhaa hii haiwezi kuuzwa mpaka Mkurugenzi aweke bei yake.",
+    "empty": "Bado hakuna bidhaa.",
+    "productCount": "Bidhaa {count}",
+    "units": {
+      "piece": "kipande",
+      "piece_12ft": "kipande cha futi 12",
+      "bag_50kg": "mfuko wa kilo 50",
+      "bucket_20l": "ndoo ya lita 20",
+      "sheet": "bati",
+      "bar": "fito"
+    },
+    "add": {
+      "heading": "Ongeza bidhaa",
+      "name": "Jina la bidhaa",
+      "nameHelp": "Kwa mfano Timber 2 × 4.",
+      "specification": "Daraja au maelezo",
+      "specificationHelp": "Weka tu kama daraja ni sehemu ya utambulisho, kama BS 300. Acha wazi kama halipo.",
+      "unit": "Inauzwa kwa",
+      "submit": "Ongeza bidhaa",
+      "added": "{name} imeongezwa. Bado haina bei.",
+      "another": "Ongeza bidhaa nyingine"
+    },
+    "price": {
+      "set": "Weka bei",
+      "change": "Badilisha bei",
+      "heading": "Bei ya kuuza",
+      "amount": "Bei kwa TZS",
+      "amountHelp": "Shilingi nzima tu, bila senti.",
+      "reason": "Kwa nini inabadilika?",
+      "reasonHelp": "Inahifadhiwa kudumu pamoja na bei.",
+      "submit": "Hifadhi bei",
+      "cancel": "Ghairi",
+      "saved": "Bei imehifadhiwa.",
+      "history": "Historia ya bei",
+      "historyEmpty": "Bado hakuna bei iliyowekwa.",
+      "historyShow": "Historia ya bei",
+      "historyEntry": "{price}, imewekwa na {who}",
+      "historyFrom": "ilikuwa {price}",
+      "historyFirst": "bei ya kwanza",
+      "setBy": "Imewekwa na {who}"
+    }
+  },
+  "catalogueErrors": {
+    "generic": "Haikufanikiwa. Jaribu tena.",
+    "not_permitted": "Huruhusiwi kufanya hivyo.",
+    "product_exists": "Bidhaa hiyo tayari ipo kwenye orodha.",
+    "unknown_unit": "Chagua jinsi bidhaa inavyouzwa.",
+    "no_product": "Bidhaa hiyo haipo tena. Pakia ukurasa upya.",
+    "price_unchanged": "Hiyo tayari ndiyo bei. Weka kiasi kingine au ghairi.",
+    "price_required": "Weka bei kwa shilingi nzima.",
+    "reason_required": "Eleza kwa nini bei inabadilika.",
+    "name_required": "Weka jina la bidhaa.",
+    "idempotency_key_conflict": "Pakia ukurasa upya kisha jaribu tena.",
+    "name": {
+      "tooShort": "Weka jina la bidhaa.",
+      "tooLong": "Jina hilo ni refu mno."
+    },
+    "specification": {
+      "tooLong": "Daraja hilo ni refu mno."
+    },
+    "unit": {
+      "required": "Chagua jinsi bidhaa inavyouzwa."
+    },
+    "price": {
+      "invalid": "Weka bei kwa shilingi nzima, bila senti.",
+      "tooLarge": "Bei hiyo inaonekana kubwa mno. Ihakiki."
+    },
+    "reason": {
+      "tooShort": "Eleza kwa nini bei inabadilika.",
+      "tooLong": "Maelezo hayo ni marefu mno."
     }
   }
 }
