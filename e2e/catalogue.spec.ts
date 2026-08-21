@@ -893,6 +893,119 @@ test.describe("counting units", () => {
     });
   });
 
+
+  /**
+   * The unit panel owns the form while it is open (product.md AC-119).
+   *
+   * The panel's fields sit INSIDE the product form, so both of these once reached the server as a
+   * product: Enter in a label field, which the browser routes to the form's default button, and a
+   * tap on Add product while the unit request was still in flight. Either one commits a product
+   * against the unit selected BEFORE the new one arrived, and a product's counting unit cannot be
+   * edited afterwards — the wrong answer is permanent, and a stray unit is left behind with it.
+   */
+  test("Enter in a unit label saves the unit and never adds the product", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Enter ${tier}`;
+    const unitEn = `keg ${tier}`;
+
+    const serverActions = recordServerActions(page);
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.selectOption("#productUnit", "bar");
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(`pipa ${tier}`);
+
+    // The keystroke the defect was reachable through.
+    await page.locator("#unitLabelSw").press("Enter");
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Exactly one request, and it was the unit — not a product.
+    expect(serverActions, "Enter sent more than one command").toHaveLength(1);
+    expect(serverActions[0]).toContain(unitEn);
+
+    // No product exists, and the form still holds what was typed, now pointing at the new unit.
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toHaveCount(0);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.locator("#productUnit")).toHaveValue(`keg_${tier}`);
+
+    await page.goto(PRODUCTS_HREF);
+    await expect(page.getByRole("article", { name: new RegExp(`^${name}`), exact: false })).toHaveCount(
+      0,
+    );
+  });
+
+  test("Add product is closed while a counting unit is being saved, and says why", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Exclusive ${tier}`;
+    const unitEn = `vat ${tier}`;
+
+    const serverActions = recordServerActions(page);
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.selectOption("#productUnit", "bar");
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+
+    // Closed the moment the panel opens, with the reason beside it (design.md §4.4).
+    const add = page.locator("#addProduct");
+    await expect(add).toBeDisabled();
+    await expect(page.getByText(/save or cancel the counting unit first/i)).toBeVisible();
+
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(`tangi ${tier}`);
+
+    // Hold the unit request open, so the window the review found is genuinely being stood in.
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+      await route.continue();
+    });
+
+    await page.locator("#saveUnit").click();
+
+    // Still closed while the request is in flight, and a native burst cannot reach the handler.
+    await expect(add).toBeDisabled();
+    await add.evaluate((node: HTMLButtonElement) => {
+      for (let i = 0; i < 6; i++) node.click();
+    });
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // One command reached the server, and it was the unit.
+    expect(serverActions, "a product was submitted during unit creation").toHaveLength(1);
+    expect(serverActions[0]).toContain(unitEn);
+
+    // The form is handed back with the new unit selected, and Add product is live again.
+    await expect(add).toBeEnabled();
+    await expect(page.getByText(/save or cancel the counting unit first/i)).toHaveCount(0);
+    await expect(page.locator("#productUnit")).toHaveValue(`vat_${tier}`);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+
+    // And nothing was committed against the old unit.
+    await page.unroute(/\/settings\/products/);
+    await page.goto(PRODUCTS_HREF);
+    await expect(page.getByRole("article", { name: new RegExp(`^${name}`), exact: false })).toHaveCount(
+      0,
+    );
+  });
+
   test("a Manager reads the unit and the content and is offered no way to create either", async ({
     page,
   }, testInfo) => {

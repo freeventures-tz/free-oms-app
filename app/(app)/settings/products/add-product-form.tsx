@@ -2,7 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type KeyboardEvent,
+} from "react";
 
 import {
   addProductAction,
@@ -189,6 +197,16 @@ function AddProductFields({
    */
   const [createdUnits, setCreatedUnits] = useState<Unit[]>([]);
 
+  /**
+   * True while the inline unit panel is open, including while its request is in flight.
+   *
+   * The panel lives INSIDE the product form, so for as long as it is open the Director is part-way
+   * through a different decision. Leaving Add product live during that meant a tap — or an Enter —
+   * could commit a product against the unit that was selected BEFORE the new one arrived, and a
+   * product's counting unit cannot be edited afterwards (product.md §6, AC-119).
+   */
+  const [unitSubflowActive, setUnitSubflowActive] = useState(false);
+
   const activeUnits = useMemo(() => {
     const byCode = new Map<string, Unit>();
     // Only ACTIVE units are offered. The retired package-specific rows still exist so old products
@@ -313,6 +331,7 @@ function AddProductFields({
 
           <NewUnitPanel
             disabled={pending}
+            onActiveChange={setUnitSubflowActive}
             onCreated={(unit) => {
               // Selecting a unit the picker will not offer would leave the form pointing at an
               // option that is not there. Nothing that cannot be chosen gets chosen.
@@ -339,9 +358,21 @@ function AddProductFields({
           </FieldError>
         </Field>
 
-        <Button id="addProduct" type="submit" pending={pending} pendingLabel={t("common.loading")}>
-          {t("catalogue.add.submit")}
-        </Button>
+        <div className="flex flex-col gap-2">
+          <Button
+            id="addProduct"
+            type="submit"
+            disabled={unitSubflowActive}
+            pending={pending}
+            pendingLabel={t("common.loading")}
+          >
+            {t("catalogue.add.submit")}
+          </Button>
+          {/* Disabled, and it says why (design.md §4.4). Disabling the default button also stops
+              the browser's implicit submission, so Enter anywhere in the product fields is closed
+              by the same change rather than by a second guard that could drift from this one. */}
+          {unitSubflowActive ? <Help>{t("catalogue.add.finishUnitFirst")}</Help> : null}
+        </div>
       </form>
     </Card>
   );
@@ -358,9 +389,12 @@ function AddProductFields({
  */
 function NewUnitPanel({
   disabled,
+  onActiveChange,
   onCreated,
 }: {
   disabled: boolean;
+  /** Told whenever this panel takes or releases the form. */
+  onActiveChange: (active: boolean) => void;
   onCreated: (unit: Unit) => void;
 }) {
   const t = useTranslations();
@@ -392,6 +426,26 @@ function NewUnitPanel({
     },
   });
   const { pending, result } = action;
+
+  // Reported from one place rather than from each of the three sites that open or close the panel,
+  // so a future fourth cannot forget to hand the form back.
+  useEffect(() => {
+    onActiveChange(open);
+  }, [open, onActiveChange]);
+
+  /**
+   * Enter inside this panel means "save this counting unit".
+   *
+   * Without this it means "submit the product", because these fields sit inside the product form
+   * and the browser's implicit submission finds that form's default button. A Director typing a
+   * label and pressing Enter would create a product against the OLD unit, and there is no path to
+   * edit a product's unit afterwards.
+   */
+  function submitOnEnter(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    submit();
+  }
 
   function submit() {
     const data = new FormData();
@@ -461,6 +515,7 @@ function NewUnitPanel({
           id="unitLabelEn"
           autoComplete="off"
           disabled={pending}
+          onKeyDown={submitOnEnter}
           value={labelEn}
           onChange={(event) => setLabelEn(event.target.value)}
         />
@@ -475,6 +530,7 @@ function NewUnitPanel({
           id="unitLabelSw"
           autoComplete="off"
           disabled={pending}
+          onKeyDown={submitOnEnter}
           value={labelSw}
           onChange={(event) => setLabelSw(event.target.value)}
         />

@@ -208,7 +208,8 @@
       "unitLabelSw": "In Swahili",
       "unitSubmit": "Save counting unit",
       "unitCancel": "Cancel",
-      "unitCreated": "Counting unit added and selected."
+      "unitCreated": "Counting unit added and selected.",
+      "finishUnitFirst": "Save or cancel the counting unit first."
     },
     "price": {
       "set": "Set price",

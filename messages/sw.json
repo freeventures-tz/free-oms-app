@@ -208,7 +208,8 @@
       "unitLabelSw": "Kwa Kiswahili",
       "unitSubmit": "Hifadhi kipimo",
       "unitCancel": "Ghairi",
-      "unitCreated": "Kipimo kimeongezwa na kimechaguliwa."
+      "unitCreated": "Kipimo kimeongezwa na kimechaguliwa.",
+      "finishUnitFirst": "Hifadhi au ghairi kipimo cha kuhesabu kwanza."
     },
     "price": {
       "set": "Weka bei",
