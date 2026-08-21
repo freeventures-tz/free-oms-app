@@ -38,7 +38,7 @@ export default async function ProductsPage() {
       {/* Hidden from a Manager, not disabled. */}
       {canEdit ? <AddProductForm units={units} idempotencyKey={randomUUID()} /> : null}
 
-      <ProductList products={products} history={history} canEdit={canEdit} />
+      <ProductList products={products} units={units} history={history} canEdit={canEdit} />
     </>
   );
 }

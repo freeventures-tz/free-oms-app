@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
 
@@ -17,7 +17,21 @@ import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
  */
 
 const SERVER_DELAY_MS = 3000;
+/**
+ * The budget for the two older checks below, which start their timer in one Playwright call and act
+ * in a later one. That gap is automation round-trip time, not interface time, so the number has to
+ * absorb it. Those tests are Part A and Part B work and are left as they are.
+ */
 const ACKNOWLEDGEMENT_BUDGET_MS = 500;
+
+/**
+ * design.md §12.7 rule 1 as actually written: ~100 ms, and BROWSER time.
+ *
+ * `measureTapToPending` instruments, clocks and clicks inside a single in-page evaluation, so
+ * nothing but the interface is being measured and the threshold can be the contract itself rather
+ * than the contract plus however long the automation took to get there.
+ */
+const TAP_TO_PENDING_BUDGET_MS = 100;
 const PRODUCTS_HREF = "/settings/products";
 
 async function signInAs(page: Page, who: "director" | "manager") {
@@ -50,9 +64,18 @@ test.describe("reading the catalogue", () => {
     // the add-product test below changes it. That the seed is exactly 21 is asserted where it can
     // be asserted decisively — in pgTAP, and by the migration itself, which refuses to apply
     // otherwise.
-    for (const product of ["Tofali 5\"", "Dangote Cement 42R", "Marine 18 mm"]) {
+    // The accessible name is the product's full identity, which since Stage 10 Part C includes what
+    // one counted unit holds: "Dangote Cement 42R 50 kg" is a different product from the same
+    // cement in a 25 kg bag (product.md §6.2).
+    for (const product of ["Tofali 5\"", "Dangote Cement 42R 50 kg", "Marine 18 mm"]) {
       await expect(page.getByRole("article", { name: product, exact: true })).toBeVisible();
     }
+
+    // The two facts read separately, which is the whole point of the separation: what the yard
+    // counts, and what one of them holds.
+    const cement = productCard(page, "Dangote Cement 42R 50 kg");
+    await expect(cement).toContainText(/counted by:\s*bag/i);
+    await expect(cement).toContainText(/each one holds:\s*50 kg/i);
     await expect(page.getByRole("article", { name: "Nondo 12 mm BS 300", exact: true })).toBeVisible();
     await expect(page.getByRole("article", { name: "Nondo 12 mm BS 500", exact: true })).toBeVisible();
 
@@ -77,6 +100,7 @@ test.describe("reading the catalogue", () => {
     await expect(page.getByRole("button", { name: /^change price$/i })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: /add a product/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^add product$/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /add a counting unit/i })).toHaveCount(0);
   });
 
   test("a Sales Representative is not offered the destination at all", async ({ page }, testInfo) => {
@@ -126,9 +150,12 @@ test.describe("setting prices", () => {
     await signInAs(page, "director");
     await page.goto(PRODUCTS_HREF);
 
-    const product = { mobile: "Timber 1 × 6", tablet: "Timber 1 × 8", desktop: "Timber 2 × 2" }[
-      testInfo.project.name as "mobile" | "tablet" | "desktop"
-    ]!;
+    // Timber is counted in pieces, each 12 ft, so the identity carries the content (product.md §6).
+    const product = {
+      mobile: "Timber 1 × 6 12 ft",
+      tablet: "Timber 1 × 8 12 ft",
+      desktop: "Timber 2 × 2 12 ft",
+    }[testInfo.project.name as "mobile" | "tablet" | "desktop"]!;
 
     for (const [amount, reason] of [
       ["8000", "Opening price"],
@@ -156,7 +183,8 @@ test.describe("setting prices", () => {
     await signInAs(page, "director");
     await page.goto(PRODUCTS_HREF);
 
-    const card = productCard(page, "Sand");
+    // Sand is counted in buckets, each 20 litres, and that content is part of its identity.
+    const card = productCard(page, "Sand 20 litres");
     await card.getByRole("button", { name: /^set price$|^change price$/i }).click();
 
     // Cents are refused rather than rounded away: the figure would reach a customer.
@@ -252,14 +280,19 @@ test.describe("adding a product", () => {
       await route.continue();
     });
 
-    const another = page.getByRole("button", { name: /add another product/i });
+    // By id, not by accessible name: a pending Button swaps its label for "Working…", so a
+    // role+name locator stops matching exactly when the pending state needs asserting.
+    const another = page.locator("#addAnother");
     const before = await another.boundingBox();
 
-    // Stamp, inside the page, how long after the tap anything says the tap registered.
+    // Stamp, inside the page, how long after the tap THIS control says the tap registered. Scoped
+    // to the button by id rather than asking whether anything on the page is busy: the decoy test
+    // in "counting units" exists to condemn that query, and a sibling case should not still use it.
     await page.evaluate(() => {
       const state = { t0: performance.now(), busyAt: null as number | null };
       const check = () => {
-        if (state.busyAt === null && document.querySelector('button[aria-busy="true"]')) {
+        const target = document.querySelector("#addAnother");
+        if (state.busyAt === null && target?.getAttribute("aria-busy") === "true") {
           state.busyAt = performance.now() - state.t0;
         }
       };
@@ -286,10 +319,11 @@ test.describe("adding a product", () => {
       )
       .toBeLessThan(ACKNOWLEDGEMENT_BUDGET_MS);
 
-    // Working, saying so in words, and the same size as before (§12.7 rule 4).
-    const busy = page.locator("button[data-slot='button'][aria-busy='true']");
-    await expect(busy).toContainText(/working/i);
-    const during = await busy.boundingBox();
+    // Working, saying so in words, and the same size as before (§12.7 rule 4) — asserted on the
+    // control that was pressed, so a busy control elsewhere cannot stand in for it.
+    await expect(another).toHaveAttribute("aria-busy", "true");
+    await expect(another).toContainText(/working/i);
+    const during = await another.boundingBox();
     expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
 
     // A clean form comes back — empty fields, and no leftover confirmation.
@@ -419,6 +453,10 @@ test.describe("the interaction contract on this screen", () => {
     });
 
     // The pending state belongs to the control that was pressed, and says so in words.
+    //
+    // This one still asks the page rather than the control, unlike the counting-unit case above.
+    // Narrowing it needs a stable id on the price button, and `product-list.tsx` is outside the
+    // files this correction round may touch — so it is reported rather than half-changed.
     await expect(page.locator("button[data-slot='button'][aria-busy='true']")).toContainText(
       /working/i,
     );
@@ -430,5 +468,563 @@ test.describe("the interaction contract on this screen", () => {
     await page.goto(PRODUCTS_HREF);
     await productCard(page, product).getByRole("button", { name: /price history \(1\)/i }).click();
     await expect(page.getByText("Pressed more than once on purpose")).toBeVisible();
+  });
+});
+
+/**
+ * Counting units and content (Stage 10 Part C, product.md §6, design.md §7.12a).
+ *
+ * The one thing only a browser can prove: a Director who needs a counting unit that does not exist
+ * gets it WITHOUT losing the product they were part-way through typing. Every other layer can show
+ * the unit being created; only this layer can show the form still holding the name, the content and
+ * the selection afterwards.
+ *
+ * The three device projects share one database, so every label here carries its tier.
+ */
+
+/**
+ * Tap-to-visible-pending, measured inside the page, in ONE evaluation.
+ *
+ * The instrumentation, the clock and the click burst all happen in the same in-page call on
+ * purpose. Starting the timer in one Playwright call and clicking in a later one measures the
+ * automation round trip as well as the interface, and the only way to keep such a test green is to
+ * loosen the threshold until it stops meaning anything. The contract is ~100 ms of BROWSER time
+ * (design.md §12.7 rule 1), so browser time is what this returns.
+ *
+ * The burst is dispatched natively in a single tick, bypassing every actionability check Playwright
+ * would otherwise apply — which is the point: a real thumb does not wait to be told the control is
+ * ready.
+ */
+async function measureTapToPending(button: Locator, clicks = 6): Promise<number> {
+  return button.evaluate(
+    (node: HTMLButtonElement, clickCount) =>
+      new Promise<number>((resolve, reject) => {
+        let settled = false;
+
+        function check() {
+          if (settled) return;
+          // THIS node, not "any busy button on the page". A page-wide query would report a
+          // stranger's pending state as this button's acknowledgement, and would keep passing if
+          // the control a Director actually pressed never responded at all.
+          if (node.getAttribute("aria-busy") !== "true") return;
+          settled = true;
+          observer.disconnect();
+          resolve(performance.now() - t0);
+        }
+
+        const observer = new MutationObserver(check);
+        // The parent subtree, so the attribute change on `node` is seen wherever React commits it.
+        // If the button were ever replaced by a different element rather than mutated, `check`
+        // would stop seeing it and this would time out — which is the safe direction to fail in.
+        observer.observe(node.parentElement ?? document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["aria-busy"],
+        });
+
+        const t0 = performance.now();
+        for (let i = 0; i < clickCount; i++) node.click();
+        // In case the pending state committed synchronously and the observer has nothing to report.
+        check();
+
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          reject(new Error("the button pressed never entered a pending state within 5s of the tap"));
+        }, 5000);
+      }),
+    clicks,
+  );
+}
+
+/** Every server-action request the page makes, in order, with the body it sent. */
+function recordServerActions(page: Page): string[] {
+  const payloads: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.headers()["next-action"]) {
+      payloads.push(request.postData() ?? "");
+    }
+  });
+  return payloads;
+}
+
+/** The idempotency key inside a server-action payload, which is the value that decides replay. */
+function idempotencyKeyIn(payload: string): string {
+  const match = payload.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return match ? match[0] : "";
+}
+
+test.describe("counting units", () => {
+  /**
+   * The measurement itself, under test.
+   *
+   * Every timing assertion below rests on `measureTapToPending`, so it has to be measuring the
+   * right thing. A page-wide "is any button busy?" query would report a stranger's pending state as
+   * this button's acknowledgement — and would keep passing if the control a Director actually
+   * pressed never responded at all, which is the exact defect the contract exists to catch.
+   */
+  test("the measurement ignores a busy control that is not the one pressed", async ({ page }) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+
+    // A decoy that is busy from the start and never stops. Nothing about it belongs to the control
+    // measured below.
+    await page.evaluate(() => {
+      const decoy = document.createElement("button");
+      decoy.setAttribute("data-slot", "button");
+      decoy.setAttribute("aria-busy", "true");
+      decoy.textContent = "Working…";
+      document.body.append(decoy);
+    });
+
+    // Cancel closes the panel and never enters a pending state, so the only busy button on the page
+    // is the decoy. The measurement must time out rather than report the decoy's state as Cancel's.
+    const cancel = page.getByRole("button", { name: /^cancel$/i }).first();
+
+    await expect(measureTapToPending(cancel, 1)).rejects.toThrow(/never entered a pending state/i);
+  });
+
+
+  test("a Director creates one and uses it without the page reloading", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const unitEn = `drum ${tier}`;
+    const name = `E2E Unit Product ${tier}`;
+
+    // Typed FIRST, deliberately. If creating a unit costs the Director this, the feature is worse
+    // than useless — they would have to leave, come back, and type it all again.
+    await page.getByLabel(/product name/i).fill(name);
+    await page.getByLabel(/what one holds/i).fill("200 litres");
+
+    // A marker that a document reload would wipe. Cheaper and more honest than counting requests:
+    // it fails if the page navigated at all, by any route.
+    await page.evaluate(() => {
+      (window as unknown as { __fvNoReload?: boolean }).__fvNoReload = true;
+    });
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(`ngoma ${tier}`);
+    await page.getByRole("button", { name: /save counting unit/i }).click();
+
+    // Announced politely, so a screen-reader user learns the unit exists and is selected.
+    const confirmation = page.getByRole("status").filter({ hasText: /counting unit added/i });
+    await expect(confirmation).toBeVisible({ timeout: 15_000 });
+    await expect(confirmation).toHaveAttribute("aria-live", "polite");
+
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __fvNoReload?: boolean }).__fvNoReload === true,
+      ),
+      "the page reloaded, which is the one thing this flow must not do",
+    ).toBe(true);
+
+    // Selected, by the code the SERVER minted from the English label. The caller never supplied one.
+    await expect(page.locator("#productUnit")).toHaveValue(`drum_${tier}`);
+    // And everything typed before is still there.
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.getByLabel(/what one holds/i)).toHaveValue("200 litres");
+
+    await page.getByRole("button", { name: /^add product$/i }).click();
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toBeVisible({ timeout: 15_000 });
+
+    // The card names both facts, separately: what it is counted by, and what one of them holds.
+    await page.goto(PRODUCTS_HREF);
+    const card = productCard(page, `${name} 200 litres`);
+    await expect(card).toContainText(new RegExp(`counted by:\\s*${unitEn}`, "i"));
+    await expect(card).toContainText(/each one holds:\s*200 litres/i);
+  });
+
+  test("saving a counting unit repeatedly creates exactly one", async ({ page }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const unitEn = `crate ${tier}`;
+    const serverActions = recordServerActions(page);
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(`kasha ${tier}`);
+
+    // Slowed so the burst genuinely overlaps a request in flight, and so the acknowledgement below
+    // cannot have been waiting on the server.
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+      await route.continue();
+    });
+
+    // By id — see the note on `#addAnother` above.
+    const save = page.locator("#saveUnit");
+    const before = await save.boundingBox();
+
+    const tapToPending = await measureTapToPending(save);
+    expect(tapToPending, "the tap was not acknowledged inside the contract").toBeLessThanOrEqual(
+      TAP_TO_PENDING_BUDGET_MS,
+    );
+
+    // Working, saying so in words, and the same size as before (§12.7 rule 4) — asserted on the
+    // control that was pressed. A page-wide "is any button busy?" query is the exact thing the
+    // decoy test above condemns, and it has no business in the case that test protects.
+    await expect(save).toHaveAttribute("aria-busy", "true");
+    await expect(save).toContainText(/working/i);
+    const during = await save.boundingBox();
+    expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 20_000,
+    });
+    expect(serverActions, "more than one request reached the server").toHaveLength(1);
+
+    // One option, not six. A second unit reading identically would be indistinguishable in here.
+    await page.unroute(/\/settings\/products/);
+    expect(
+      await page.locator("#productUnit option", { hasText: unitEn }).count(),
+      "the same counting unit was created more than once",
+    ).toBe(1);
+  });
+
+  test("a business refusal keeps every entered value", async ({ page }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Refusal ${tier}`;
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+
+    // `piece` is already on offer in every environment. Typed in different clothes, it is still it.
+    await page.locator("#unitLabelEn").fill("  PIECE  ");
+    await page.locator("#unitLabelSw").fill(`kitu ${tier}`);
+    await page.getByRole("button", { name: /save counting unit/i }).click();
+
+    await expect(page.getByRole("alert").first()).toContainText(
+      /already a counting unit with that name/i,
+      { timeout: 15_000 },
+    );
+
+    // Nothing was lost: not the labels, not the product being typed around them.
+    await expect(page.locator("#unitLabelEn")).toHaveValue("  PIECE  ");
+    await expect(page.locator("#unitLabelSw")).toHaveValue(`kitu ${tier}`);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.getByText(/counting unit added/i)).toHaveCount(0);
+  });
+
+  /**
+   * A request that never reaches a verdict, and the retry that resumes it.
+   *
+   * Distinct from the business refusal above, and the harder half: a refusal is the server
+   * answering, while this is the server never answering at all. The guarantee under test is that
+   * the retry carries the SAME idempotency key, so a request that did reach the database is
+   * resumed rather than duplicated into a second counting unit.
+   */
+  test("a failed unit request keeps every field and retries the identical command", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Retry ${tier}`;
+    const specification = `Grade R${tier.slice(0, 1).toUpperCase()}`;
+    const unitEn = `pallet ${tier}`;
+    const unitSw = `paleti ${tier}`;
+
+    const serverActions = recordServerActions(page);
+
+    // All four surrounding product values, entered before the unit is even attempted.
+    await page.getByLabel(/product name/i).fill(name);
+    await page.getByLabel(/grade or specification/i).fill(specification);
+    await page.selectOption("#productUnit", "bar");
+    await page.getByLabel(/what one holds/i).fill("8 ft");
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(unitSw);
+
+    // The first server action never reaches a verdict. Not a refusal — a dropped request.
+    let failedOnce = false;
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      if (!failedOnce) {
+        failedOnce = true;
+        return route.abort("failed");
+      }
+      return route.continue();
+    });
+
+    await page.getByRole("button", { name: /save counting unit/i }).click();
+
+    // Reported, not swallowed, and no success claimed for a request that never landed.
+    await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/counting unit added/i)).toHaveCount(0);
+
+    // All six entered values survive, including the counting unit already selected.
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.getByLabel(/grade or specification/i)).toHaveValue(specification);
+    await expect(page.locator("#productUnit")).toHaveValue("bar");
+    await expect(page.getByLabel(/what one holds/i)).toHaveValue("8 ft");
+    await expect(page.locator("#unitLabelEn")).toHaveValue(unitEn);
+    await expect(page.locator("#unitLabelSw")).toHaveValue(unitSw);
+
+    const retry = page.getByRole("button", { name: /try again/i });
+    await expect(retry).toBeVisible();
+    await retry.click();
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The retry addressed the SAME command: same labels, and the same idempotency key, which is
+    // what stops a resumed request becoming a second unit.
+    expect(serverActions.length, "the retry did not reach the server").toBe(2);
+    const [first, second] = serverActions;
+    expect(idempotencyKeyIn(second), "the retry minted a new idempotency key").toBe(
+      idempotencyKeyIn(first),
+    );
+    expect(idempotencyKeyIn(first)).not.toBe("");
+    for (const payload of serverActions) {
+      expect(payload).toContain(unitEn);
+      expect(payload).toContain(unitSw);
+    }
+
+    // One unit, selected, with the product still intact around it.
+    await page.unroute(/\/settings\/products/);
+    expect(
+      await page.locator("#productUnit option", { hasText: unitEn }).count(),
+      "the retry created a second counting unit",
+    ).toBe(1);
+    await expect(page.locator("#productUnit")).toHaveValue(`pallet_${tier}`);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.getByLabel(/grade or specification/i)).toHaveValue(specification);
+    await expect(page.getByLabel(/what one holds/i)).toHaveValue("8 ft");
+  });
+
+  test("adding a product repeatedly adds exactly one", async ({ page }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Once ${tier}`;
+    const serverActions = recordServerActions(page);
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.selectOption("#productUnit", "bag");
+    await page.getByLabel(/what one holds/i).fill("40 kg");
+
+    // Slowed so the burst overlaps a request in flight. Without this the first click could finish
+    // before the second is dispatched, and the test would prove nothing about repeat activation.
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+      await route.continue();
+    });
+
+    // By id — see the note on `#addAnother` above.
+    const add = page.locator("#addProduct");
+    const before = await add.boundingBox();
+
+    const tapToPending = await measureTapToPending(add);
+    expect(tapToPending, "the tap was not acknowledged inside the contract").toBeLessThanOrEqual(
+      TAP_TO_PENDING_BUDGET_MS,
+    );
+
+    // The pending state belongs to the control that was pressed, says so in words, and does not
+    // change width under the thumb still resting on it (§12.7 rule 4). Asserted on `add` itself.
+    await expect(add).toHaveAttribute("aria-busy", "true");
+    await expect(add).toContainText(/working/i);
+    const during = await add.boundingBox();
+    expect(Math.abs((during?.width ?? 0) - (before?.width ?? 0))).toBeLessThanOrEqual(1);
+
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toBeVisible({ timeout: 20_000 });
+    expect(serverActions, "more than one request reached the server").toHaveLength(1);
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toHaveCount(1);
+
+    // One product in the catalogue, however many times the button was pressed, and the card states
+    // the two measurement facts separately.
+    await page.unroute(/\/settings\/products/);
+    await page.goto(PRODUCTS_HREF);
+    const card = productCard(page, `${name} 40 kg`);
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText(/counted by:\s*bag/i);
+    await expect(card).toContainText(/each one holds:\s*40 kg/i);
+  });
+
+  test("a Director adds the same product in two sizes", async ({ page }, testInfo) => {
+    await signInAs(page, "director");
+
+    const tier = testInfo.project.name;
+    const name = `E2E Sized ${tier}`;
+
+    // Two products, not one. Content is part of what a product IS (product.md §6.2), so these are
+    // stocked and priced separately, and the catalogue is expected to hold both.
+    for (const content of ["50 kg", "25 kg"]) {
+      await page.goto(PRODUCTS_HREF);
+      await page.getByLabel(/product name/i).fill(name);
+      await page.getByLabel(/what one holds/i).fill(content);
+      await page.selectOption("#productUnit", "bag");
+      await page.getByRole("button", { name: /^add product$/i }).click();
+      await expect(page.getByText(new RegExp(`${name} added`, "i"))).toBeVisible({
+        timeout: 15_000,
+      });
+    }
+
+    await page.goto(PRODUCTS_HREF);
+    await expect(productCard(page, `${name} 50 kg`)).toBeVisible();
+    await expect(productCard(page, `${name} 25 kg`)).toBeVisible();
+
+    // The same size again is a duplicate, and says so.
+    await page.getByLabel(/product name/i).fill(name);
+    await page.getByLabel(/what one holds/i).fill("  50   KG  ");
+    await page.selectOption("#productUnit", "bag");
+    await page.getByRole("button", { name: /^add product$/i }).click();
+    await expect(page.getByRole("alert").first()).toContainText(/already in the catalogue/i, {
+      timeout: 15_000,
+    });
+  });
+
+
+  /**
+   * The unit panel owns the form while it is open (product.md AC-119).
+   *
+   * The panel's fields sit INSIDE the product form, so both of these once reached the server as a
+   * product: Enter in a label field, which the browser routes to the form's default button, and a
+   * tap on Add product while the unit request was still in flight. Either one commits a product
+   * against the unit selected BEFORE the new one arrived, and a product's counting unit cannot be
+   * edited afterwards — the wrong answer is permanent, and a stray unit is left behind with it.
+   */
+  test("Enter in a unit label saves the unit and never adds the product", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Enter ${tier}`;
+    const unitEn = `keg ${tier}`;
+
+    const serverActions = recordServerActions(page);
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.selectOption("#productUnit", "bar");
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(`pipa ${tier}`);
+
+    // The keystroke the defect was reachable through.
+    await page.locator("#unitLabelSw").press("Enter");
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Exactly one request, and it was the unit — not a product.
+    expect(serverActions, "Enter sent more than one command").toHaveLength(1);
+    expect(serverActions[0]).toContain(unitEn);
+
+    // No product exists, and the form still holds what was typed, now pointing at the new unit.
+    await expect(page.getByText(new RegExp(`${name} added`, "i"))).toHaveCount(0);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+    await expect(page.locator("#productUnit")).toHaveValue(`keg_${tier}`);
+
+    await page.goto(PRODUCTS_HREF);
+    await expect(page.getByRole("article", { name: new RegExp(`^${name}`), exact: false })).toHaveCount(
+      0,
+    );
+  });
+
+  test("Add product is closed while a counting unit is being saved, and says why", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "director");
+    await page.goto(PRODUCTS_HREF);
+
+    const tier = testInfo.project.name;
+    const name = `E2E Exclusive ${tier}`;
+    const unitEn = `vat ${tier}`;
+
+    const serverActions = recordServerActions(page);
+
+    await page.getByLabel(/product name/i).fill(name);
+    await page.selectOption("#productUnit", "bar");
+
+    await page.getByRole("button", { name: /add a counting unit/i }).click();
+
+    // Closed the moment the panel opens, with the reason beside it (design.md §4.4).
+    const add = page.locator("#addProduct");
+    await expect(add).toBeDisabled();
+    await expect(page.getByText(/save or cancel the counting unit first/i)).toBeVisible();
+
+    await page.locator("#unitLabelEn").fill(unitEn);
+    await page.locator("#unitLabelSw").fill(`tangi ${tier}`);
+
+    // Hold the unit request open, so the window the review found is genuinely being stood in.
+    await page.route(/\/settings\/products/, async (route, request) => {
+      if (request.method() !== "POST") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+      await route.continue();
+    });
+
+    await page.locator("#saveUnit").click();
+
+    // Still closed while the request is in flight, and a native burst cannot reach the handler.
+    await expect(add).toBeDisabled();
+    await add.evaluate((node: HTMLButtonElement) => {
+      for (let i = 0; i < 6; i++) node.click();
+    });
+
+    await expect(page.getByRole("status").filter({ hasText: /counting unit added/i })).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // One command reached the server, and it was the unit.
+    expect(serverActions, "a product was submitted during unit creation").toHaveLength(1);
+    expect(serverActions[0]).toContain(unitEn);
+
+    // The form is handed back with the new unit selected, and Add product is live again.
+    await expect(add).toBeEnabled();
+    await expect(page.getByText(/save or cancel the counting unit first/i)).toHaveCount(0);
+    await expect(page.locator("#productUnit")).toHaveValue(`vat_${tier}`);
+    await expect(page.getByLabel(/product name/i)).toHaveValue(name);
+
+    // And nothing was committed against the old unit.
+    await page.unroute(/\/settings\/products/);
+    await page.goto(PRODUCTS_HREF);
+    await expect(page.getByRole("article", { name: new RegExp(`^${name}`), exact: false })).toHaveCount(
+      0,
+    );
+  });
+
+  test("a Manager reads the unit and the content and is offered no way to create either", async ({
+    page,
+  }, testInfo) => {
+    await signInAs(page, "manager");
+
+    const navigation = await openNavigation(page, testInfo);
+    await navigation.getByRole("link", { name: /products/i }).click();
+    await expect(page.getByRole("heading", { level: 1, name: /products/i })).toBeVisible();
+
+    // Both facts are readable, separately, by the person who has to receive the goods.
+    const cement = productCard(page, "Dangote Cement 42R 50 kg");
+    await expect(cement).toContainText(/counted by:\s*bag/i);
+    await expect(cement).toContainText(/each one holds:\s*50 kg/i);
+
+    // Hidden, not disabled (design.md §4.3, §4.4). No greyed control, nothing that leaks the
+    // authority structure, and no field to type into.
+    await expect(page.getByRole("button", { name: /add a counting unit/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /add a product/i })).toHaveCount(0);
+    await expect(page.locator("#productUnit")).toHaveCount(0);
+    await expect(page.getByLabel(/what one holds/i)).toHaveCount(0);
   });
 });

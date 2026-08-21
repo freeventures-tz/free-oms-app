@@ -15,13 +15,95 @@ import { createServerSupabase } from "@/lib/supabase/server";
  * needs it.
  */
 
-export type Unit = { code: string; sortOrder: number };
+/**
+ * A counting unit, with the label a Director typed in each language (product.md §6).
+ *
+ * The labels come from the ROW, not from `catalogue.units.*` message keys. They are business data:
+ * a Director who creates `drum` at six in the morning cannot wait for a message file to ship, and
+ * there is no build between them and a usable catalogue (design.md §8.2).
+ *
+ * `isActive` is the difference between a unit that may be CHOSEN and a unit that may be READ. The
+ * three Part B rows that combined a count with a content — `piece_12ft`, `bag_50kg`, `bucket_20l` —
+ * are inactive: no product references them any more, and none may again.
+ *
+ * Picking the right label for a reader is `unit-label.ts`, which client components can import
+ * without dragging this file's server-only Supabase imports into the browser bundle.
+ */
+export type Unit = {
+  code: string;
+  sortOrder: number;
+  labelEn: string;
+  labelSw: string;
+  isActive: boolean;
+};
+
+/**
+ * The one place a database row becomes a `Unit`.
+ *
+ * Two callers need it and they receive the row differently: `loadCatalogue` gets it from PostgREST,
+ * and `addUnit` gets it as the `unit` object inside the command's jsonb result, where a bigint-ish
+ * column can arrive as a string. `Number()` is therefore deliberate rather than a cast — a cast
+ * would type-check happily and hand the picker a `sortOrder` of `"30"` to sort by.
+ *
+ * Returns `null` rather than a half-built unit. A row missing a label would otherwise render as a
+ * blank option in the counting-unit picker, which is worse than not being offered at all, and
+ * `is_active` defaults CLOSED: anything that does not positively say it is active is treated as
+ * retired and never offered for a new product.
+ */
+type UnitRow = {
+  code?: unknown;
+  sort_order?: unknown;
+  label_en?: unknown;
+  label_sw?: unknown;
+  is_active?: unknown;
+};
+
+function toUnit(row: UnitRow | null | undefined): Unit | null {
+  if (!row) return null;
+
+  const code = typeof row.code === "string" && row.code.length > 0 ? row.code : null;
+  const labelEn = typeof row.label_en === "string" && row.label_en.length > 0 ? row.label_en : null;
+  const labelSw = typeof row.label_sw === "string" && row.label_sw.length > 0 ? row.label_sw : null;
+
+  // The TYPE is checked before the coercion, not after it. `Number(null)` is 0 — a perfectly finite
+  // number — so a row with no sort order would otherwise sort to the front of the picker.
+  const sortOrder =
+    typeof row.sort_order === "number"
+      ? row.sort_order
+      : typeof row.sort_order === "string" && row.sort_order.trim() !== ""
+        ? Number(row.sort_order)
+        : Number.NaN;
+
+  // `false` is an answer: the unit is retired. Missing, a string, or a number is NOT "retired" —
+  // it is a row nobody can vouch for, and reading it as `false` would launder a broken response
+  // into a plausible object that the picker then has to decide what to do with.
+  const isActive = typeof row.is_active === "boolean" ? row.is_active : null;
+
+  if (
+    code === null ||
+    labelEn === null ||
+    labelSw === null ||
+    isActive === null ||
+    !Number.isFinite(sortOrder)
+  ) {
+    return null;
+  }
+
+  return { code, sortOrder, labelEn, labelSw, isActive };
+}
 
 export type CatalogueProduct = {
   id: string;
   name: string;
   specification: string | null;
   unitCode: string;
+  /**
+   * What one counting unit of this product contains: `50 kg`, `20 litres`, `12 ft`.
+   *
+   * Descriptive, and `null` for most products. Nothing computes with it, because V1 holds no
+   * conversion factor to compute with (product.md §6.1 rule 3).
+   */
+  unitContent: string | null;
   isActive: boolean;
   /** `null` is a real state — no Director has approved a price — and never a zero. */
   priceTzs: number | null;
@@ -66,10 +148,16 @@ export async function loadCatalogue(): Promise<Catalogue> {
   const [productRows, unitRows, priceRows, historyRows] = await Promise.all([
     supabase
       .from("products")
-      .select("id, name, specification, unit_code, is_active")
+      .select("id, name, specification, unit_code, unit_content, is_active")
       .order("name")
       .order("specification", { nullsFirst: true }),
-    supabase.from("units").select("code, sort_order").order("sort_order"),
+    // Every unit, active or not. The picker offers only the active ones, but a product's unit still
+    // has to be readable if it was ever retired — a card that could not name its own unit would be
+    // a worse answer than an out-of-date one.
+    supabase
+      .from("units")
+      .select("code, sort_order, label_en, label_sw, is_active")
+      .order("sort_order"),
     supabase.from("product_current_prices").select("product_id, price_tzs, effective_at"),
     supabase
       .from("product_prices")
@@ -116,7 +204,9 @@ export async function loadCatalogue(): Promise<Catalogue> {
 
   return {
     history: historyByProduct,
-    units: units.map((row) => ({ code: row.code as string, sortOrder: row.sort_order as number })),
+    // A row that cannot produce a whole unit is dropped rather than half-built. The product card
+    // then names its counting unit by code, which is an unhelpful answer but never a wrong one.
+    units: units.map(toUnit).filter((unit): unit is Unit => unit !== null),
     products: products.map((row) => {
       const current = priceByProduct.get(row.id as string);
       return {
@@ -124,6 +214,7 @@ export async function loadCatalogue(): Promise<Catalogue> {
         name: row.name as string,
         specification: (row.specification as string | null) ?? null,
         unitCode: row.unit_code as string,
+        unitContent: (row.unit_content as string | null) ?? null,
         isActive: row.is_active as boolean,
         priceTzs: current?.priceTzs ?? null,
         priceSetAt: current?.effectiveAt ?? null,
@@ -158,7 +249,13 @@ function mapDatabaseError(message: string): string {
 }
 
 export async function addProduct(
-  input: { name: string; specification: string | null; unitCode: string; idempotencyKey: string },
+  input: {
+    name: string;
+    specification: string | null;
+    unitCode: string;
+    unitContent: string | null;
+    idempotencyKey: string;
+  },
   issuedBy?: CatalogueApi,
 ): Promise<CatalogueResult> {
   const api = issuedBy ?? ((await userApi()) as unknown as CatalogueApi);
@@ -167,12 +264,48 @@ export async function addProduct(
     p_name: input.name,
     p_specification: input.specification,
     p_unit_code: input.unitCode,
+    p_unit_content: input.unitContent,
     p_idempotency_key: input.idempotencyKey,
   });
 
   if (error) return { ok: false, reason: mapDatabaseError(error.message) };
   if (!data?.ok) return { ok: false, reason: reasonOf(data, "generic") };
   return { ok: true, detail: reasonOf(data, "added") };
+}
+
+/** What a successful unit creation hands back, so the form can select it without a reload. */
+export type CreatedUnit = { ok: true; detail: string; unit: Unit };
+
+export type AddUnitResult = CreatedUnit | { ok: false; reason: string };
+
+/**
+ * Creating a counting unit (product.md §6.1 rule 5).
+ *
+ * Returns the unit itself, not just a success. The Director is mid-way through adding a product;
+ * making them reload to see the unit they just created would throw away everything else they had
+ * typed, and a reload is exactly what design.md §7.12a says must not happen.
+ */
+export async function addUnit(
+  input: { labelEn: string; labelSw: string; idempotencyKey: string },
+  issuedBy?: CatalogueApi,
+): Promise<AddUnitResult> {
+  const api = issuedBy ?? ((await userApi()) as unknown as CatalogueApi);
+
+  const { data, error } = await api.rpc("admin_add_unit", {
+    p_label_en: input.labelEn,
+    p_label_sw: input.labelSw,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) return { ok: false, reason: mapDatabaseError(error.message) };
+  if (!data?.ok) return { ok: false, reason: reasonOf(data, "generic") };
+
+  // Same mapper as the catalogue read, so the unit the form selects and the unit the next page
+  // load shows cannot be built two different ways.
+  const unit = toUnit(data.unit as UnitRow | undefined);
+  if (!unit) return { ok: false, reason: "generic" };
+
+  return { ok: true, detail: reasonOf(data, "added"), unit };
 }
 
 export async function setProductPrice(

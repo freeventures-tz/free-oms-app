@@ -197,3 +197,38 @@ export async function createGatedStaff(
 }
 
 export { PUBLISHABLE_KEY, SECRET_KEY, SUPABASE_URL, generateTemporaryPassword };
+
+/**
+ * What a burst of identical commands actually did.
+ *
+ * The contract for a repeated request is one committed operation replayed to everybody else, and
+ * "they all said ok" does not prove it. A second caller answered `unit_exists` is also `ok: false`,
+ * and a second caller handed a DIFFERENT row is `ok: true` for a change nobody asked for. So the
+ * summary counts the reasons apart and collapses the returned identities: one entry in `ids` is the
+ * assertion that every caller was handed the same row.
+ */
+export function summariseBurst(
+  results: Array<{ data: unknown; error: unknown }>,
+  entity: "unit" | "product",
+): { ok: number; added: number; replayed: number; reasons: string[]; ids: string[] } {
+  const rows = results.map((result) => {
+    if (result.error) {
+      throw new Error(`the burst failed at the transport: ${JSON.stringify(result.error)}`);
+    }
+    return (result.data ?? {}) as Record<string, unknown>;
+  });
+
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const returned = row[entity] as { id?: string } | null | undefined;
+    if (returned?.id) ids.add(returned.id);
+  }
+
+  return {
+    ok: rows.filter((row) => row.ok === true).length,
+    added: rows.filter((row) => row.reason === "added").length,
+    replayed: rows.filter((row) => row.reason === "replayed").length,
+    reasons: rows.map((row) => String(row.reason)),
+    ids: [...ids],
+  };
+}

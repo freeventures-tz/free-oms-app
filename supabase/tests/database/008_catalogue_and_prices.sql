@@ -55,8 +55,10 @@ insert into public.user_roles (user_id, role) values
 select is((select count(*)::int from public.products), 21,
   'exactly the 21 products product.md §6 approves are seeded');
 
-select is((select count(*)::int from public.units), 6,
-  'the six approved units of measure are seeded');
+-- Eight since Stage 10 Part C: five generic counting units a Director may choose, plus the three
+-- package-specific Part B rows kept inactive for traceability (009_counting_units_and_content.sql).
+select is((select count(*)::int from public.units), 8,
+  'the counting units are seeded, including the retired package-specific rows');
 
 select is((select count(*)::int from public.inventory_locations), 3,
   'Store, Warehouse and Yard are seeded (product.md §7)');

@@ -182,30 +182,34 @@
     "title": "Bidhaa na bei",
     "description": "Bidhaa ambazo Free Ventures inauza, na bei ya kila moja.",
     "descriptionManager": "Bidhaa ambazo Free Ventures inauza, na bei ya kila moja. Ni Mkurugenzi pekee anayeweza kubadilisha bei.",
-    "unitLabel": "Inauzwa kwa",
+    "unitLabel": "Inahesabiwa kwa",
     "priceLabel": "Bei ya kuuza",
     "noPrice": "Bei haijawekwa",
     "noPriceHelp": "Bidhaa hii haiwezi kuuzwa mpaka Mkurugenzi aweke bei yake.",
     "empty": "Bado hakuna bidhaa.",
     "productCount": "Bidhaa {count}",
-    "units": {
-      "piece": "kipande",
-      "piece_12ft": "kipande cha futi 12",
-      "bag_50kg": "mfuko wa kilo 50",
-      "bucket_20l": "ndoo ya lita 20",
-      "sheet": "bati",
-      "bar": "fito"
-    },
     "add": {
       "heading": "Ongeza bidhaa",
       "name": "Jina la bidhaa",
       "nameHelp": "Kwa mfano Timber 2 × 4.",
       "specification": "Daraja au maelezo",
       "specificationHelp": "Weka tu kama daraja ni sehemu ya utambulisho, kama BS 300. Acha wazi kama halipo.",
-      "unit": "Inauzwa kwa",
+      "unit": "Inahesabiwa kwa",
       "submit": "Ongeza bidhaa",
       "added": "{name} imeongezwa. Bado haina bei.",
-      "another": "Ongeza bidhaa nyingine"
+      "another": "Ongeza bidhaa nyingine",
+      "unitHelp": "Kitu ambacho eneo la kazi linahesabu, linapokea na kuuza: kipande, mfuko, ndoo.",
+      "content": "Kimoja kina nini",
+      "contentHelp": "Si lazima. Kwa mfano kilo 50, lita 20 au futi 12. Acha wazi kama haihusiki.",
+      "newUnit": "Ongeza kipimo cha kuhesabu",
+      "newUnitHeading": "Kipimo kipya cha kuhesabu",
+      "newUnitHelp": "Majina yote mawili yanahitajika. Kila mtu ataliona neno hili.",
+      "unitLabelEn": "Kwa Kiingereza",
+      "unitLabelSw": "Kwa Kiswahili",
+      "unitSubmit": "Hifadhi kipimo",
+      "unitCancel": "Ghairi",
+      "unitCreated": "Kipimo kimeongezwa na kimechaguliwa.",
+      "finishUnitFirst": "Hifadhi au ghairi kipimo cha kuhesabu kwanza."
     },
     "price": {
       "set": "Weka bei",
@@ -225,13 +229,15 @@
       "historyFrom": "ilikuwa {price}",
       "historyFirst": "bei ya kwanza",
       "setBy": "Imewekwa na {who}"
-    }
+    },
+    "contentLabel": "Kila moja ina",
+    "priceLabelPerUnit": "Bei ya {unit} moja"
   },
   "catalogueErrors": {
     "generic": "Haikufanikiwa. Jaribu tena.",
     "not_permitted": "Huruhusiwi kufanya hivyo.",
     "product_exists": "Bidhaa hiyo tayari ipo kwenye orodha.",
-    "unknown_unit": "Chagua jinsi bidhaa inavyouzwa.",
+    "unknown_unit": "Chagua jinsi bidhaa inavyohesabiwa.",
     "no_product": "Bidhaa hiyo haipo tena. Pakia ukurasa upya.",
     "price_unchanged": "Hiyo tayari ndiyo bei. Weka kiasi kingine au ghairi.",
     "price_required": "Weka bei kwa shilingi nzima.",
@@ -246,7 +252,7 @@
       "tooLong": "Daraja hilo ni refu mno."
     },
     "unit": {
-      "required": "Chagua jinsi bidhaa inavyouzwa."
+      "required": "Chagua jinsi bidhaa inavyohesabiwa."
     },
     "price": {
       "invalid": "Weka bei kwa shilingi nzima, bila senti.",
@@ -255,6 +261,19 @@
     "reason": {
       "tooShort": "Eleza kwa nini bei inabadilika.",
       "tooLong": "Maelezo hayo ni marefu mno."
+    },
+    "unit_exists": "Tayari kuna kipimo chenye jina hilo.",
+    "label_required": "Kipe kipimo jina kwa lugha zote mbili.",
+    "unitLabelEn": {
+      "tooShort": "Weka jina la kipimo kwa Kiingereza.",
+      "tooLong": "Jina hilo ni refu mno."
+    },
+    "unitLabelSw": {
+      "tooShort": "Weka jina la kipimo kwa Kiswahili.",
+      "tooLong": "Jina hilo ni refu mno."
+    },
+    "unitContent": {
+      "tooLong": "Hiyo ni ndefu mno. Iwe fupi, kama kilo 50."
     }
   }
 }

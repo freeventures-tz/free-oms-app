@@ -25,9 +25,17 @@ export default async function ProductsLoading() {
           >
             <div className="flex flex-col gap-2">
               <Skeleton className="h-5 w-[180px] rounded-sm" />
+              {/* Two lines under the name, because a card now carries two facts about measurement:
+                  what it is counted by, and what one of those holds (product.md §6). Most of the
+                  catalogue has both, so a two-line skeleton would buy the first layout shift with
+                  a second one (design.md §12.7 rule 3). */}
               <Skeleton className="h-3.5 w-[110px] rounded-sm" />
+              <Skeleton className="h-3.5 w-[90px] rounded-sm" />
             </div>
-            <Skeleton className="h-6 w-[140px] rounded-sm" />
+            <div className="flex flex-col gap-1.5 md:items-end">
+              <Skeleton className="h-6 w-[140px] rounded-sm" />
+              <Skeleton className="h-3.5 w-[100px] rounded-sm" />
+            </div>
           </div>
         ))}
       </div>

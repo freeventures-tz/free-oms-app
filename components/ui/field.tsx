@@ -59,6 +59,35 @@ export function Field({ className, ...props }: React.ComponentProps<"div">) {
   return <div className={cn("flex flex-col gap-2", className)} {...props} />;
 }
 
+/**
+ * A confirmation the server has already given.
+ *
+ * `role="status"` with `aria-live="polite"` is the success counterpart of `FormError`'s
+ * `role="alert"`: a screen reader hears it at the next natural pause instead of being interrupted,
+ * and nothing steals focus. Sighted users get a sentence appearing where they are already looking;
+ * without this, a user who cannot see it gets nothing at all.
+ *
+ * Only ever rendered from a result the server returned. Announcing a success before confirmation
+ * would be the one thing design.md §12.7 rule 5 forbids outright.
+ */
+export function FormSuccess({ className, children, ...props }: React.ComponentProps<"p">) {
+  if (!children) return null;
+  return (
+    // The caller's props go on FIRST and the accessible semantics after, so an `id` or a `data-*`
+    // arrives as the declared type promises while `role` and `aria-live` stay the component's own.
+    // A caller reaching for `role="alert"` here would interrupt a screen-reader user to tell them
+    // something went right, which is the failure this primitive exists to prevent.
+    <p
+      {...props}
+      role="status"
+      aria-live="polite"
+      className={cn("text-sm text-success", className)}
+    >
+      {children}
+    </p>
+  );
+}
+
 /** A whole-form failure, shown above the fields — never revealing which detail was wrong. */
 export function FormError({ children }: { children?: React.ReactNode }) {
   if (!children) return null;
