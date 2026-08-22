@@ -33,6 +33,20 @@ export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   // database, because a Sales Representative cannot write an order without knowing what a thing
   // costs. Restricting the route is a navigation decision; nothing here is a secret.
   { prefix: "/settings/products", roles: ["manager", "director"] },
+
+  // Suppliers: Director registers, Manager reads (product.md §9 requires the record; who creates
+  // one is a derived decision recorded in the Stage 10D plan).
+  { prefix: "/settings/suppliers", roles: ["manager", "director"] },
+
+  // Supplier receiving is the one stock route a Cashier and a Sales Representative reach, because
+  // §9.1 lets receipt ENTRY be delegated to them. It is listed BEFORE `/inventory` so the more
+  // specific prefix wins: `rolesAllowedFor` takes the first match, and `/inventory` would otherwise
+  // swallow it and refuse both roles.
+  { prefix: "/inventory/receiving", roles: ["sales_rep", "cashier", "manager", "director"] },
+
+  // Everything else under Inventory is Manager and Director (design.md §4.2). What each of them may
+  // DO there differs by screen and is decided by the database, not by this list.
+  { prefix: "/inventory", roles: ["manager", "director"] },
 ];
 
 export function rolesAllowedFor(pathname: string): readonly AppRole[] | null {

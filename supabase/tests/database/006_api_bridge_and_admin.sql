@@ -4,12 +4,19 @@
 -- that distinction, and the prefix rule that now carries it:
 --
 --   api.admin_*   `authenticated` Directors. Derives its own actor. May START administrative work.
+--   api.staff_*   `authenticated` staff. Derives its own actor AND the roles it allows, from
+--                 product.md §4.1 — receiving is entered by a Manager, a Cashier or a Sales
+--                 Representative, and none of those is a Director.
 --   api.self_*    any `authenticated` user. Derives its own identity and acts only on itself.
 --   api.service_* `service_role` only. Takes ids and a worker token, never an identity.
+--
+-- `staff_` arrived with Stage 10D. It carries exactly the same guarantee as `admin_` — granted to
+-- `authenticated`, refused inside the function unless the caller holds an allowed live role, and no
+-- actor parameter anywhere — so the three assertions below cover it on the same terms.
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(27);
+select plan(28);
 
 create schema if not exists tests;
 
@@ -44,6 +51,7 @@ select is(
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'api'
       and p.proname not like 'admin\_%'
+      and p.proname not like 'staff\_%'
       and p.proname not like 'self\_%'
       and p.proname not like 'service\_%'),
   '',
@@ -52,12 +60,27 @@ select is(
 select is(
   (select coalesce(string_agg(p.proname, ', ' order by p.proname), '')
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'api' and (p.proname like 'admin\_%' or p.proname like 'self\_%')
+    where n.nspname = 'api' and (p.proname like 'admin\_%' or p.proname like 'staff\_%'
+                                 or p.proname like 'self\_%')
       and (not has_function_privilege('authenticated', p.oid, 'execute')
            or has_function_privilege('service_role', p.oid, 'execute')
            or has_function_privilege('anon', p.oid, 'execute'))),
   '',
-  'every api.admin_ and api.self_ function is executable by authenticated ALONE');
+  'every api.admin_, api.staff_ and api.self_ function is executable by authenticated ALONE');
+
+-- The prefix is a promise about WHO, and it would be worth nothing if a staff_ function let the
+-- caller say who they were. Same rule the service_ functions are held to, one row below in spirit:
+-- authority is derived from the verified session, never supplied.
+select is(
+  (select coalesce(string_agg(p.proname, ', ' order by p.proname), '')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'api'
+      and p.proname like 'staff\_%'
+      and (pg_get_function_identity_arguments(p.oid) like '%p_user_id%'
+           or pg_get_function_identity_arguments(p.oid) like '%p_actor%'
+           or pg_get_function_identity_arguments(p.oid) like '%p_role%')),
+  '',
+  'no api.staff_ function accepts an identity or a role -- both come from the session');
 
 select is(
   (select coalesce(string_agg(p.proname, ', ' order by p.proname), '')
