@@ -28,13 +28,30 @@ import { useGuardedAction } from "@/lib/ui/use-guarded-action";
  *
  * `Africa/Dar_es_Salaam` and not the browser's zone, for the same reason the delivery date is
  * decided on the server: an accountability record has to read the same to everybody who opens it.
+ *
+ * The formatter is built once per locale and kept. Constructing an `Intl.DateTimeFormat` is the
+ * expensive half of formatting a date — it resolves locale data every time — and a receiving board
+ * renders two timestamps per card for up to two hundred cards, so building one per timestamp is
+ * hundreds of resolutions to produce at most two distinct formatters.
  */
+const STAMP_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+
+function stampFormatter(locale: string): Intl.DateTimeFormat {
+  const tag = locale === "sw" ? "sw-TZ" : "en-GB";
+  let formatter = STAMP_FORMATTERS.get(tag);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(tag, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Africa/Dar_es_Salaam",
+    });
+    STAMP_FORMATTERS.set(tag, formatter);
+  }
+  return formatter;
+}
+
 function formatStamp(iso: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale === "sw" ? "sw-TZ" : "en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Africa/Dar_es_Salaam",
-  }).format(new Date(iso));
+  return stampFormatter(locale).format(new Date(iso));
 }
 
 /** A line as the person is typing it — strings, because a half-typed number is not a number. */
@@ -412,9 +429,11 @@ function NewReceiptForm({
       // second one (design.md §12.7).
       if (outcome.successKey) {
         setSupplierId("");
-        // Back to the business's today, not to blank: the next delivery is usually the same day's,
-        // and an emptied field would make the person type what the server already knows.
-        setDeliveryDate(today);
+        // The date the SERVER computed as this command succeeded, not the one this page was
+        // rendered with. They differ when the form has been open across midnight in Dar es Salaam,
+        // and the `today` prop is then a day stale — falling back to it only if the response
+        // carried nothing, which no successful receipt does.
+        setDeliveryDate(outcome.businessDate ?? today);
         setDeliveryNoteRef("");
         setLines([emptyLine()]);
         setIdempotencyKey(crypto.randomUUID());

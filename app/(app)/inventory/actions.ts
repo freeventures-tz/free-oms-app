@@ -28,6 +28,7 @@ import {
   rejectionSchema,
   setSupplierActiveSchema,
 } from "@/lib/validation/inventory";
+import { businessDate } from "@/lib/time/business-date";
 
 /**
  * Stock writes (product.md §4.1, §9, §10).
@@ -92,6 +93,15 @@ export type InventoryActionState = {
    * with them it says "there are 12 and you asked for 30", which is a sentence somebody can act on.
    */
   errorValues?: Record<string, string | number>;
+  /**
+   * The business date AT THE MOMENT THE COMMAND SUCCEEDED, for a form that clears itself.
+   *
+   * The date a page was rendered with is the right answer until the page outlives it. A receiving
+   * screen left open across midnight in Dar es Salaam would otherwise reset to yesterday, and the
+   * person recording the first delivery of the new day would not obviously see anything wrong.
+   * Sent only on success, and computed on the server for the same reason the initial one is.
+   */
+  businessDate?: string;
 };
 
 /** Every stock screen revalidates the same three routes: a movement changes all of them. */
@@ -229,7 +239,10 @@ export async function enterReceiptAction(
   if (!result.ok) return { error: errorKey(result.reason) };
 
   revalidateStock();
-  return { successKey: "inventory.receiving.entered" };
+  // Computed here, after the work, rather than reused from the request: this is the date the NEXT
+  // delivery should start with, and the two differ exactly when the form has been open across
+  // midnight — which is the case worth being right about.
+  return { successKey: "inventory.receiving.entered", businessDate: businessDate() };
 }
 
 export async function approveReceiptAction(
