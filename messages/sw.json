@@ -453,6 +453,9 @@
       "approvedBy": "Imeidhinishwa na {who}",
       "rejected": "Imekataliwa",
       "rejectedBy": "Imekataliwa na {who}",
+      "approvedByRole": "Imeidhinishwa na {who} ({role})",
+      "rejectedByRole": "Imekataliwa na {who} ({role})",
+      "decidedAt": "Iliamuliwa {when}",
       "reasonGiven": "Sababu: {reason}"
     }
   },

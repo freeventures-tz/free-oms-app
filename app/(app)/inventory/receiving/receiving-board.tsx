@@ -15,8 +15,27 @@ import { Field, FieldError, FormError, FormSuccess, Help, Input, Label, Select }
 import { Card, StatusChip } from "@/components/ui/surface";
 import type { CatalogueProduct, Unit } from "@/lib/catalogue/catalogue";
 import { unitLabel } from "@/lib/catalogue/unit-label";
-import type { InventoryLocation, StockReceipt, Supplier } from "@/lib/inventory/inventory";
+import type {
+  ApprovalState,
+  InventoryLocation,
+  StockReceipt,
+  Supplier,
+} from "@/lib/inventory/inventory";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
+
+/**
+ * A timestamp in the business's own time zone, in the reader's language.
+ *
+ * `Africa/Dar_es_Salaam` and not the browser's zone, for the same reason the delivery date is
+ * decided on the server: an accountability record has to read the same to everybody who opens it.
+ */
+function formatStamp(iso: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale === "sw" ? "sw-TZ" : "en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Africa/Dar_es_Salaam",
+  }).format(new Date(iso));
+}
 
 /** A line as the person is typing it — strings, because a half-typed number is not a number. */
 type DraftLine = {
@@ -72,6 +91,7 @@ export function ReceivingBoard({
   canEnter,
   canApprove,
   idempotencyKey,
+  today,
 }: {
   receipts: StockReceipt[];
   suppliers: Supplier[];
@@ -81,6 +101,8 @@ export function ReceivingBoard({
   canEnter: boolean;
   canApprove: boolean;
   idempotencyKey: string;
+  /** Today in `Africa/Dar_es_Salaam`, as `YYYY-MM-DD`, decided on the server. */
+  today: string;
 }) {
   const t = useTranslations("inventory.receiving");
 
@@ -96,6 +118,7 @@ export function ReceivingBoard({
           units={units}
           locations={locations}
           initialKey={idempotencyKey}
+          today={today}
         />
       ) : null}
 
@@ -140,6 +163,66 @@ export function ReceivingBoard({
   );
 }
 
+/**
+ * What was decided about a receipt, by whom, in what role, and when (product.md §4.2, §4.3).
+ *
+ * Rendered only once a decision exists. Every part is read from the record rather than assumed:
+ * an approval and a rejection are different outcomes with different consequences, and a decision
+ * missing its decider is shown as the plain outcome rather than as a sentence with a blank in it.
+ */
+function DecisionRecord({
+  approval,
+  receiptId,
+}: {
+  approval: ApprovalState;
+  receiptId: string;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+
+  const approved = approval.status === "approved";
+  // Everything that is neither approved nor pending — rejected, cancelled, expired, superseded —
+  // is a settled decision in which nothing was approved, and reads as one (§4.3).
+  const attributed = approval.decidedByName && approval.decidedRole;
+
+  return (
+    <div
+      className="flex flex-col items-start gap-1"
+      data-testid={`decision-record-${receiptId}`}
+      data-outcome={approved ? "approved" : "rejected"}
+      // The machine-readable instant beside the rendered one, so a reader in either language and a
+      // test in neither are looking at the same fact.
+      data-decided-at={approval.decidedAt ?? undefined}
+      data-decided-role={approval.decidedRole ?? undefined}
+    >
+      <StatusChip tone={approved ? "success" : "danger"}>
+        {attributed
+          ? t(approved ? "inventory.status.approvedByRole" : "inventory.status.rejectedByRole", {
+              who: approval.decidedByName!,
+              role: t(`admin.roles.${approval.decidedRole}`),
+            })
+          : t(approved ? "inventory.status.approved" : "inventory.status.rejected")}
+      </StatusChip>
+
+      {approval.decidedAt ? (
+        <p className="text-xs text-muted-foreground">
+          {t("inventory.status.decidedAt", {
+            when: formatStamp(approval.decidedAt, locale),
+          })}
+        </p>
+      ) : null}
+
+      {/* The reason a rejection was given. §4.3 requires it to be recorded; showing it is what
+          makes the record answerable a year later. */}
+      {approval.note ? (
+        <p className="text-xs text-muted-foreground">
+          {t("inventory.status.reasonGiven", { reason: approval.note })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function ReceiptCard({
   receipt,
   products,
@@ -173,26 +256,39 @@ function ReceiptCard({
             <p className="text-xs text-muted-foreground">
               {t(`inventory.stock.locations.${receipt.locationCode}`)} · {receipt.deliveryDate}
             </p>
-            {/* Entered by and approved by are shown as DISTINCT facts, each with its role
-                (design.md §7.14, product.md §4.2). */}
-            <p className="text-xs text-muted-foreground">
+            {/* Entered by and decided by are shown as DISTINCT facts, each with its own person,
+                role and moment (design.md §7.14, product.md §4.2). Entry is never evidence that
+                anything was approved, so it carries its own timestamp even while nobody has
+                decided yet. */}
+            <p className="text-xs text-muted-foreground" data-testid={`entry-record-${receipt.id}`}>
               {t("inventory.receiving.enteredBy", {
                 who: receipt.enteredByName,
                 role: t(`admin.roles.${receipt.enteredRole}`),
-              })}
+              })}{" "}
+              ·{" "}
+              <time dateTime={receipt.enteredAt}>{formatStamp(receipt.enteredAt, locale)}</time>
             </p>
           </div>
 
           <div className="shrink-0">
-            <DecisionControls
-              entityId={receipt.id}
-              approval={receipt.approval}
-              canDecide={canApprove}
-              approveAction={approveReceiptAction}
-              rejectAction={rejectReceiptAction}
-              approveLabel={t("inventory.receiving.approve")}
-              approveConsequence={t("inventory.receiving.approveConsequence")}
-            />
+            {/* A settled receipt is a RECORD, not a control. `DecisionControls` renders the two
+                buttons and the pending state; once a decision exists the card owns the answer,
+                which is why the whole record — who, in what role, and when — is written here and
+                the shared badge is not also rendered. Two elements both reading "Approved by" would
+                say the same fact twice and agree only by accident. */}
+            {receipt.approval.status === "pending" ? (
+              <DecisionControls
+                entityId={receipt.id}
+                approval={receipt.approval}
+                canDecide={canApprove}
+                approveAction={approveReceiptAction}
+                rejectAction={rejectReceiptAction}
+                approveLabel={t("inventory.receiving.approve")}
+                approveConsequence={t("inventory.receiving.approveConsequence")}
+              />
+            ) : (
+              <DecisionRecord approval={receipt.approval} receiptId={receipt.id} />
+            )}
           </div>
         </div>
 
@@ -284,12 +380,14 @@ function NewReceiptForm({
   units,
   locations,
   initialKey,
+  today,
 }: {
   suppliers: Supplier[];
   products: CatalogueProduct[];
   units: Unit[];
   locations: InventoryLocation[];
   initialKey: string;
+  today: string;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -297,7 +395,9 @@ function NewReceiptForm({
   const [open, setOpen] = useState(false);
   const [supplierId, setSupplierId] = useState("");
   const [locationCode, setLocationCode] = useState(locations[0]?.code ?? "");
-  const [deliveryDate, setDeliveryDate] = useState("");
+  // The business's today, not the device's. Computed on the server and handed down, so a phone set
+  // to another zone cannot offer yesterday as today (lib/time/business-date.ts).
+  const [deliveryDate, setDeliveryDate] = useState(today);
   const [deliveryNoteRef, setDeliveryNoteRef] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [idempotencyKey, setIdempotencyKey] = useState(initialKey);
@@ -312,7 +412,9 @@ function NewReceiptForm({
       // second one (design.md §12.7).
       if (outcome.successKey) {
         setSupplierId("");
-        setDeliveryDate("");
+        // Back to the business's today, not to blank: the next delivery is usually the same day's,
+        // and an emptied field would make the person type what the server already knows.
+        setDeliveryDate(today);
         setDeliveryNoteRef("");
         setLines([emptyLine()]);
         setIdempotencyKey(crypto.randomUUID());

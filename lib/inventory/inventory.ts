@@ -60,6 +60,13 @@ export type LedgerEntry = {
 export type ApprovalState = {
   status: "pending" | "approved" | "rejected" | string;
   decidedByName: string | null;
+  /**
+   * The role the decider held AT THE MOMENT THEY DECIDED, not the role they hold now.
+   *
+   * Both sources store it beside the decision for that reason — a person whose role changes later
+   * must not silently rewrite who authorised a stock movement last month (§4.2).
+   */
+  decidedRole: AppRole | null;
   decidedAt: string | null;
   /** Present on a rejection: the reason the decider gave (§4.3). */
   note: string | null;
@@ -139,7 +146,7 @@ async function approvalsFor(
     await supabase
       .from("approval_requests")
       .select(`
-        entity_id, status, approved_at,
+        entity_id, status, approved_at, approved_role,
         profiles!approval_requests_approved_by_fkey(full_name)
       `)
       .eq("entity_type", entityType),
@@ -152,7 +159,7 @@ async function approvalsFor(
     await supabase
       .from("approval_decisions")
       .select(`
-        request_id, outcome, note, decided_at,
+        request_id, outcome, note, decided_at, decided_role,
         approval_requests!inner(entity_id, entity_type),
         profiles!approval_decisions_decided_by_fkey(full_name)
       `)
@@ -161,13 +168,17 @@ async function approvalsFor(
     `inventory.decisions.${entityType}`,
   );
 
-  const latestDecision = new Map<string, { name: string; note: string | null; at: string }>();
+  const latestDecision = new Map<
+    string,
+    { name: string; role: AppRole | null; note: string | null; at: string }
+  >();
   for (const row of decisions) {
     const parent = row.approval_requests as { entity_id: string } | { entity_id: string }[] | null;
     const entityId = Array.isArray(parent) ? parent[0]?.entity_id : parent?.entity_id;
     if (!entityId || latestDecision.has(entityId)) continue;
     latestDecision.set(entityId, {
       name: nameOf(row.profiles),
+      role: (row.decided_role as AppRole | null) ?? null,
       note: (row.note as string | null) ?? null,
       at: row.decided_at as string,
     });
@@ -182,6 +193,9 @@ async function approvalsFor(
       // On an approval both sources agree; on a rejection only the decision has a name, because
       // `approved_by` is null by design and reading it would show a rejection as unattributed.
       decidedByName: nameOf(row.profiles) || decision?.name || null,
+      // The same asymmetry, for the same reason: `approval_fields_match_status` permits
+      // `approved_role` only on an approval, so a rejection's role comes from the decision row.
+      decidedRole: (row.approved_role as AppRole | null) ?? decision?.role ?? null,
       decidedAt: (row.approved_at as string | null) ?? decision?.at ?? null,
       note: decision?.note ?? null,
     });
@@ -192,6 +206,7 @@ async function approvalsFor(
 const PENDING: ApprovalState = {
   status: "pending",
   decidedByName: null,
+  decidedRole: null,
   decidedAt: null,
   note: null,
 };

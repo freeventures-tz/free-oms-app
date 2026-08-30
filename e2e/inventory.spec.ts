@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { businessDate } from "@/lib/time/business-date";
+
 import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
 
 /**
@@ -224,6 +226,35 @@ test.describe.serial("a delivery becomes stock", () => {
     await expect(card.getByText(/2 short, recorded permanently/i)).toBeVisible();
     await expect(card.getByText(/approved by/i)).toBeVisible();
   });
+
+  test("the card says who entered it and who approved it, each with a role and a moment", async ({
+    page,
+  }) => {
+    await signInAs(page, "manager");
+    await page.goto(RECEIVING_HREF);
+
+    const card = page.getByRole("article", { name: `${supplierName} ${noteRef}`, exact: true });
+
+    // ENTRY: the Cashier who recorded it, the role they held while doing so, and when. §4.2 makes
+    // this a fact in its own right — it is not evidence that anything was approved.
+    const entry = card.locator("[data-testid^='entry-record-']");
+    await expect(entry).toContainText("E2E Cashier");
+    await expect(entry).toContainText("Cashier");
+    await expect(entry.locator("time")).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/);
+
+    // DECISION: a different person, in a different role, at a different moment. A Cashier may enter
+    // a delivery and may never approve one, so a card that showed only "approved" would hide the
+    // half of the record that says who is answerable for the stock rising.
+    const decision = card.locator("[data-testid^='decision-record-']");
+    await expect(decision).toHaveAttribute("data-outcome", "approved");
+    await expect(decision).toHaveAttribute("data-decided-role", "manager");
+    await expect(decision).toHaveAttribute("data-decided-at", /^\d{4}-\d{2}-\d{2}T/);
+    await expect(decision).toContainText("Approved by E2E Manager (Manager)");
+    await expect(decision).toContainText(/decided/i);
+
+    // The two attributions are separate elements, not one sentence doing both jobs.
+    await expect(entry).not.toContainText(/approved by/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -281,6 +312,32 @@ test.describe.serial("a delivery is rejected", () => {
     await expect(settled.getByText(/wrong grade of ply/i)).toBeVisible();
 
     expect(await stockAt(page, "warehouse", PRODUCT)).toBe(before);
+  });
+
+  test("the rejection is attributed as completely as an approval would be", async ({ page }) => {
+    await signInAs(page, "manager");
+    await page.goto(RECEIVING_HREF);
+
+    const card = page.getByRole("article", { name: `${supplierName} ${noteRef}`, exact: true });
+
+    const entry = card.locator("[data-testid^='entry-record-']");
+    await expect(entry).toContainText("E2E Sales Rep");
+    await expect(entry).toContainText("Sales Representative");
+    await expect(entry.locator("time")).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/);
+
+    // A rejection records no approver at all (§4.3, AC-84), so its decider and their role come
+    // from the decision rather than from the approval. The record has to be just as complete —
+    // refusing a delivery is a decision somebody is answerable for.
+    const decision = card.locator("[data-testid^='decision-record-']");
+    await expect(decision).toHaveAttribute("data-outcome", "rejected");
+    await expect(decision).toHaveAttribute("data-decided-role", "manager");
+    await expect(decision).toHaveAttribute("data-decided-at", /^\d{4}-\d{2}-\d{2}T/);
+    await expect(decision).toContainText("Rejected by E2E Manager (Manager)");
+    await expect(decision).toContainText(/decided/i);
+    await expect(decision).toContainText(/wrong grade of ply/i);
+
+    // Nowhere on a rejected card does the word "approved" appear about the decision.
+    await expect(card.getByText(/approved by/i)).toHaveCount(0);
   });
 });
 
@@ -481,5 +538,108 @@ test.describe("the stock screen on every tier", () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow, "the page body scrolls horizontally").toBeLessThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The delivery date the form offers, which is the yard's today and not the device's
+// ---------------------------------------------------------------------------
+test.describe.serial("the delivery date a new receipt starts with", () => {
+  // Eleven hours ahead of Dar es Salaam. For eleven hours out of every twenty-four this device
+  // is on a different calendar day from the yard, which is exactly the disagreement a
+  // browser-derived default would resolve the wrong way.
+  test.use({ timezoneId: "Pacific/Kiritimati" });
+
+  let supplierName: string;
+
+  test("a supplier exists to receive from", async ({ page }) => {
+    supplierName = unique("E2E Dated");
+
+    await signInAs(page, "director");
+    await page.goto(SUPPLIERS_HREF);
+    await page.getByLabel(/supplier name/i).fill(supplierName);
+    await page.locator("#addSupplier").click();
+    await expect(page.getByText(/supplier added/i)).toBeVisible();
+  });
+
+  test("opens already filled in with today in Dar es Salaam", async ({ page }) => {
+    await signInAs(page, "cashier");
+    await page.goto(RECEIVING_HREF);
+    await page.locator("#newReceipt").click();
+
+    const field = page.getByLabel(/delivery date/i);
+    // Computed in Node from the same helper the server uses — not read back off the page, which
+    // would only prove the page agrees with itself.
+    await expect(field).toHaveValue(businessDate());
+
+    // What the DEVICE would have offered. When the two calendars disagree, this is the value a
+    // default derived from the browser would have shown, and the field must not be showing it.
+    const deviceDate = await page.evaluate(() => {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+      return `${value("year")}-${value("month")}-${value("day")}`;
+    });
+    if (deviceDate !== businessDate()) {
+      await expect(field).not.toHaveValue(deviceDate);
+    }
+  });
+
+  test("a REFUSAL keeps the date the person entered, and everything else they typed", async ({
+    page,
+  }) => {
+    await signInAs(page, "cashier");
+    await page.goto(RECEIVING_HREF);
+    await page.locator("#newReceipt").click();
+
+    // Tomorrow in the yard. The database is what refuses a future delivery date (§15.3), so this
+    // is a real round trip and a real refusal rather than a client-side guess.
+    const tomorrow = new Date(Date.parse(`${businessDate()}T12:00:00Z`) + 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const noteRef = unique("DND").replace(" ", "-");
+
+    await page.getByLabel(/^supplier$/i).selectOption({ label: supplierName });
+    await page.getByLabel(/delivered to/i).selectOption("store");
+    await page.getByLabel(/delivery date/i).fill(tomorrow);
+    await page.getByLabel(/delivery note number/i).fill(noteRef);
+    await page.getByLabel(/^product$/i).selectOption({ label: PRODUCT });
+    await page.getByLabel(/^expected/i).fill("4");
+    await page.getByLabel(/^received$/i).fill("4");
+
+    await page.locator("#submitReceipt").click();
+    await expect(page.getByText(/cannot be dated in the future/i)).toBeVisible();
+
+    // The refusal does NOT reset the form to the business date. Everything the person typed is
+    // still there, including the date they chose, so the correction is one edit and not a retype
+    // (design.md §12.7).
+    await expect(page.getByLabel(/delivery date/i)).toHaveValue(tomorrow);
+    await expect(page.getByLabel(/delivery note number/i)).toHaveValue(noteRef);
+    await expect(page.getByLabel(/^received$/i)).toHaveValue("4");
+  });
+
+  test("a SUCCESS returns the field to the business date, not to blank", async ({ page }) => {
+    await signInAs(page, "cashier");
+    await page.goto(RECEIVING_HREF);
+    await page.locator("#newReceipt").click();
+
+    await page.getByLabel(/^supplier$/i).selectOption({ label: supplierName });
+    await page.getByLabel(/delivered to/i).selectOption("store");
+    await page.getByLabel(/delivery note number/i).fill(unique("DNS").replace(" ", "-"));
+    await page.getByLabel(/^product$/i).selectOption({ label: PRODUCT });
+    await page.getByLabel(/^expected/i).fill("6");
+    await page.getByLabel(/^received$/i).fill("6");
+
+    // The date is deliberately left as it opened — proving the default is submittable as it stands.
+    await page.locator("#submitReceipt").click();
+    await expect(page.getByText(/waiting for a manager to approve/i)).toBeVisible();
+
+    // The next delivery is usually the same day's, so an emptied field would make the person type
+    // what the server already knows.
+    await expect(page.getByLabel(/delivery date/i)).toHaveValue(businessDate());
+    await expect(page.getByLabel(/delivery note number/i)).toHaveValue("");
   });
 });

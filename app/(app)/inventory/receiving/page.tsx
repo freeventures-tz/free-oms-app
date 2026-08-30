@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
 import { loadCatalogue } from "@/lib/catalogue/catalogue";
 import { loadReceipts, loadStockOverview, loadSuppliers } from "@/lib/inventory/inventory";
+import { businessDate } from "@/lib/time/business-date";
 
 /**
  * Inventory › Supplier receiving (design.md §7.14, product.md §9).
@@ -48,6 +49,10 @@ export default async function ReceivingPage() {
         }
         canApprove={viewer.role === "manager"}
         idempotencyKey={randomUUID()}
+        // Today in Dar es Salaam, decided here rather than in the browser. Most deliveries are
+        // recorded on the day they arrive, so this is the answer that is usually right — and when
+        // it is not, the field is still an ordinary date input the person can change.
+        today={businessDate()}
       />
     </>
   );

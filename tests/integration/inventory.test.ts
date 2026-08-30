@@ -449,7 +449,7 @@ describe("the reads the screens actually make", () => {
     expect(adjustments.error, adjustments.error?.message).toBeNull();
 
     const approvals = await director.read.from("approval_requests").select(`
-      entity_id, status, approved_at,
+      entity_id, status, approved_at, approved_role,
       profiles!approval_requests_approved_by_fkey(full_name)
     `);
     expect(approvals.error, approvals.error?.message).toBeNull();
@@ -457,7 +457,7 @@ describe("the reads the screens actually make", () => {
     const decisions = await director.read
       .from("approval_decisions")
       .select(`
-        request_id, outcome, note, decided_at,
+        request_id, outcome, note, decided_at, decided_role,
         approval_requests!inner(entity_id, entity_type),
         profiles!approval_decisions_decided_by_fkey(full_name)
       `)
@@ -476,5 +476,184 @@ describe("the reads the screens actually make", () => {
     const ledger = await cashier.read.from("inventory_ledger").select("id");
     expect(ledger.error).toBeNull();
     expect(ledger.data ?? []).toHaveLength(0);
+  });
+});
+
+/**
+ * The evidence a receipt screen has to be able to show (product.md §4.2, §4.3).
+ *
+ * §4.2 makes entry and decision two separate facts, each with its own person, role and moment, and
+ * the point of storing the ROLE beside each is that a person's role can change afterwards. These
+ * read exactly the way `lib/inventory/inventory.ts` reads, because the risk is not that the columns
+ * are empty — pgTAP already proves they are written — but that the screen's query cannot reach
+ * them, or reaches the wrong one on a rejection.
+ */
+describe("the accountability record behind a receipt", () => {
+  const nameOf = (profiles: unknown): string => {
+    const value = profiles as { full_name: string } | { full_name: string }[] | null;
+    return (Array.isArray(value) ? value[0]?.full_name : value?.full_name) ?? "";
+  };
+
+  async function enterReceipt(who: Fixture, locationCode: string): Promise<string> {
+    const { data, error } = await who.api.rpc("staff_enter_stock_receipt", {
+      p_supplier_id: supplierId,
+      p_location_code: locationCode,
+      p_delivery_date: new Date().toISOString().slice(0, 10),
+      p_delivery_note_ref: `DN-${randomUUID().slice(0, 6)}`,
+      p_lines: [{ product_id: secondProductId, expected_quantity: 12, received_quantity: 12 }],
+      p_idempotency_key: randomUUID(),
+    });
+    expect(error?.message).toBeUndefined();
+    expect(data?.ok, JSON.stringify(data)).toBe(true);
+    return (data.receipt as { id: string }).id;
+  }
+
+  /** The entry half, read the way the screen reads it. */
+  async function entryOf(receiptId: string) {
+    const { data, error } = await director.read
+      .from("stock_receipts")
+      .select(`
+        id, entered_role, entered_at,
+        profiles!stock_receipts_entered_by_fkey(full_name)
+      `)
+      .eq("id", receiptId)
+      .single();
+    expect(error, error?.message).toBeNull();
+    return data!;
+  }
+
+  /** The decision half: the request for an approval, the decision row for a rejection. */
+  async function decisionOf(receiptId: string) {
+    const request = await director.read
+      .from("approval_requests")
+      .select(`
+        id, entity_id, status, approved_at, approved_role,
+        profiles!approval_requests_approved_by_fkey(full_name)
+      `)
+      .eq("entity_type", "stock_receipt")
+      .eq("entity_id", receiptId)
+      .single();
+    expect(request.error, request.error?.message).toBeNull();
+
+    const decision = await director.read
+      .from("approval_decisions")
+      .select(`
+        request_id, outcome, note, decided_at, decided_role,
+        profiles!approval_decisions_decided_by_fkey(full_name)
+      `)
+      .eq("request_id", request.data!.id as string)
+      .order("decided_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    expect(decision.error, decision.error?.message).toBeNull();
+
+    return { request: request.data!, decision: decision.data };
+  }
+
+  it("names the enterer, their role and the moment, before anybody has decided", async () => {
+    const receiptId = await enterReceipt(cashier, "store");
+
+    const entry = await entryOf(receiptId);
+    expect(nameOf(entry.profiles)).toBe("Test cashier");
+    // The role AS ENTERED. §9.1 delegates entry to three roles and the record has to say which one
+    // actually did it, not merely that somebody was allowed to.
+    expect(entry.entered_role).toBe("cashier");
+    expect(Date.parse(entry.entered_at as string)).toBeGreaterThan(0);
+
+    // Nothing decided yet, and the record says so rather than showing a blank approver.
+    const { request, decision } = await decisionOf(receiptId);
+    expect(request.status).toBe("pending");
+    expect(request.approved_role).toBeNull();
+    expect(request.approved_at).toBeNull();
+    expect(nameOf(request.profiles)).toBe("");
+    expect(decision).toBeNull();
+  });
+
+  it("keeps entry and approval as two separate attributions on an APPROVED receipt", async () => {
+    const receiptId = await enterReceipt(cashier, "store");
+
+    const { data: approved } = await manager.api.rpc("staff_approve_stock_receipt", {
+      p_receipt_id: receiptId,
+      p_idempotency_key: randomUUID(),
+    });
+    expect(approved?.ok, JSON.stringify(approved)).toBe(true);
+
+    const entry = await entryOf(receiptId);
+    const { request } = await decisionOf(receiptId);
+
+    // Two different people in two different roles. The whole value of §4.2 is that these can never
+    // collapse into one line saying only that the receipt exists.
+    expect(nameOf(entry.profiles)).toBe("Test cashier");
+    expect(entry.entered_role).toBe("cashier");
+
+    expect(request.status).toBe("approved");
+    expect(nameOf(request.profiles)).toBe("Test manager");
+    // `approved_role` is the source for an approval — the screen reads it here, not from the
+    // decision row.
+    expect(request.approved_role).toBe("manager");
+    expect(Date.parse(request.approved_at as string)).toBeGreaterThan(0);
+
+    // Entry came first, and the two moments are genuinely distinct facts.
+    expect(Date.parse(request.approved_at as string)).toBeGreaterThanOrEqual(
+      Date.parse(entry.entered_at as string),
+    );
+  });
+
+  it("attributes a REJECTED receipt from the decision, because it has no approver", async () => {
+    const receiptId = await enterReceipt(salesRep, "warehouse");
+
+    const { data: rejected } = await manager.api.rpc("staff_reject_stock_receipt", {
+      p_receipt_id: receiptId,
+      p_reason: "delivery note does not match the load",
+      p_idempotency_key: randomUUID(),
+    });
+    expect(rejected?.ok, JSON.stringify(rejected)).toBe(true);
+
+    const entry = await entryOf(receiptId);
+    expect(nameOf(entry.profiles)).toBe("Test sales_rep");
+    expect(entry.entered_role).toBe("sales_rep");
+    expect(Date.parse(entry.entered_at as string)).toBeGreaterThan(0);
+
+    const { request, decision } = await decisionOf(receiptId);
+
+    // AC-84: a rejection records NO approver. Reading `approved_role` here would render the
+    // deciding Manager's role as blank and the rejection as unattributed, which is the exact
+    // mistake this pair of assertions exists to catch.
+    expect(request.status).toBe("rejected");
+    expect(request.approved_role).toBeNull();
+    expect(nameOf(request.profiles)).toBe("");
+
+    expect(decision).not.toBeNull();
+    expect(decision!.outcome).toBe("rejected");
+    expect(nameOf(decision!.profiles)).toBe("Test manager");
+    expect(decision!.decided_role).toBe("manager");
+    expect(Date.parse(decision!.decided_at as string)).toBeGreaterThan(0);
+    expect(decision!.note).toBe("delivery note does not match the load");
+  });
+
+  it("tells an approved and a rejected receipt apart across the whole history", async () => {
+    const rows = await director.read
+      .from("approval_requests")
+      .select(`
+        entity_id, status, approved_role,
+        approval_decisions(outcome, decided_role, decided_at)
+      `)
+      .eq("entity_type", "stock_receipt");
+    expect(rows.error, rows.error?.message).toBeNull();
+
+    const settled = (rows.data ?? []).filter((row) => row.status !== "pending");
+    expect(settled.some((row) => row.status === "approved")).toBe(true);
+    expect(settled.some((row) => row.status === "rejected")).toBe(true);
+
+    for (const row of settled) {
+      // Whichever way it went, exactly one of the two sources carries the decider's role — never
+      // neither, which would leave a settled receipt nobody can be held to.
+      const decisions = (row.approval_decisions ?? []) as Array<{ decided_role: string | null }>;
+      const role = (row.approved_role as string | null) ?? decisions[0]?.decided_role ?? null;
+      expect(role, `settled receipt ${row.entity_id} has no decider role`).not.toBeNull();
+      if (row.status === "approved") expect(row.approved_role).toBe("manager");
+      // A rejection that grew an `approved_role` would be §4.3 broken at the source.
+      if (row.status === "rejected") expect(row.approved_role).toBeNull();
+    }
   });
 });

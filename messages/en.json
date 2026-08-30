@@ -453,6 +453,9 @@
       "approvedBy": "Approved by {who}",
       "rejected": "Rejected",
       "rejectedBy": "Rejected by {who}",
+      "approvedByRole": "Approved by {who} ({role})",
+      "rejectedByRole": "Rejected by {who} ({role})",
+      "decidedAt": "Decided {when}",
       "reasonGiven": "Reason: {reason}"
     }
   },
