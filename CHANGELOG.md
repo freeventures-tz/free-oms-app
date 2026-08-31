@@ -2,6 +2,82 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.0.3] — 2026-08-31
+
+**Selling.** This release adds customers, orders, quotations, invoices, discounts and the stock a
+confirmed order holds. Taking money, authorising credit, settling an invoice and releasing goods
+are still not in the system, and neither are brick production, petty cash and reports. A walk-in
+(Cash Customer) order can be written and confirmed, and says plainly that nothing is owed and
+nothing is held until payment — and payment is not in this release.
+
+### New
+
+- **Customers are a record.** A Sales Representative, a Manager or a Director adds a customer by
+  name without waiting for anybody, and the same name typed with different capitals or spacing is
+  recognised as the customer who already exists. A Cashier reads customers and does not create
+  them.
+- **Writing an order, without typing a single total.** Search for the customer and pick them from
+  the results; search for each product and pick it from a card that shows its price and how many
+  can be sold; set the quantity with a stepper. Every line total and the subtotal are worked out
+  for you, and there is nowhere to type one. A product no Director has priced cannot be put on an
+  order at all.
+- **On a phone the order is three steps** — customer, then items, then a review — with the number
+  of items and the running total always on screen. Going back a step keeps everything already
+  entered. If something is missing when you submit, the screen lists what it is, takes you to the
+  first one, and keeps everything you typed. On a tablet or a desktop the same three sections are
+  all visible at once, with the running total beside them.
+- **A quotation appears by itself.** Submitting an order produces a numbered quotation with the
+  date it is valid until. Nobody creates one by hand, and the screen says plainly that a quotation
+  is not a bill: nothing is owed and no stock is held until the customer confirms.
+- **The customer can change their mind before they accept.** Revise the quotation from the order
+  screen — change a quantity, add an item, drop one — and a new version is issued. Every earlier
+  version stays readable, so what the customer was told last week is still there.
+- **Discounts go to whoever may decide them.** A Manager may approve up to 5%, and only on an order
+  above one million shillings. Every other discount is a Director's — to **approve or to refuse**,
+  because refusing one settles it just as finally as granting it. The screen names the limit before
+  anybody taps anything and offers a Manager no decision they cannot make, and the database refuses
+  one who reaches it anyway, judging the limit on what the order comes to now rather than on what
+  it came to when the discount was asked for. An approved discount re-quotes the customer, and a
+  rejection has to say why. **Everyone who may confirm the order can see it is waiting on that
+  decision**, including a Sales Representative who did not ask for it, so nobody is offered a
+  confirmation the system is going to refuse.
+- **Confirming an order creates exactly one invoice** and holds the stock for that customer. It
+  takes two deliberate steps — the screen names what confirming will do and waits for a second,
+  separate press, because it creates a financial record. If the system refuses — the stock has gone
+  while the order sat, say — **it says so where you are standing, with the figures and a way to try
+  again**, rather than leaving you to close the question to find the answer. The goods stay
+  physically where they are; what changes is that they can no longer be sold to somebody else.
+  Confirming twice, or two people confirming at the same moment, still produces one invoice and one
+  hold.
+- **An invoice cannot be changed by anybody.** A correction is a cancellation and a new order.
+- **Cancelling an order** releases the stock it was holding and records why. A confirmed order
+  keeps its invoice and its invoice number, marked cancelled with the reason beside it. Any
+  discount still waiting for a decision is withdrawn with the order, and the withdrawal is written
+  down as a decision of its own — who did it, from which role, when, and why — with nobody
+  recorded as having approved anything.
+- **Every order names who wrote it**, to everyone who is allowed to open that order — a Cashier and
+  another Sales Representative included, without either of them gaining anything else about that
+  person: not their phone number, not their role, not whether their account is still switched on.
+  Where a reader is not entitled to an actor's name, the screen says what happened without
+  pretending to name somebody — and if the name cannot be read at all, the page says the order
+  could not be loaded and offers to try again, rather than showing the order with a blank where a
+  person should be. None of these records can be written directly by any account, including a
+  Director's.
+- **Each role is offered only what its work needs.** A Cashier reads orders and is offered no way
+  to start one; a Sales Representative is offered no way to decide a discount.
+- Everything on these screens is in English and Kiswahili, and works on a phone, a tablet and a
+  desktop.
+
+### Fixed
+
+- **A confirmed order can now be cancelled from the order screen.** The rule and the permanent
+  record behind it already worked, but the screen offered the button only while the order was still
+  a quotation, so an order confirmed by mistake could not be withdrawn without help.
+
+### Improved
+
+None.
+
 ## [0.0.2] — 2026-08-30
 
 **Stock.** This release adds who Free Ventures buys from, what is physically at each location, and
