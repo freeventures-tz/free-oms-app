@@ -30,3 +30,40 @@ export function requireRows<T>(result: QueryResult<T>, what: string): T[] {
   }
   return result.data ?? [];
 }
+
+export type ScalarResult = { data: unknown; error: { message: string } | null };
+
+/**
+ * One piece of text that the caller has already established MUST exist, or the same thrown failure.
+ *
+ * `requireRows` has an empty answer to return, because "no orders yet" is a real state. This has
+ * none. It is for a scalar the caller only asks for once it knows the record is there and readable
+ * — the name of the person who wrote an order it has just read — where there is no such thing as
+ * "no answer". A null, an empty string or anything that is not text means the read did not work,
+ * whatever the provider said about it, and the page must say so rather than render a sentence with
+ * a hole in it. That hole is the exact shape of the defect this replaced: a missing name became
+ * "Created by  (Sales Representative)".
+ *
+ * The provider's own message never reaches the thrown error, for the reason above. Neither does the
+ * VALUE when it is the wrong shape: only what shape it was, which is what a log needs and all it
+ * needs.
+ */
+export function requireText(result: ScalarResult, what: string): string {
+  if (result.error) {
+    console.error(`[data] ${what} failed: ${result.error.message}`);
+    throw new Error(`${DATA_UNAVAILABLE}: ${what}`);
+  }
+
+  if (typeof result.data !== "string" || result.data.trim().length === 0) {
+    const shape =
+      result.data === null
+        ? "null"
+        : typeof result.data === "string"
+          ? "blank text"
+          : typeof result.data;
+    console.error(`[data] ${what} returned ${shape} where text was expected`);
+    throw new Error(`${DATA_UNAVAILABLE}: ${what}`);
+  }
+
+  return result.data;
+}

@@ -172,8 +172,13 @@ export async function ensureDirector(): Promise<Fixture> {
 }
 
 /** A live account of the given role, provisioned by a Director through their own session. */
-export async function createLiveStaff(director: Fixture, role: AppRole): Promise<Fixture> {
-  const created = await createGatedStaff(director, role);
+export async function createLiveStaff(
+  director: Fixture,
+  role: AppRole,
+  /** Name it when a test needs two of the same role to be told apart by their display names. */
+  fullName?: string,
+): Promise<Fixture> {
+  const created = await createGatedStaff(director, role, fullName);
   await completeGateAsServer(created.userId, created.password);
   return fixtureFor(created.userId, created.phoneE164, created.password, role);
 }
