@@ -22,6 +22,14 @@ export type E2EFixtures = {
   /** Reads Products & prices and must find no way to change one (design.md §4.3). */
   manager: Credentials;
   salesRep: Credentials;
+  /**
+   * A SECOND Sales Representative.
+   *
+   * product.md §12.6 lets any of the three order roles confirm any order, so "what one
+   * representative can see about another one's order" is a real question with a real answer, and
+   * one account cannot ask it.
+   */
+  salesRepTwo: Credentials;
   cashier: Credentials;
   /**
    * Accounts still holding a temporary password, one per device project.
@@ -157,6 +165,7 @@ export default async function globalSetup(): Promise<void> {
   const directorApi = await directorSession(directorPhone, directorPassword);
 
   const salesRep = await makeLiveAccount(directorApi, "sales_rep", "E2E Sales Rep");
+  const salesRepTwo = await makeLiveAccount(directorApi, "sales_rep", "E2E Sales Rep Two");
   const cashier = await makeLiveAccount(directorApi, "cashier", "E2E Cashier");
   const manager = await makeLiveAccount(directorApi, "manager", "E2E Manager");
 
@@ -185,6 +194,7 @@ export default async function globalSetup(): Promise<void> {
     director: { phone: directorPhone, password: directorPassword },
     manager,
     salesRep,
+    salesRepTwo,
     cashier,
     gated: Object.fromEntries(gatedEntries) as E2EFixtures["gated"],
     gatedCrash: Object.fromEntries(gatedCrashEntries) as E2EFixtures["gatedCrash"],

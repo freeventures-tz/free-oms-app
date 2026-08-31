@@ -4,7 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import en from "@/messages/en.json";
-import { DATA_UNAVAILABLE, requireRows } from "@/lib/supabase/query";
+import { DATA_UNAVAILABLE, requireRows, requireText } from "@/lib/supabase/query";
 
 /**
  * What happens when the system itself fails, rather than refusing.
@@ -199,6 +199,56 @@ describe("a route whose data could not be read", () => {
   it("still treats a genuinely empty result as empty", () => {
     expect(requireRows({ data: [], error: null }, "x")).toEqual([]);
     expect(requireRows({ data: null, error: null }, "x")).toEqual([]);
+  });
+
+  it("refuses a scalar the caller has already established must exist", () => {
+    // `requireRows` has an empty answer to return, because "no orders yet" is a real state. A
+    // single value the caller only asks for once it knows the record is there has none: a null, a
+    // blank or the wrong type all mean the read did not work.
+    expect(() => requireText({ data: null, error: null }, "sales.order_creator")).toThrow(
+      `${DATA_UNAVAILABLE}: sales.order_creator`,
+    );
+    expect(() => requireText({ data: "", error: null }, "sales.order_creator")).toThrow(
+      DATA_UNAVAILABLE,
+    );
+    expect(() => requireText({ data: "   ", error: null }, "sales.order_creator")).toThrow(
+      DATA_UNAVAILABLE,
+    );
+    expect(() => requireText({ data: 42, error: null }, "sales.order_creator")).toThrow(
+      DATA_UNAVAILABLE,
+    );
+
+    expect(requireText({ data: "Asha Mushi", error: null }, "sales.order_creator")).toBe(
+      "Asha Mushi",
+    );
+  });
+
+  it("keeps a scalar's provider message and its unusable value out of the thrown error", () => {
+    const leaky = 'permission denied for function: user "sb_x" at 10.0.0.4';
+    expect(() => requireText({ data: null, error: { message: leaky } }, "sales.order_creator"))
+      .toThrow(DATA_UNAVAILABLE);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(leaky));
+
+    consoleError.mockClear();
+
+    expect(() => requireText({ data: { secret: "0712345678" }, error: null }, "sales.order_creator"))
+      .toThrow(DATA_UNAVAILABLE);
+    // The SHAPE is what a log needs; the value could be anything, so it is never written down.
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("where text was expected"));
+    expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("0712345678"));
+  });
+
+  it("hands the boundary the same failure shape whichever read failed", () => {
+    // The page-level state below is reached by a thrown Error, not by a special one. Both helpers
+    // therefore throw the same marker, so a new read cannot arrive at that boundary with a message
+    // the route has no state for.
+    const shapes = [
+      () => requireRows({ data: null, error: { message: "x" } }, "sales.order_lines"),
+      () => requireText({ data: null, error: null }, "sales.order_creator"),
+    ];
+    for (const shape of shapes) {
+      expect(shape).toThrow(new RegExp(`^${DATA_UNAVAILABLE}: sales\\.`));
+    }
   });
 
   it("shows a page-level state with a retry that re-fetches the route", async () => {

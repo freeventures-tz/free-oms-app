@@ -32,13 +32,21 @@ join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity;
 
 -- 0008 rls_enabled_no_policy: RLS with no policy denies everything, which is usually a mistake.
--- `idempotency_keys` is deliberate: it is written only inside functions and read by nobody.
+--
+-- Two tables are deliberate, and both are the same shape: written only inside SECURITY DEFINER
+-- functions and read by nobody through PostgREST. They hold no policy for `authenticated` because
+-- `authenticated` has no business reaching them at all.
+--
+--   idempotency_keys   the claim ledger behind every command.
+--   document_sequences the daily counter behind FV-INV-YYYYMMDD-#### (product.md §12.2). A client
+--                      that could read it could predict the next invoice number; one that could
+--                      write it could hand two invoices the same one.
 insert into advisor_findings
 select 'rls_enabled_no_policy', 'INFO', n.nspname || '.' || c.relname
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
-  and c.relname <> 'idempotency_keys'
+  and c.relname not in ('idempotency_keys', 'document_sequences')
   and not exists (
     select 1 from pg_policy p where p.polrelid = c.oid
   );

@@ -1,34 +1,40 @@
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
+import { OrderList } from "@/app/(app)/orders/order-list";
 import { Button } from "@/components/ui/button";
-import { Card, PageHeader } from "@/components/ui/surface";
+import { PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
+import { loadOrders } from "@/lib/sales/sales";
 
 /**
- * Sales Representative landing (design.md §4.1): the orders list, with Create New Order prominent.
+ * Orders list (design.md §7.3), and the Sales Representative's landing view (§4.1).
  *
- * An honest module shell. Order entry belongs to the sales module and is not built — nothing here
- * pretends otherwise, and no order, stock or money behaviour is implied by its presence.
+ * Create New Order is offered to the three roles §12.6 step 1 and design.md §4.2 name; a Cashier
+ * reads the list and is offered no way to start one, absent rather than greyed (§4.3, §4.4).
  */
 export default async function OrdersPage() {
   const viewer = await requireAccess("/orders");
-  const t = await getTranslations("landing");
+  const t = await getTranslations("sales.orders");
+
+  const orders = await loadOrders();
+  const canCreate =
+    viewer.role === "sales_rep" || viewer.role === "manager" || viewer.role === "director";
 
   return (
     <>
       <PageHeader
-        title={t("orders.title")}
-        description={t("orders.description")}
+        title={t("title")}
+        description={t("description")}
         action={
-          viewer.role === "sales_rep" || viewer.role === "manager" || viewer.role === "director" ? (
-            <Button disabled>{t("orders.primaryAction")}</Button>
+          canCreate ? (
+            <Button asChild>
+              <Link href="/orders/new">{t("create")}</Link>
+            </Button>
           ) : undefined
         }
       />
-      <Card>
-        <p className="text-sm text-muted-foreground">{t("orders.empty")}</p>
-        <p className="mt-2 text-sm">{t("comingSoon")}</p>
-      </Card>
+      <OrderList orders={orders} canCreate={canCreate} />
     </>
   );
 }
