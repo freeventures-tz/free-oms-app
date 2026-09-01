@@ -706,6 +706,100 @@ create policy dispatch_lines_definer_owner_insert on public.dispatch_lines
 revoke all on public.dispatch_lines from service_role;
 
 -- ---------------------------------------------------------------------------
+-- assignable_dispatch_lines — what a Cashier may still put on a dispatch
+--
+-- SEPARATE FROM `paid_but_unreleased`, AND THE DIFFERENCE IS THE POINT. That view answers "what is
+-- settled and still in the yard", assigned or not — §7.12's dangerous-state list, and it stays
+-- exactly that. This one answers a different question: "what is still waiting for a storekeeper".
+--
+-- Deriving the second from a page of the first is what this replaces, and it went wrong in the way
+-- page-local arithmetic always does. Twenty-five older claims, every one of them already covered by
+-- a dispatch in progress, fill the page; the assignment list is computed from those twenty-five,
+-- finds nothing left on any of them, and tells the Cashier nothing is waiting — while the claim
+-- that IS waiting sits on page two, invisible and uncounted.
+--
+-- THE SUBTRACTION IS THE SAME ONE `api.staff_assign_dispatch` MAKES before it writes: what the
+-- customer is owed, less whatever a dispatch that has not gone out yet already covers. A released
+-- dispatch is not subtracted, because releasing is what moves `released_quantity`. Keeping the two
+-- in step is why this is a view rather than a second implementation.
+--
+-- A claim with nothing left is EXCLUDED here, before anything counts or pages it, so a page holds
+-- twenty-five invoices that genuinely need a storekeeper and the total beside it counts the same.
+-- ---------------------------------------------------------------------------
+create view public.assignable_dispatch_lines
+with (security_invoker = true) as
+select a.id           as allocation_id,
+       i.id           as invoice_id,
+       i.invoice_no,
+       c.name         as customer_name,
+       a.product_id,
+       (a.quantity - a.released_quantity - coalesce(live.claimed, 0))::bigint
+         as assignable_quantity
+  from public.stock_allocations a
+  join public.orders o    on o.id = a.order_id
+  join public.invoices i  on i.order_id = o.id
+  join public.customers c on c.id = o.customer_id
+  left join lateral (
+    select sum(dl.quantity) as claimed
+      from public.dispatch_lines dl
+      join public.dispatches d on d.id = dl.dispatch_id
+     where dl.allocation_id = a.id
+       and d.status in ('assigned', 'note_recorded')
+  ) live on true
+ where a.state = 'committed'
+   and i.cancelled_at is null
+   and (a.quantity - a.released_quantity - coalesce(live.claimed, 0)) > 0
+   and (select api.staff_settlement_readable());
+
+comment on view public.assignable_dispatch_lines is
+  'Claims still needing a storekeeper (product.md §12.6 step 9): what is owed, less what an '
+  'in-progress dispatch already covers. The same subtraction api.staff_assign_dispatch makes, so '
+  'the screen cannot offer a quantity the command will refuse.';
+
+-- Direct access to public.assignable_dispatch_lines
+grant select on public.assignable_dispatch_lines to authenticated;
+grant select on public.assignable_dispatch_lines to fv_definer_owner;
+
+revoke all on public.assignable_dispatch_lines from service_role;
+
+-- ---------------------------------------------------------------------------
+-- assignable_dispatch_invoices — the same work, one row per invoice
+--
+-- THE PAGED UNIT IS THE INVOICE, not the claim, because the assignment card is one invoice with
+-- every remaining line on it. Paging the lines would split a two-product invoice across a page
+-- boundary and offer a Cashier half of it, which is not a smaller card — it is a wrong one.
+--
+-- So the count is a count of invoices, the page is a page of invoices, and the lines for that page
+-- are fetched against these ids. `days_waiting` comes from the invoice's business date exactly as
+-- `paid_but_unreleased` computes it, and is the same for every line, so grouping cannot disagree
+-- with itself.
+-- ---------------------------------------------------------------------------
+create view public.assignable_dispatch_invoices
+with (security_invoker = true) as
+select l.invoice_id,
+       l.invoice_no,
+       l.customer_name,
+       count(*)::bigint                    as line_count,
+       sum(l.assignable_quantity)::bigint  as assignable_quantity,
+       (((now() at time zone 'Africa/Dar_es_Salaam')::date) - i.business_date) as days_waiting
+  from public.assignable_dispatch_lines l
+  join public.invoices i on i.id = l.invoice_id
+ group by l.invoice_id, l.invoice_no, l.customer_name, i.business_date;
+
+comment on view public.assignable_dispatch_invoices is
+  'One row per invoice still waiting for a storekeeper, so a page is a page of assignment cards '
+  'and no invoice is ever split across two of them.';
+
+-- Direct access to public.assignable_dispatch_invoices
+--
+-- Built on `assignable_dispatch_lines`, which is `security_invoker` and already carries the
+-- settlement-readable predicate, so this inherits the same refusal.
+grant select on public.assignable_dispatch_invoices to authenticated;
+grant select on public.assignable_dispatch_invoices to fv_definer_owner;
+
+revoke all on public.assignable_dispatch_invoices from service_role;
+
+-- ---------------------------------------------------------------------------
 -- paid_but_unreleased — the most dangerous state in the system, made findable
 --
 -- design.md §7.12: goods that are settled and still in the yard. Everyone needs to be able to see

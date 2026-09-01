@@ -85,8 +85,9 @@ describe("the storekeeper options a dispatch assignment is offered", () => {
       fullName: FULL_ROW.full_name,
     });
 
-    // Named individually, because `toEqual` on an object literal would still pass if a future
-    // field were added and this list were not updated.
+    // The value assertions above are the ones that matter, and the serialised check below names
+    // the three fields individually so a failure says WHICH one leaked rather than only that the
+    // shape changed.
     const serialised = JSON.stringify(option);
     expect(serialised).not.toContain(FULL_ROW.phone);
     expect(serialised).not.toContain(FULL_ROW.start_date);

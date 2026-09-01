@@ -57,6 +57,8 @@ let customerId: string;
 let cashCustomerId: string;
 let productId: string;
 let storekeeperId: string;
+/** A second product, so one invoice can hold two assignable lines. */
+let secondProductId: string;
 
 const UNIT_PRICE = 100_000;
 
@@ -84,6 +86,30 @@ beforeAll(async () => {
 
   await director.api.rpc("admin_record_opening_stock", {
     p_product_id: productId,
+    p_location_code: "store",
+    p_quantity: 1000,
+    p_note: null,
+    p_idempotency_key: randomUUID(),
+  });
+
+  const { data: second } = await director.api.rpc("admin_add_product", {
+    p_name: `Settlement Second ${randomUUID().slice(0, 8)}`,
+    p_specification: null,
+    p_unit_code: "piece",
+    p_unit_content: null,
+    p_idempotency_key: randomUUID(),
+  });
+  secondProductId = (second!.product as { id: string }).id;
+
+  await director.api.rpc("admin_set_product_price", {
+    p_product_id: secondProductId,
+    p_price_tzs: UNIT_PRICE,
+    p_reason: "integration fixture",
+    p_idempotency_key: randomUUID(),
+  });
+
+  await director.api.rpc("admin_record_opening_stock", {
+    p_product_id: secondProductId,
     p_location_code: "store",
     p_quantity: 1000,
     p_note: null,
@@ -910,6 +936,8 @@ describe("the approved role boundary (design.md §4.2)", () => {
     "paid_but_unreleased",
     "customer_credit_exposure",
     "cash_sales_awaiting_payment",
+    "assignable_dispatch_invoices",
+    "assignable_dispatch_lines",
   ];
 
   beforeAll(async () => {
@@ -1337,14 +1365,17 @@ describe("the walk-in queue, and what an anti-join in the wrong place hides", ()
 
 describe("a page number past the end of a queue", () => {
   /**
-   * The two ways to ask for a page that is not there, and they are the same bug.
+   * The two ways to ask for a page that is not there, and PostgREST answers them DIFFERENTLY.
    *
-   * Someone edits `?awaiting=999` in the address bar; or they clear the last invoice on page 2 and
-   * the revalidated render asks for page 2 of a queue that now has one page. PostgREST answers
-   * both with an empty range and a positive count, and an un-normalised screen says "nothing is
+   * An EXTREME range — `?awaiting=999`, typed into the address bar — starts far past the last row
+   * and is REFUSED with `PGRST103`. Untreated that becomes an outage screen for a mistyped URL.
+   *
+   * A STALE FINAL PAGE is the other one: clear the last invoice on page 2 and the revalidated
+   * render asks for page 2 of a queue that now has one page. That range is answered politely, with
+   * an empty list and a POSITIVE COUNT — and an un-normalised screen turns it into "nothing is
    * waiting" over the top of work that exists.
    *
-   * `pagedQuery` is what stops that, and this is the query it makes, run twice.
+   * `pagedQuery` handles both, and these are the queries it makes.
    */
   async function awaitingPage(page: number) {
     const from = (page - 1) * 25;
@@ -1517,6 +1548,283 @@ describe("ties in a sort order", () => {
   });
 });
 
+describe("the assignment queue, and what a page-local derivation hides", () => {
+  /** One page of invoices still waiting for a storekeeper, asked for the way the loader asks. */
+  async function assignmentPage(page: number) {
+    const from = (page - 1) * 25;
+    const result = await cashier.read
+      .from("assignable_dispatch_invoices")
+      .select("invoice_id, invoice_no, days_waiting", { count: "exact" })
+      .order("days_waiting", { ascending: false })
+      .order("invoice_no", { ascending: true })
+      .order("invoice_id", { ascending: true })
+      .range(from, from + 24);
+    expect(result.error, result.error?.message).toBeNull();
+    return { rows: result.data ?? [], total: result.count ?? 0 };
+  }
+
+  /**
+   * Assigns everything currently waiting, so a scenario can start from an empty queue.
+   *
+   * Earlier tests in this file leave assignable invoices behind, and "page 1 holds the one claim
+   * that is waiting" is only a statement about page 1 if nothing else is ahead of it. Draining
+   * makes the scenario the one being tested rather than the one the file happens to be in.
+   */
+  async function drainAssignmentQueue() {
+    for (let guard = 0; guard < 40; guard += 1) {
+      const page = await assignmentPage(1);
+      if (page.total === 0) return;
+
+      for (const row of page.rows) {
+        const invoiceId = row.invoice_id as string;
+        const lines = await cashier.read
+          .from("assignable_dispatch_lines")
+          .select("allocation_id, assignable_quantity")
+          .eq("invoice_id", invoiceId);
+
+        const assigned = await cashier.api.rpc("staff_assign_dispatch", {
+          p_invoice_id: invoiceId,
+          p_storekeeper_id: storekeeperId,
+          p_source_location: "store",
+          p_lines: (lines.data ?? []).map((line) => ({
+            allocation_id: line.allocation_id,
+            quantity: Number(line.assignable_quantity),
+          })),
+          p_idempotency_key: randomUUID(),
+        });
+        expect(assigned.data?.ok, JSON.stringify(assigned.data)).toBe(true);
+      }
+    }
+    throw new Error("the assignment queue would not drain");
+  }
+
+  /** A settled invoice whose whole quantity is already covered by a dispatch in progress. */
+  async function fullyAssigned(quantity: number) {
+    const settled = await settledInvoice(quantity);
+    const assigned = await cashier.api.rpc("staff_assign_dispatch", {
+      p_invoice_id: settled.invoiceId,
+      p_storekeeper_id: storekeeperId,
+      p_source_location: "store",
+      p_lines: [{ allocation_id: settled.allocationId, quantity }],
+      p_idempotency_key: randomUUID(),
+    });
+    expect(assigned.data?.ok, JSON.stringify(assigned.data)).toBe(true);
+    return settled;
+  }
+
+  it("never lets fully covered claims fill the page ahead of one that still needs a storekeeper",
+    async () => {
+      await drainAssignmentQueue();
+
+      // TWENTY-FIVE older claims, every one already covered by a dispatch that has not gone out.
+      // They are still paid-but-unreleased — the goods are in the yard — but there is nothing left
+      // to assign on any of them. Derived from a page of THAT list, the assignment queue read
+      // twenty-five rows, found nothing assignable, and told the Cashier nothing was waiting.
+      const covered: string[] = [];
+      for (let i = 0; i < 25; i += 1) {
+        covered.push((await fullyAssigned(1)).invoiceId);
+      }
+
+      // And one that still needs a storekeeper, created last — so it is behind all twenty-five in
+      // every ordering, which is exactly how it used to disappear.
+      const waiting = await settledInvoice(4);
+
+      const page = await assignmentPage(1);
+
+      // PAGE ONE, not "somewhere in the queue": the covered twenty-five are not in it at all, so
+      // there is nothing to push the one that matters onto a second page.
+      expect(page.total).toBe(1);
+      expect(page.rows.map((row) => row.invoice_id)).toEqual([waiting.invoiceId]);
+      for (const invoiceId of covered) {
+        expect(page.rows.map((row) => row.invoice_id)).not.toContain(invoiceId);
+      }
+
+      // They ARE still visible as committed stock in the yard, which is a different question and a
+      // different list (design.md §7.12).
+      const unreleased = await manager.read
+        .from("paid_but_unreleased")
+        .select("invoice_id", { count: "exact", head: true })
+        .in("invoice_id", covered);
+      expect(unreleased.count).toBe(25);
+    });
+
+  it("keeps every line of one invoice on one card", async () => {
+    // Two products on one invoice, so the assignment record has two lines. Splitting them across a
+    // page boundary would offer the Cashier half an invoice.
+    const { data: order } = await salesRep.api.rpc("staff_create_order", {
+      p_customer_id: customerId,
+      p_lines: [
+        { product_id: productId, quantity: 2 },
+        { product_id: secondProductId, quantity: 3 },
+      ],
+      p_idempotency_key: randomUUID(),
+    });
+    const orderId = (order!.order as { id: string }).id;
+    const { data: confirmed } = await salesRep.api.rpc("staff_confirm_order", {
+      p_order_id: orderId,
+      p_idempotency_key: randomUUID(),
+    });
+    const invoiceId = (confirmed!.invoice as { id: string }).id;
+
+    await cashier.api.rpc("staff_record_payment", {
+      p_invoice_id: invoiceId,
+      p_method: "cash",
+      p_amount_tzs: (await settlementOf(invoiceId)).outstanding,
+      p_idempotency_key: randomUUID(),
+    });
+    await cashier.api.rpc("staff_approve_settlement", {
+      p_invoice_id: invoiceId,
+      p_idempotency_key: randomUUID(),
+    });
+
+    const summary = await cashier.read
+      .from("assignable_dispatch_invoices")
+      .select("line_count, assignable_quantity")
+      .eq("invoice_id", invoiceId)
+      .single();
+
+    expect(summary.error, summary.error?.message).toBeNull();
+    // ONE row for the invoice, carrying BOTH lines — never two rows that could land on two pages.
+    expect(Number(summary.data!.line_count)).toBe(2);
+    expect(Number(summary.data!.assignable_quantity)).toBe(5);
+
+    const lines = await cashier.read
+      .from("assignable_dispatch_lines")
+      .select("product_id, assignable_quantity")
+      .eq("invoice_id", invoiceId);
+    expect(lines.data).toHaveLength(2);
+    expect((lines.data ?? []).map((row) => row.product_id).sort())
+      .toEqual([productId, secondProductId].sort());
+  });
+
+  it("leaves the remainder assignable after a partial assignment, on the same card", async () => {
+    const settled = await settledInvoice(10);
+
+    await cashier.api.rpc("staff_assign_dispatch", {
+      p_invoice_id: settled.invoiceId,
+      p_storekeeper_id: storekeeperId,
+      p_source_location: "store",
+      p_lines: [{ allocation_id: settled.allocationId, quantity: 4 }],
+      p_idempotency_key: randomUUID(),
+    });
+
+    const summary = await cashier.read
+      .from("assignable_dispatch_invoices")
+      .select("assignable_quantity")
+      .eq("invoice_id", settled.invoiceId)
+      .single();
+
+    // Six left, which is exactly what `api.staff_assign_dispatch` will accept next.
+    expect(Number(summary.data!.assignable_quantity)).toBe(6);
+  });
+
+  it("pages more than twenty-five assignable invoices without duplicates or omissions",
+    async () => {
+      while ((await assignmentPage(1)).total < 27) {
+        await settledInvoice(1);
+      }
+
+      const total = (await assignmentPage(1)).total;
+      const pages = Math.ceil(total / 25);
+      expect(pages).toBeGreaterThan(1);
+
+      const seen: string[] = [];
+      for (let page = 1; page <= pages; page += 1) {
+        const rows = (await assignmentPage(page)).rows;
+        seen.push(...rows.map((row) => row.invoice_id as string));
+      }
+
+      expect(seen).toHaveLength(total);
+      expect(new Set(seen).size, "an invoice appeared on two pages").toBe(total);
+
+      // No card is split: an invoice appears on exactly one page, with all of its lines.
+      const first = seen[0];
+      const lines = await cashier.read
+        .from("assignable_dispatch_lines")
+        .select("allocation_id")
+        .eq("invoice_id", first);
+      expect((lines.data ?? []).length).toBeGreaterThan(0);
+    });
+
+  it("recovers a stale or extreme assignment page the way the other queues do", async () => {
+    const total = (await assignmentPage(1)).total;
+    expect(total).toBeGreaterThan(0);
+
+    // Extreme: refused outright, which is why `pagedQuery` cannot just look at `rows.length`.
+    const from = 998 * 25;
+    const extreme = await cashier.read
+      .from("assignable_dispatch_invoices")
+      .select("invoice_id", { count: "exact" })
+      .order("days_waiting", { ascending: false })
+      .order("invoice_no", { ascending: true })
+      .order("invoice_id", { ascending: true })
+      .range(from, from + 24);
+    expect(extreme.error?.code).toBe("PGRST103");
+
+    // And the probe the fallback uses resolves it to a page with records on it.
+    const probe = await cashier.read
+      .from("assignable_dispatch_invoices")
+      .select("invoice_id", { count: "exact" })
+      .order("days_waiting", { ascending: false })
+      .order("invoice_no", { ascending: true })
+      .order("invoice_id", { ascending: true })
+      .range(0, 0);
+    expect(probe.error, probe.error?.message).toBeNull();
+
+    const lastPage = Math.max(1, Math.ceil((probe.count ?? 0) / 25));
+    const resolved = await assignmentPage(lastPage);
+    expect(resolved.rows.length).toBeGreaterThan(0);
+  });
+
+  it("assigning the last card on the last page leaves an earlier page holding the rest",
+    async () => {
+      const before = await assignmentPage(1);
+      const pages = Math.ceil(before.total / 25);
+      expect(pages).toBeGreaterThan(1);
+
+      const last = await assignmentPage(pages);
+      expect(last.rows.length).toBeGreaterThan(0);
+
+      // Clear the whole last page, which is what "assigning the final item" does to it.
+      for (const row of last.rows) {
+        const invoiceId = row.invoice_id as string;
+        const lines = await cashier.read
+          .from("assignable_dispatch_lines")
+          .select("allocation_id, assignable_quantity")
+          .eq("invoice_id", invoiceId);
+
+        const assigned = await cashier.api.rpc("staff_assign_dispatch", {
+          p_invoice_id: invoiceId,
+          p_storekeeper_id: storekeeperId,
+          p_source_location: "store",
+          p_lines: (lines.data ?? []).map((line) => ({
+            allocation_id: line.allocation_id,
+            quantity: Number(line.assignable_quantity),
+          })),
+          p_idempotency_key: randomUUID(),
+        });
+        expect(assigned.data?.ok, JSON.stringify(assigned.data)).toBe(true);
+      }
+
+      // That page is now empty against a count that is still positive — the stale-final-page shape.
+      const emptied = await assignmentPage(pages);
+      expect(emptied.rows).toHaveLength(0);
+      expect(emptied.total).toBeGreaterThan(0);
+
+      const lastPage = Math.max(1, Math.ceil(emptied.total / 25));
+      const fallback = await assignmentPage(lastPage);
+      expect(fallback.rows.length).toBeGreaterThan(0);
+    });
+
+  it("refuses the whole assignment queue to a Sales Representative", async () => {
+    for (const view of ["assignable_dispatch_invoices", "assignable_dispatch_lines"]) {
+      const { data, error } = await salesRep.read.from(view).select("*");
+      expect(error, error?.message).toBeNull();
+      expect(data, `a Sales Representative read ${view}`).toHaveLength(0);
+    }
+  });
+});
+
 describe("the settlement tables, from outside the database", () => {
   it("is unreachable with the SECRET key", async () => {
     for (const table of [
@@ -1578,5 +1886,15 @@ describe("the settlement tables, from outside the database", () => {
       .from("storekeepers")
       .select("id, storekeeper_code, full_name");
     expect(options.error, options.error?.message).toBeNull();
+
+    const assignableInvoices = await cashier.read
+      .from("assignable_dispatch_invoices")
+      .select("invoice_id, invoice_no, customer_name, days_waiting");
+    expect(assignableInvoices.error, assignableInvoices.error?.message).toBeNull();
+
+    const assignableLines = await cashier.read
+      .from("assignable_dispatch_lines")
+      .select("allocation_id, invoice_id, product_id, assignable_quantity");
+    expect(assignableLines.error, assignableLines.error?.message).toBeNull();
   });
 });

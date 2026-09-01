@@ -16,7 +16,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(105);
+select plan(110);
 
 create schema if not exists tests;
 
@@ -769,6 +769,60 @@ select is(
       and cmd = 'SELECT' and roles::text like '%authenticated%'),
   5,
   'and each of the five still has exactly one read policy for the roles that do need it');
+
+-- ---------------------------------------------------------------------------
+-- assignable_dispatch_lines / _invoices — the subtraction, in the database
+--
+-- The dispatch board used to work this out from whatever page of `paid_but_unreleased` it happened
+-- to be showing. Twenty-five claims already covered by dispatches in progress fill that page, the
+-- arithmetic finds nothing left on any of them, and the Cashier is told nothing is waiting while
+-- the claim that IS waiting sits on page two, uncounted.
+--
+-- The two lists answer different questions and are now read separately: `paid_but_unreleased` is
+-- everything committed and still in the yard, assigned or not; this is what still needs a
+-- storekeeper.
+-- ---------------------------------------------------------------------------
+select tests.acting_as('b0000000-0000-0000-0000-000000000003'::uuid);   -- Cashier
+
+select is(
+  (select count(*)::int from public.assignable_dispatch_lines l
+    where not exists (select 1 from public.paid_but_unreleased u
+                       where u.allocation_id = l.allocation_id)),
+  0,
+  'everything assignable is also committed stock still in the yard: one list is a subset of the '
+  'other, never a different set');
+
+select is(
+  (select count(*)::int
+     from public.assignable_dispatch_lines l
+     join public.paid_but_unreleased u on u.allocation_id = l.allocation_id
+    where l.assignable_quantity <> u.outstanding_quantity
+            - coalesce((select sum(dl.quantity) from public.dispatch_lines dl
+                          join public.dispatches d on d.id = dl.dispatch_id
+                         where dl.allocation_id = l.allocation_id
+                           and d.status in ('assigned', 'note_recorded')), 0)),
+  0,
+  'assignable is what is owed LESS what an in-progress dispatch already covers -- the same '
+  'subtraction api.staff_assign_dispatch makes before it writes');
+
+select is(
+  (select count(*)::int from public.assignable_dispatch_lines
+    where assignable_quantity <= 0),
+  0,
+  'a claim with nothing left is excluded before anything counts or pages it');
+
+select is(
+  (select count(*)::int from public.assignable_dispatch_invoices i
+    where i.line_count <> (select count(*) from public.assignable_dispatch_lines l
+                            where l.invoice_id = i.invoice_id)),
+  0,
+  'and every line of an invoice is on ONE row, so a card cannot be split across two pages');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000004'::uuid);   -- Sales Representative
+
+select is(
+  (select count(*)::int from public.assignable_dispatch_invoices), 0,
+  'the assignment queue refuses a Sales Representative, like every other settlement view');
 
 -- ---------------------------------------------------------------------------
 -- cash_sales_awaiting_payment — the anti-join, where it has to be

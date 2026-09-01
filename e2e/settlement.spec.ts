@@ -834,6 +834,63 @@ test("the walk-in queue states its own total, and pages like the others", async 
 });
 
 // ---------------------------------------------------------------------------
+test("the assignment stage counts and pages on its own", async ({ page }) => {
+  let invoiceNo = "";
+
+  await test.step("a settled invoice is waiting for a storekeeper", async () => {
+    await signInAs(page, "salesRep");
+    invoiceNo = await sellTo(page, CUSTOMER, 3);
+
+    await switchTo(page, "cashier");
+    await page.goto(PAYMENTS_HREF);
+
+    const card = page.getByRole("article", { name: invoiceNo, exact: true });
+    await card.getByRole("button", { name: /take payment/i }).click();
+    await card.getByTestId("method-cash").click();
+    await card.getByRole("button", { name: /^record payment$/i }).click();
+    await expect(card.getByText(/payment recorded/i)).toBeVisible();
+
+    await card.getByRole("button", { name: /mark as settled/i }).click();
+    await expect(card.getByText(/ready to dispatch/i)).toBeVisible();
+  });
+
+  await test.step("the stage states its own total, from its own read", async () => {
+    await page.goto(DISPATCH_HREF);
+
+    // The count comes from a counted query over every invoice still waiting — not from whatever
+    // the paid-but-unreleased page happened to hold, which is what it used to be derived from.
+    await expect(page.getByRole("heading", { name: /waiting for a storekeeper \(\d+\)/i }))
+      .toBeVisible();
+
+    const count = page.getByTestId("pager-count-assignment");
+    await expect(count).toBeVisible();
+    await expect(count).not.toContainText(/nothing to show/i);
+
+    // And the empty state is absent, because the total is not zero.
+    await expect(page.getByText(/nothing is waiting for a storekeeper/i)).toHaveCount(0);
+    await expect(page.getByRole("article", { name: invoiceNo, exact: true })).toBeVisible();
+  });
+
+  await test.step("?assignment=999 resolves to a page with work on it", async () => {
+    await page.goto(`${DISPATCH_HREF}?assignment=999`);
+
+    await expect(page.getByText(/this page could not be loaded/i)).toHaveCount(0);
+    const count = page.getByTestId("pager-count-assignment");
+    await expect(count).toBeVisible();
+    await expect(count).not.toContainText(/nothing to show/i);
+    await expect(page.getByText(/nothing is waiting for a storekeeper/i)).toHaveCount(0);
+  });
+
+  await test.step("paid-but-unreleased keeps its own separate count", async () => {
+    await page.goto(DISPATCH_HREF);
+    // Two lists, two questions: everything committed and in the yard, against what still needs a
+    // storekeeper. They are read and paged independently.
+    await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
+    await expect(page.getByTestId("pager-count-assignment")).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
 test.describe("what the settlement screens offer", () => {
   test("a Manager reads payments and is offered no way to take money", async ({ page }) => {
     await signInAs(page, "manager");
@@ -889,11 +946,13 @@ test.describe("what the settlement screens offer", () => {
     await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
     await expect(page.getByTestId("pager-count-released")).toBeVisible();
 
-    // Every queue parameter is normalised, not only the ones on /payments.
-    await page.goto(`${DISPATCH_HREF}?unreleased=999&released=999`);
+    // Every queue parameter is normalised, not only the ones on /payments — and the assignment
+    // stage is a queue of its own now, with its own parameter and its own total.
+    await page.goto(`${DISPATCH_HREF}?unreleased=999&released=999&assignment=999`);
     await expect(page.getByText(/this page could not be loaded/i)).toHaveCount(0);
     await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
     await expect(page.getByTestId("pager-count-released")).toBeVisible();
+    await expect(page.getByTestId("pager-count-assignment")).toBeVisible();
   });
 
   test("neither payments nor dispatch scrolls the page sideways", async ({ page }) => {

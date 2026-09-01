@@ -239,11 +239,15 @@ async function pagedQuery<T>(
 
   // TWO SHAPES OF "THAT PAGE IS NOT THERE", and only one of them looks like an answer.
   //
-  // Ask for row 24,975 of a twelve-row queue and PostgREST does not return an empty list — it
-  // REFUSES, with `PGRST103`. Untreated, that reaches `requireRows` and becomes an outage: the
-  // Cashier gets "the system could not be reached" because somebody typed a number in the address
-  // bar. Ask for row 25 of a twenty-five-row queue and it answers politely with nothing at all,
-  // which becomes the opposite lie — "nothing is waiting" over the top of work that exists.
+  // An EXTREME range — row 24,975 of a twelve-row queue, from a hand-edited `?awaiting=999` — is
+  // REFUSED outright with `PGRST103`. Untreated it reaches `requireRows` and becomes an outage:
+  // the Cashier is told the system could not be reached because somebody typed a number into the
+  // address bar.
+  //
+  // A STALE FINAL PAGE is different. Clear the last row of page 2 and the revalidated render asks
+  // for page 2 of a queue that now has one page: the range still starts inside the result set as
+  // PostgREST sees it, so the answer is a polite empty list WITH A POSITIVE COUNT. That is the
+  // opposite lie — "nothing is waiting" over the top of work that exists.
   //
   // Neither is true, and both have the same fix: find the real last page and show it.
   const pastTheEnd =
@@ -726,14 +730,26 @@ export type DispatchQueue = {
   live: Dispatch[];
   /** Released, newest first, and paged — this is history. */
   released: Page<Dispatch>;
-  /** Settled goods still in the yard (design.md §7.12), oldest wait first. */
+  /**
+   * Settled goods still in the yard (design.md §7.12), longest wait first.
+   *
+   * EVERY committed claim, assigned or not. It is the dangerous-state list and answers a different
+   * question from `assignable`, so the two are read and paged independently.
+   */
   outstanding: Page<OutstandingClaim>;
-  /** What a Cashier may still put on a dispatch, derived from this page of `outstanding`. */
-  assignable: AssignableInvoice[];
+  /**
+   * Invoices still waiting for a storekeeper — its own read, its own count, its own page.
+   *
+   * It used to be derived from whatever `outstanding` happened to be showing, and that is exactly
+   * how a queue lies: twenty-five older claims already covered by dispatches in progress fill the
+   * page, the derivation finds nothing left on any of them, and the Cashier is told nothing is
+   * waiting while the claim that IS waiting sits on page two.
+   */
+  assignable: Page<AssignableInvoice>;
 };
 
 export async function loadDispatchQueue(
-  pages: { released?: number; unreleased?: number } = {},
+  pages: { released?: number; unreleased?: number; assignment?: number } = {},
 ): Promise<DispatchQueue> {
   const supabase = await createServerSupabase();
 
@@ -744,7 +760,7 @@ export async function loadDispatchQueue(
     profiles!dispatches_assigned_by_fkey(full_name)
   `;
 
-  const [live, released, outstanding] = await Promise.all([
+  const [live, released, outstanding, assignableInvoices] = await Promise.all([
     // No page, and that is the bound: a dispatch stops being live the moment it is released or
     // cancelled, so this set is the work in hand rather than the history of it. Batched all the
     // same, because "no page" must not quietly become "the first thousand".
@@ -790,21 +806,55 @@ export async function loadDispatchQueue(
           .range(from, to),
       "settlement.paid_but_unreleased",
     ),
+    // The assignment queue, counted and paged over INVOICES so a card is never split in half.
+    // `invoice_id` closes the sort: `days_waiting` is a whole number of days and `invoice_no` can
+    // only tie with itself, so without it a page boundary could drop or repeat a card.
+    pagedQuery(
+      pages.assignment ?? 1,
+      (from, to) =>
+        supabase
+          .from("assignable_dispatch_invoices")
+          .select("invoice_id, invoice_no, customer_name, days_waiting", { count: "exact" })
+          .order("days_waiting", { ascending: false })
+          .order("invoice_no", { ascending: true })
+          .order("invoice_id", { ascending: true })
+          .range(from, to),
+      "settlement.assignable.invoices",
+    ),
   ]);
 
   const dispatchIds = [...live, ...released.rows].map((row) => (row as { id: string }).id);
 
-  const lines = await scopedTo(
-    dispatchIds,
-    (from, to) =>
-      supabase
-        .from("dispatch_lines")
-        .select("id, dispatch_id, allocation_id, product_id, quantity")
-        .in("dispatch_id", dispatchIds)
-        .order("id")
-        .range(from, to),
-    "settlement.dispatch_lines",
+  const assignableInvoiceIds = assignableInvoices.rows.map(
+    (row) => (row as { invoice_id: string }).invoice_id,
   );
+
+  const [lines, assignableLines] = await Promise.all([
+    scopedTo(
+      dispatchIds,
+      (from, to) =>
+        supabase
+          .from("dispatch_lines")
+          .select("id, dispatch_id, allocation_id, product_id, quantity")
+          .in("dispatch_id", dispatchIds)
+          .order("id")
+          .range(from, to),
+      "settlement.dispatch_lines",
+    ),
+    // EVERY line of every invoice on the page, scoped to those invoices. The page decides which
+    // invoices; this decides nothing, so an invoice cannot arrive with some of its lines missing.
+    scopedTo(
+      assignableInvoiceIds,
+      (from, to) =>
+        supabase
+          .from("assignable_dispatch_lines")
+          .select("allocation_id, invoice_id, product_id, assignable_quantity")
+          .in("invoice_id", assignableInvoiceIds)
+          .order("allocation_id")
+          .range(from, to),
+      "settlement.assignable.lines",
+    ),
+  ]);
 
   const linesByDispatch = new Map<string, DispatchLine[]>();
   for (const row of lines) {
@@ -844,19 +894,6 @@ export async function loadDispatchQueue(
 
   const liveDispatches = live.map((row) => toDispatch(row));
 
-  // How much of each claim an in-progress dispatch has already spoken for. `api.staff_assign_
-  // dispatch` subtracts exactly this before it writes; the screen has to subtract it too, or it
-  // offers a quantity the database is going to refuse.
-  const claimedByAllocation = new Map<string, number>();
-  for (const dispatch of liveDispatches) {
-    for (const line of dispatch.lines) {
-      claimedByAllocation.set(
-        line.allocationId,
-        (claimedByAllocation.get(line.allocationId) ?? 0) + line.quantity,
-      );
-    }
-  }
-
   const claims = outstanding.rows.map((raw) => {
     const row = raw as Record<string, unknown>;
     return {
@@ -870,33 +907,36 @@ export async function loadDispatchQueue(
     };
   });
 
-  // An invoice stays assignable while ANY of its claims has something left after the in-progress
-  // dispatches are subtracted. A partial release therefore does not end the invoice's dispatch
-  // life, which is what §12 means by "the remainder stays committed".
-  const byInvoice = new Map<string, AssignableInvoice>();
-  for (const claim of claims) {
-    const assignableQuantity =
-      claim.outstandingQuantity - (claimedByAllocation.get(claim.allocationId) ?? 0);
-    if (assignableQuantity <= 0) continue;
-
-    const entry = byInvoice.get(claim.invoiceId) ?? {
-      invoiceId: claim.invoiceId,
-      invoiceNo: claim.invoiceNo,
-      customerName: claim.customerName,
-      lines: [],
-    };
-    entry.lines.push({
-      allocationId: claim.allocationId,
-      productId: claim.productId,
-      assignableQuantity,
+  // The lines, gathered under the invoice they belong to. Assembled in the order the PAGE gave,
+  // not the order the lines came back in, so the cards read the same way every time.
+  const linesByInvoice = new Map<string, AssignableLine[]>();
+  for (const raw of assignableLines) {
+    const row = raw as Record<string, unknown>;
+    const invoiceId = row.invoice_id as string;
+    const list = linesByInvoice.get(invoiceId) ?? [];
+    list.push({
+      allocationId: row.allocation_id as string,
+      productId: row.product_id as string,
+      assignableQuantity: Number(row.assignable_quantity),
     });
-    byInvoice.set(claim.invoiceId, entry);
+    linesByInvoice.set(invoiceId, list);
   }
+
+  const assignable = assignableInvoices.rows.map((raw) => {
+    const row = raw as Record<string, unknown>;
+    const invoiceId = row.invoice_id as string;
+    return {
+      invoiceId,
+      invoiceNo: row.invoice_no as string,
+      customerName: row.customer_name as string,
+      lines: linesByInvoice.get(invoiceId) ?? [],
+    } satisfies AssignableInvoice;
+  });
 
   return {
     live: liveDispatches,
     released: { ...released, rows: released.rows.map((row) => toDispatch(row)) },
     outstanding: { ...outstanding, rows: claims },
-    assignable: [...byInvoice.values()],
+    assignable: { ...assignableInvoices, rows: assignable },
   };
 }

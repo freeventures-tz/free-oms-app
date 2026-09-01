@@ -78,7 +78,7 @@ export function DispatchBoard({
           total={outstanding.total}
           param="unreleased"
           basePath={DISPATCH_PATH}
-          otherParams={{ released: released.page }}
+          otherParams={{ released: released.page, assignment: assignable.page }}
           label={t("paidUnreleasedHeading", { count: outstanding.total })}
         />
         {outstanding.rows.length === 0 ? (
@@ -117,15 +117,28 @@ export function DispatchBoard({
 
       {canAssign ? (
         <section className="flex flex-col gap-3">
+          {/* The COMPLETE total, from its own counted read — not the size of this page, and not
+              what survived being derived from another queue's page. */}
           <h2 className="text-sm font-semibold">
-            {t("awaitingAssignmentHeading", { count: assignable.length })}
+            {t("awaitingAssignmentHeading", { count: assignable.total })}
           </h2>
-          {assignable.length === 0 ? (
+          <Pager
+            page={assignable.page}
+            pageSize={assignable.pageSize}
+            total={assignable.total}
+            param="assignment"
+            basePath={DISPATCH_PATH}
+            otherParams={{ unreleased: outstanding.page, released: released.page }}
+            label={t("awaitingAssignmentHeading", { count: assignable.total })}
+          />
+          {/* "Nothing is waiting" only when nothing is waiting ANYWHERE — an empty page of a
+              non-empty queue is a page to correct, not a state to announce. */}
+          {assignable.total === 0 ? (
             <Card>
               <p className="text-sm text-muted-foreground">{t("nothingAwaitingAssignment")}</p>
             </Card>
           ) : (
-            assignable.map((invoice) => (
+            assignable.rows.map((invoice) => (
               <AssignCard
                 key={invoice.invoiceId}
                 invoice={invoice}
@@ -162,7 +175,7 @@ export function DispatchBoard({
           total={released.total}
           param="released"
           basePath={DISPATCH_PATH}
-          otherParams={{ unreleased: outstanding.page }}
+          otherParams={{ unreleased: outstanding.page, assignment: assignable.page }}
           label={t("releasedHeading")}
         />
         {released.rows.length === 0 ? (

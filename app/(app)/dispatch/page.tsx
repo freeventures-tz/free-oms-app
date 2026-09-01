@@ -27,7 +27,9 @@ import {
  * a control is disabled rather than hidden.
  *
  * An invoice stays in the assignment list while it still has goods to hand over, so a PARTIAL
- * release can be followed by a second assignment for the remainder.
+ * release can be followed by a second assignment for the remainder. That list is its own counted,
+ * paged read rather than an arithmetic over whatever the paid-but-unreleased page happens to hold:
+ * the two answer different questions and each carries its own total.
  */
 export default async function DispatchPage({ searchParams }: PageProps<"/dispatch">) {
   const viewer = await requireAccess("/dispatch");
@@ -39,6 +41,7 @@ export default async function DispatchPage({ searchParams }: PageProps<"/dispatc
     loadDispatchQueue({
       released: pageNumber(params.released),
       unreleased: pageNumber(params.unreleased),
+      assignment: pageNumber(params.assignment),
     }),
     // The assignment SHAPE, not the personnel record: this board is a client component, and a
     // storekeeper's phone number and start date have no business being serialised into a page
