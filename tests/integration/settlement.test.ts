@@ -905,7 +905,12 @@ describe("the approved role boundary (design.md §4.2)", () => {
     "storekeepers",
   ];
 
-  const VIEWS = ["invoice_settlement", "paid_but_unreleased", "customer_credit_exposure"];
+  const VIEWS = [
+    "invoice_settlement",
+    "paid_but_unreleased",
+    "customer_credit_exposure",
+    "cash_sales_awaiting_payment",
+  ];
 
   beforeAll(async () => {
     // Something in every one of them, so "zero rows" is a refusal rather than an empty database.
@@ -917,6 +922,19 @@ describe("the approved role boundary (design.md §4.2)", () => {
       p_lines: [{ allocation_id: settled.allocationId, quantity: 1 }],
       p_idempotency_key: randomUUID(),
     });
+    // A confirmed walk-in order left UNPAID, so `cash_sales_awaiting_payment` has a row to show
+    // the roles entitled to it — an empty view would make "a Sales Representative sees nothing"
+    // prove nothing at all.
+    const { data: walkIn } = await salesRep.api.rpc("staff_create_order", {
+      p_customer_id: cashCustomerId,
+      p_lines: [{ product_id: productId, quantity: 1 }],
+      p_idempotency_key: randomUUID(),
+    });
+    await salesRep.api.rpc("staff_confirm_order", {
+      p_order_id: (walkIn!.order as { id: string }).id,
+      p_idempotency_key: randomUUID(),
+    });
+
     const credited = await invoicedOrder(3);
     await cashier.api.rpc("staff_request_credit", {
       p_invoice_id: credited.invoiceId,
@@ -1209,6 +1227,296 @@ describe("a second dispatch after a partial release", () => {
     });
 });
 
+describe("the walk-in queue, and what an anti-join in the wrong place hides", () => {
+  /**
+   * Thirty completed walk-in sales, then one that still needs paying.
+   *
+   * This is the shape of the defect exactly: the loader used to take the twenty-five oldest
+   * confirmed walk-in orders and THEN drop the ones already invoiced. Thirty finished sales from
+   * last week spend the whole limit, so the Cashier is shown an empty queue while a customer
+   * stands at the till. `public.cash_sales_awaiting_payment` applies the anti-join first, so the
+   * limit only ever spends rows that are genuinely waiting.
+   */
+  it("never lets completed sales fill the page ahead of one that needs paying", async () => {
+    const before = await cashier.read
+      .from("cash_sales_awaiting_payment")
+      .select("order_id", { count: "exact", head: true });
+    const waitingBefore = before.count ?? 0;
+
+    // Thirty walk-in orders, confirmed and paid for — done, and older than what follows.
+    for (let i = 0; i < 30; i += 1) {
+      const { data: order } = await salesRep.api.rpc("staff_create_order", {
+        p_customer_id: cashCustomerId,
+        p_lines: [{ product_id: productId, quantity: 1 }],
+        p_idempotency_key: randomUUID(),
+      });
+      const orderId = (order!.order as { id: string }).id;
+      await salesRep.api.rpc("staff_confirm_order", {
+        p_order_id: orderId,
+        p_idempotency_key: randomUUID(),
+      });
+      const paid = await cashier.api.rpc("staff_take_cash_payment", {
+        p_order_id: orderId,
+        p_method: "cash",
+        p_amount_tzs: UNIT_PRICE,
+        p_idempotency_key: randomUUID(),
+      });
+      expect(paid.data?.ok, JSON.stringify(paid.data)).toBe(true);
+    }
+
+    // And one that is confirmed and NOT paid: the sale the Cashier has to be able to see.
+    const { data: waiting } = await salesRep.api.rpc("staff_create_order", {
+      p_customer_id: cashCustomerId,
+      p_lines: [{ product_id: productId, quantity: 2 }],
+      p_idempotency_key: randomUUID(),
+    });
+    const waitingOrderId = (waiting!.order as { id: string }).id;
+    await salesRep.api.rpc("staff_confirm_order", {
+      p_order_id: waitingOrderId,
+      p_idempotency_key: randomUUID(),
+    });
+
+    // The thirty completed ones are not in the queue at all — not filtered out of a page of it.
+    const page = await cashier.read
+      .from("cash_sales_awaiting_payment")
+      .select("order_id, order_no, total_tzs", { count: "exact" })
+      .order("created_at", { ascending: true })
+      .order("order_id", { ascending: true })
+      .range(0, 24);
+
+    expect(page.error, page.error?.message).toBeNull();
+    expect(page.count).toBe(waitingBefore + 1);
+    expect((page.data ?? []).map((row) => row.order_id)).toContain(waitingOrderId);
+
+    // And it carries the live proforma total, because there is no invoice to read one from.
+    const row = (page.data ?? []).find((candidate) => candidate.order_id === waitingOrderId);
+    expect(Number(row!.total_tzs)).toBe(2 * UNIT_PRICE);
+  });
+
+  it("drops a walk-in sale out of the queue the moment it is paid", async () => {
+    const { data: order } = await salesRep.api.rpc("staff_create_order", {
+      p_customer_id: cashCustomerId,
+      p_lines: [{ product_id: productId, quantity: 1 }],
+      p_idempotency_key: randomUUID(),
+    });
+    const orderId = (order!.order as { id: string }).id;
+    await salesRep.api.rpc("staff_confirm_order", {
+      p_order_id: orderId,
+      p_idempotency_key: randomUUID(),
+    });
+
+    const waiting = await cashier.read
+      .from("cash_sales_awaiting_payment")
+      .select("order_id")
+      .eq("order_id", orderId);
+    expect(waiting.data).toHaveLength(1);
+
+    await cashier.api.rpc("staff_take_cash_payment", {
+      p_order_id: orderId,
+      p_method: "cash",
+      p_amount_tzs: UNIT_PRICE,
+      p_idempotency_key: randomUUID(),
+    });
+
+    const settled = await cashier.read
+      .from("cash_sales_awaiting_payment")
+      .select("order_id")
+      .eq("order_id", orderId);
+    expect(settled.data).toHaveLength(0);
+  });
+
+  it("refuses the whole queue to a Sales Representative, like every other settlement view",
+    async () => {
+      const { data, error } = await salesRep.read
+        .from("cash_sales_awaiting_payment")
+        .select("order_id");
+      expect(error, error?.message).toBeNull();
+      expect(data).toHaveLength(0);
+    });
+});
+
+describe("a page number past the end of a queue", () => {
+  /**
+   * The two ways to ask for a page that is not there, and they are the same bug.
+   *
+   * Someone edits `?awaiting=999` in the address bar; or they clear the last invoice on page 2 and
+   * the revalidated render asks for page 2 of a queue that now has one page. PostgREST answers
+   * both with an empty range and a positive count, and an un-normalised screen says "nothing is
+   * waiting" over the top of work that exists.
+   *
+   * `pagedQuery` is what stops that, and this is the query it makes, run twice.
+   */
+  async function awaitingPage(page: number) {
+    const from = (page - 1) * 25;
+    const result = await cashier.read
+      .from("invoices")
+      .select("id", { count: "exact" })
+      .is("cancelled_at", null)
+      .is("settlement_approved_at", null)
+      .order("issued_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + 24);
+    expect(result.error, result.error?.message).toBeNull();
+    return { rows: result.data ?? [], total: result.count ?? 0 };
+  }
+
+  it("clearing the last row of page 2 leaves a valid page 1 holding the rest", async () => {
+    // Twenty-six unsettled invoices: page 1 holds twenty-five, page 2 holds exactly one.
+    const created: string[] = [];
+    while ((await awaitingPage(1)).total < 26) {
+      const made = await invoicedOrder(1);
+      created.push(made.invoiceId);
+    }
+
+    const second = await awaitingPage(2);
+    expect(second.rows.length).toBeGreaterThan(0);
+    const lastRow = second.rows.at(-1)!.id as string;
+
+    // Settle everything on page 2, which is what "processing the final row" does.
+    for (const row of second.rows) {
+      const invoiceId = row.id as string;
+      await cashier.api.rpc("staff_record_payment", {
+        p_invoice_id: invoiceId,
+        p_method: "cash",
+        p_amount_tzs: (await settlementOf(invoiceId)).outstanding,
+        p_idempotency_key: randomUUID(),
+      });
+      const approved = await cashier.api.rpc("staff_approve_settlement", {
+        p_invoice_id: invoiceId,
+        p_idempotency_key: randomUUID(),
+      });
+      expect(approved.data?.ok, JSON.stringify(approved.data)).toBe(true);
+    }
+
+    // Page 2 is now empty and the count is still positive: the exact state the fallback exists for.
+    const emptied = await awaitingPage(2);
+    expect(emptied.rows).toHaveLength(0);
+    expect(emptied.total).toBeGreaterThan(0);
+
+    const lastPage = Math.max(1, Math.ceil(emptied.total / 25));
+    const fallback = await awaitingPage(lastPage);
+    expect(fallback.rows.length).toBeGreaterThan(0);
+    expect(fallback.rows.map((row) => row.id)).not.toContain(lastRow);
+  });
+
+  it("an extreme page number is REFUSED by PostgREST, not answered with an empty page", async () => {
+    // Worth pinning, because it is the reason `pagedQuery` cannot simply look at `rows.length`:
+    // a range starting past the last row comes back as PGRST103, and an untreated refusal would
+    // put the Cashier on the error boundary for a mistyped URL.
+    const from = 998 * 25;
+    const refused = await cashier.read
+      .from("invoices")
+      .select("id", { count: "exact" })
+      .is("cancelled_at", null)
+      .is("settlement_approved_at", null)
+      .order("issued_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + 24);
+
+    expect(refused.error?.code).toBe("PGRST103");
+  });
+
+  it("and the probe the fallback uses resolves it to a last page with records on it", async () => {
+    // `range(0, 0)` is satisfiable whatever the queue holds, and carries the exact count.
+    const probe = await cashier.read
+      .from("invoices")
+      .select("id", { count: "exact" })
+      .is("cancelled_at", null)
+      .is("settlement_approved_at", null)
+      .order("issued_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(0, 0);
+
+    expect(probe.error, probe.error?.message).toBeNull();
+    const total = probe.count ?? 0;
+    expect(total).toBeGreaterThan(0);
+
+    const lastPage = Math.max(1, Math.ceil(total / 25));
+    const resolved = await awaitingPage(lastPage);
+    // Never a false empty state: the count says there is work, and the page shows some of it.
+    expect(resolved.rows.length).toBeGreaterThan(0);
+    expect(resolved.total).toBe(total);
+  });
+});
+
+describe("ties in a sort order", () => {
+  /**
+   * `days_waiting` is a whole number of days and `invoice_no` repeats across the lines of one
+   * invoice, so on any ordinary morning most of the paid-but-unreleased list ties twice over. A
+   * range over a tie is not a page: the same claim can be returned on two pages, or on neither,
+   * and nothing in the answer says so.
+   */
+  it("pages paid-but-unreleased without duplicating or losing a claim", async () => {
+    // Several claims created in one go, so they share a day and several share an invoice.
+    for (let i = 0; i < 3; i += 1) {
+      const settled = await settledInvoice(3);
+      expect(settled.allocationId).toBeTruthy();
+    }
+
+    const all = await manager.read
+      .from("paid_but_unreleased")
+      .select("allocation_id", { count: "exact" })
+      .order("days_waiting", { ascending: false })
+      .order("invoice_no", { ascending: true })
+      .order("allocation_id", { ascending: true })
+      .range(0, 999);
+
+    expect(all.error, all.error?.message).toBeNull();
+    const total = all.count ?? 0;
+    expect(total).toBeGreaterThan(2);
+
+    // Walked two rows at a time, the way a page walks it.
+    const seen: string[] = [];
+    for (let from = 0; from < total; from += 2) {
+      const slice = await manager.read
+        .from("paid_but_unreleased")
+        .select("allocation_id")
+        .order("days_waiting", { ascending: false })
+        .order("invoice_no", { ascending: true })
+        .order("allocation_id", { ascending: true })
+        .range(from, from + 1);
+      expect(slice.error, slice.error?.message).toBeNull();
+      seen.push(...(slice.data ?? []).map((row) => row.allocation_id as string));
+    }
+
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size, "a claim appeared on two pages").toBe(total);
+
+    const everything = (all.data ?? []).map((row) => row.allocation_id as string);
+    expect([...seen].sort()).toEqual([...everything].sort());
+  });
+
+  it("pages the unsettled invoice queue the same way, across equal issue times", async () => {
+    const all = await cashier.read
+      .from("invoices")
+      .select("id", { count: "exact" })
+      .is("cancelled_at", null)
+      .is("settlement_approved_at", null)
+      .order("issued_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(0, 999);
+
+    const total = all.count ?? 0;
+    expect(total).toBeGreaterThan(2);
+
+    const seen: string[] = [];
+    for (let from = 0; from < total; from += 3) {
+      const slice = await cashier.read
+        .from("invoices")
+        .select("id")
+        .is("cancelled_at", null)
+        .is("settlement_approved_at", null)
+        .order("issued_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, from + 2);
+      seen.push(...(slice.data ?? []).map((row) => row.id as string));
+    }
+
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size, "an invoice appeared on two pages").toBe(total);
+  });
+});
+
 describe("the settlement tables, from outside the database", () => {
   it("is unreachable with the SECRET key", async () => {
     for (const table of [
@@ -1260,5 +1568,15 @@ describe("the settlement tables, from outside the database", () => {
       days_waiting
     `);
     expect(unreleased.error, unreleased.error?.message).toBeNull();
+
+    const walkIns = await cashier.read
+      .from("cash_sales_awaiting_payment")
+      .select("order_id, order_no, customer_name, total_tzs");
+    expect(walkIns.error, walkIns.error?.message).toBeNull();
+
+    const options = await cashier.read
+      .from("storekeepers")
+      .select("id, storekeeper_code, full_name");
+    expect(options.error, options.error?.message).toBeNull();
   });
 });

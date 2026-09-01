@@ -22,7 +22,12 @@ import { Pager } from "@/components/ui/pager";
 import { Card, StatusChip } from "@/components/ui/surface";
 import { formatTzs } from "@/lib/money";
 import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/settlement/methods";
-import type { CashSale, SettlementInvoice, SettlementQueue } from "@/lib/settlement/settlement";
+import type {
+  CashSale,
+  Page,
+  SettlementInvoice,
+  SettlementQueue,
+} from "@/lib/settlement/settlement";
 import type { AppRole } from "@/lib/auth/roles";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
@@ -58,7 +63,7 @@ export function PaymentQueue({
   role,
 }: {
   queue: SettlementQueue;
-  awaitingCashSale: CashSale[];
+  awaitingCashSale: Page<CashSale>;
   role: AppRole;
 }) {
   const t = useTranslations("settlement.payments");
@@ -67,15 +72,27 @@ export function PaymentQueue({
 
   return (
     <div className="flex flex-col gap-6">
-      {awaitingCashSale.length > 0 ? (
+      {awaitingCashSale.total > 0 ? (
         <section className="flex flex-col gap-3">
+          {/* The COUNT, not the size of the page: a walk-in customer is standing at the till, and
+              "one waiting" when there are thirty is the wrong thing to tell the person serving
+              them. */}
           <h2 className="text-sm font-semibold">
-            {t("cashSalesHeading", { count: awaitingCashSale.length })}
+            {t("cashSalesHeading", { count: awaitingCashSale.total })}
           </h2>
           {/* §12.4: these orders have no invoice and no reservation. Everything happens here, at
               payment, in one action. */}
           <Help>{t("cashSalesHelp")}</Help>
-          {awaitingCashSale.map((order) => (
+          <Pager
+            page={awaitingCashSale.page}
+            pageSize={awaitingCashSale.pageSize}
+            total={awaitingCashSale.total}
+            param="cash"
+            basePath={PAYMENTS_PATH}
+            otherParams={{ awaiting: awaiting.page, settled: settled.page }}
+            label={t("cashSalesHeading", { count: awaitingCashSale.total })}
+          />
+          {awaitingCashSale.rows.map((order) => (
             <CashSaleCard key={order.id} order={order} canTakeMoney={role === "cashier"} />
           ))}
         </section>
@@ -89,7 +106,7 @@ export function PaymentQueue({
           total={awaiting.total}
           param="awaiting"
           basePath={PAYMENTS_PATH}
-          otherParams={{ settled: settled.page }}
+          otherParams={{ settled: settled.page, cash: awaitingCashSale.page }}
           label={t("awaitingHeading", { count: awaiting.total })}
         />
         {awaiting.rows.length === 0 ? (
@@ -116,7 +133,7 @@ export function PaymentQueue({
           total={settled.total}
           param="settled"
           basePath={PAYMENTS_PATH}
-          otherParams={{ awaiting: awaiting.page }}
+          otherParams={{ awaiting: awaiting.page, cash: awaitingCashSale.page }}
           label={t("settledHeading")}
         />
         {settled.rows.length === 0 ? (

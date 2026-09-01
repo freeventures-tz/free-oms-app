@@ -459,8 +459,10 @@ test("a credit balance beyond a Manager's limit needs a Director", async ({ page
     // carrying an approved, unpaid balance, so the figure here is real money and not zero.
     //
     // The AMOUNT is not asserted, and deliberately: it is a running total across every invoice the
-    // customer holds, so it depends on what ran before it. `credit-exposure.test.ts` proves the
-    // arithmetic exhaustively; this proves the figure reaches the screen §7.8 puts it on.
+    // customer holds, so it depends on what ran before it. The arithmetic lives in SQL now —
+    // `public.customer_credit_exposure` — and is proved there: pgTAP 012 walks its boundary cases,
+    // and the integration suite totals one customer across three invoices. This proves the figure
+    // reaches the screen §7.8 puts it on.
     const exposure = card.getByTestId(/^credit-exposure-/);
     await expect(exposure).toContainText(CUSTOMER);
     await expect(exposure).toContainText(/TZS [\d,]+/);
@@ -750,6 +752,88 @@ test("a partial release leaves the rest assignable, and the rest goes out too", 
 });
 
 // ---------------------------------------------------------------------------
+test("a page number past the end of the queue shows the last page, not an empty one", async ({
+  page,
+}) => {
+  let invoiceNo = "";
+
+  await test.step("there is unsettled work to find", async () => {
+    await signInAs(page, "salesRep");
+    invoiceNo = await sellTo(page, CUSTOMER, 1);
+  });
+
+  await test.step("?awaiting=999 lands on a page with records on it", async () => {
+    await switchTo(page, "cashier");
+
+    // Typed into the address bar, or arrived at by clearing the last row of the last page — the
+    // screen cannot tell the difference and must not answer either with "nothing is waiting".
+    // PostgREST refuses a range that starts past the last row outright, so an unnormalised page
+    // number is an error boundary rather than an empty queue; both are wrong, and both are fixed
+    // by finding the real last page.
+    await page.goto(`${PAYMENTS_HREF}?awaiting=999`);
+
+    await expect(page.getByRole("heading", { level: 1, name: /payments/i })).toBeVisible();
+    await expect(page.getByText(/this page could not be loaded/i)).toHaveCount(0);
+
+    const count = page.getByTestId("pager-count-awaiting");
+    await expect(count).toBeVisible();
+    await expect(count).not.toContainText(/nothing to show/i);
+    await expect(page.getByText(/nothing is waiting/i)).toHaveCount(0);
+
+    // The section says how many there are, and the page under it holds some of them.
+    await expect(page.getByRole("article").first()).toBeVisible();
+  });
+
+  await test.step("and the invoice is reachable from the page it actually landed on", async () => {
+    // One page of work in the test database, so the last page is page one and the invoice is on
+    // it. The assertion that matters is that SOMETHING is shown; this pins which.
+    await expect(page.getByRole("article", { name: invoiceNo, exact: true })).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+test("the walk-in queue states its own total, and pages like the others", async ({ page }) => {
+  await test.step("a Sales Representative leaves a walk-in sale waiting to be paid", async () => {
+    await signInAs(page, "salesRep");
+    await page.goto("/orders/new");
+
+    await page.locator("#cashCustomer").click();
+    await nextStep(page);
+    await addProductLine(page, PRODUCT, "1");
+    await nextStep(page);
+    await page.locator("#submitOrder").click();
+    await expect(page).toHaveURL(/\/orders\/[0-9a-f-]{36}/);
+
+    await confirmOrder(page, /confirming creates no invoice and holds no stock/i);
+    await expect(page.getByText(/^confirmed$/i)).toBeVisible();
+  });
+
+  await test.step("the Cashier sees a count of them, not a count of the page", async () => {
+    await switchTo(page, "cashier");
+    await page.goto(PAYMENTS_HREF);
+
+    // The heading counts every walk-in sale still waiting. It used to count the rows that survived
+    // a client-side filter, which is a different number and a smaller one — and on a busy day it
+    // was zero while people queued at the till.
+    await expect(page.getByRole("heading", { name: /walk-in sales waiting to be paid \(\d+\)/i }))
+      .toBeVisible();
+
+    const count = page.getByTestId("pager-count-cash");
+    await expect(count).toBeVisible();
+    await expect(count).not.toContainText(/nothing to show/i);
+  });
+
+  await test.step("and an extreme walk-in page resolves the same way", async () => {
+    await page.goto(`${PAYMENTS_HREF}?cash=999`);
+
+    await expect(page.getByText(/this page could not be loaded/i)).toHaveCount(0);
+    const count = page.getByTestId("pager-count-cash");
+    await expect(count).toBeVisible();
+    await expect(count).not.toContainText(/nothing to show/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 test.describe("what the settlement screens offer", () => {
   test("a Manager reads payments and is offered no way to take money", async ({ page }) => {
     await signInAs(page, "manager");
@@ -802,6 +886,12 @@ test.describe("what the settlement screens offer", () => {
     await expect(page.getByTestId("pager-count-settled")).toBeVisible();
 
     await page.goto(DISPATCH_HREF);
+    await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
+    await expect(page.getByTestId("pager-count-released")).toBeVisible();
+
+    // Every queue parameter is normalised, not only the ones on /payments.
+    await page.goto(`${DISPATCH_HREF}?unreleased=999&released=999`);
+    await expect(page.getByText(/this page could not be loaded/i)).toHaveCount(0);
     await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
     await expect(page.getByTestId("pager-count-released")).toBeVisible();
   });

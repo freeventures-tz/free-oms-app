@@ -21,6 +21,12 @@ import type { AppRole } from "@/lib/auth/roles";
  * `public.customer_credit_exposure` and read back per customer.
  */
 
+/**
+ * A storekeeper's FULL record (product.md §3.2), for the screen that administers them.
+ *
+ * Not the shape the dispatch board gets. §3.2 lists a phone number, a start date and a note, and
+ * none of those has anything to do with choosing who fetches the goods — see `StorekeeperOption`.
+ */
 export type Storekeeper = {
   id: string;
   code: string;
@@ -29,6 +35,21 @@ export type Storekeeper = {
   isActive: boolean;
   startDate: string;
   note: string | null;
+};
+
+/**
+ * What the Cashier needs to ASSIGN one, and nothing else (design.md §7.10).
+ *
+ * The dispatch board is a client component, so whatever it is handed is serialised into the page
+ * and readable by anyone holding the browser. Handing it the administration record put every
+ * storekeeper's phone number and start date there to fill in a `<select>` that renders a name and
+ * a code — a use with no need of either. The role boundary is unchanged: the same three roles read
+ * the same table. What changes is how much of a row leaves the server.
+ */
+export type StorekeeperOption = {
+  id: string;
+  code: string;
+  fullName: string;
 };
 
 export type Payment = {
@@ -165,11 +186,94 @@ export type Page<T> = {
  */
 export const QUEUE_PAGE_SIZE = 25;
 
-/** Turns a 1-based page number from a URL into the half-open range PostgREST wants. */
+/** Turns a 1-based page number into the half-open range PostgREST wants. */
 function rangeFor(page: number, pageSize: number): { from: number; to: number } {
   const safe = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
   const from = (safe - 1) * pageSize;
   return { from, to: from + pageSize - 1 };
+}
+
+/**
+ * A counted read of one range, as PostgREST answers it.
+ *
+ * `code` is on the error because one particular code is not a failure: `PGRST103` is what comes
+ * back when the range starts past the last row, and that is a page number to correct rather than
+ * an outage to report.
+ */
+type CountedResult<T> = {
+  data: T[] | null;
+  error: { message: string; code?: string } | null;
+  count: number | null;
+};
+
+/** PostgREST's "Requested range not satisfiable" — an offset past the end of the result. */
+const RANGE_PAST_END = "PGRST103";
+
+/**
+ * One page of a query, normalised so a page number can never produce a false empty state.
+ *
+ * TWO WAYS TO ASK FOR A PAGE THAT IS NOT THERE, and both happen. A person edits `?awaiting=999` in
+ * the address bar; or they clear the last invoice on page 2 and the revalidated render asks for
+ * page 2 of a queue that now has one page. Either way PostgREST answers with an empty range and a
+ * positive count, and the screen says "nothing is waiting" over the top of work that exists. That
+ * is the same class of lie as `data ?? []` — a confident statement about the business drawn from
+ * a query that did not ask the right question.
+ *
+ * So when a range comes back empty against a positive count, the last page is computed from that
+ * count and asked for instead, and the page number reported back is the one actually shown — which
+ * is what the pager builds its links from, so Previous and Next stay right.
+ *
+ * ORDERING IS THE CALLER'S JOB, and every caller ends its sort on a unique column. A range over a
+ * non-deterministic order is not a page: rows with equal timestamps can appear on two pages or on
+ * none, and nothing about the result says so.
+ */
+async function pagedQuery<T>(
+  page: number,
+  read: (from: number, to: number) => PromiseLike<CountedResult<T>>,
+  label: string,
+): Promise<Page<T>> {
+  const requested = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
+
+  const first = rangeFor(requested, QUEUE_PAGE_SIZE);
+  const result = await read(first.from, first.to);
+
+  // TWO SHAPES OF "THAT PAGE IS NOT THERE", and only one of them looks like an answer.
+  //
+  // Ask for row 24,975 of a twelve-row queue and PostgREST does not return an empty list — it
+  // REFUSES, with `PGRST103`. Untreated, that reaches `requireRows` and becomes an outage: the
+  // Cashier gets "the system could not be reached" because somebody typed a number in the address
+  // bar. Ask for row 25 of a twenty-five-row queue and it answers politely with nothing at all,
+  // which becomes the opposite lie — "nothing is waiting" over the top of work that exists.
+  //
+  // Neither is true, and both have the same fix: find the real last page and show it.
+  const pastTheEnd =
+    result.error?.code === RANGE_PAST_END ||
+    (result.error === null && (result.data ?? []).length === 0 && (result.count ?? 0) > 0);
+
+  if (!pastTheEnd) {
+    const rows = requireRows(result, label);
+    return { rows, total: result.count ?? rows.length, page: requested, pageSize: QUEUE_PAGE_SIZE };
+  }
+
+  // One row from the top, purely for its exact count: a refusal carries no count to work from, and
+  // `range(0, 0)` is the one range that is satisfiable whatever the queue holds.
+  const probe = await read(0, 0);
+  const total = requireRows(probe, label).length === 0 ? 0 : (probe.count ?? 0);
+
+  if (total === 0) {
+    return { rows: [], total: 0, page: 1, pageSize: QUEUE_PAGE_SIZE };
+  }
+
+  const lastPage = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  const fallback = rangeFor(lastPage, QUEUE_PAGE_SIZE);
+  const retry = await read(fallback.from, fallback.to);
+
+  return {
+    rows: requireRows(retry, label),
+    total: retry.count ?? total,
+    page: lastPage,
+    pageSize: QUEUE_PAGE_SIZE,
+  };
 }
 
 /** A page number as it arrived from the URL, which is to say: not to be trusted. */
@@ -252,6 +356,7 @@ async function scopedTo<T>(
   return readEvery(read, label);
 }
 
+/** Every storekeeper record, for Settings › Storekeepers. */
 export async function loadStorekeepers(): Promise<Storekeeper[]> {
   const supabase = await createServerSupabase();
 
@@ -259,7 +364,8 @@ export async function loadStorekeepers(): Promise<Storekeeper[]> {
     await supabase
       .from("storekeepers")
       .select("id, storekeeper_code, full_name, phone, is_active, start_date, note")
-      .order("full_name"),
+      .order("full_name")
+      .order("id"),
     "settlement.storekeepers",
   );
 
@@ -271,6 +377,32 @@ export async function loadStorekeepers(): Promise<Storekeeper[]> {
     isActive: row.is_active as boolean,
     startDate: row.start_date as string,
     note: (row.note as string | null) ?? null,
+  }));
+}
+
+/**
+ * The active storekeepers a dispatch may be assigned to — three columns, chosen in the SELECT.
+ *
+ * Narrowed in the query rather than mapped down afterwards, because a field that is never read out
+ * of the database cannot be leaked by a later refactor that forgets to drop it again.
+ */
+export async function loadStorekeeperOptions(): Promise<StorekeeperOption[]> {
+  const supabase = await createServerSupabase();
+
+  const rows = requireRows(
+    await supabase
+      .from("storekeepers")
+      .select("id, storekeeper_code, full_name")
+      .eq("is_active", true)
+      .order("full_name")
+      .order("id"),
+    "settlement.storekeeper_options",
+  );
+
+  return rows.map((row) => ({
+    id: row.id as string,
+    code: row.storekeeper_code as string,
+    fullName: row.full_name as string,
   }));
 }
 
@@ -310,30 +442,39 @@ export async function loadSettlementQueue(
     customers!inner(name)
   `;
 
-  const awaitingRange = rangeFor(pages.awaiting ?? 1, QUEUE_PAGE_SIZE);
-  const settledRange = rangeFor(pages.settled ?? 1, QUEUE_PAGE_SIZE);
-
-  const [awaitingRows, settledRows] = await Promise.all([
-    supabase
-      .from("invoices")
-      .select(invoiceColumns, { count: "exact" })
-      .is("cancelled_at", null)
-      .is("settlement_approved_at", null)
-      .order("issued_at", { ascending: false })
-      .range(awaitingRange.from, awaitingRange.to),
-    supabase
-      .from("invoices")
-      .select(invoiceColumns, { count: "exact" })
-      .is("cancelled_at", null)
-      .not("settlement_approved_at", "is", null)
-      .order("issued_at", { ascending: false })
-      .range(settledRange.from, settledRange.to),
+  // `id` closes both sorts. Two invoices issued in the same transaction share an `issued_at`, and
+  // a range over a tie is not a page: the same row can arrive twice, or never (design.md §12.3 —
+  // an empty result and a wrong one are different answers, and this would produce both).
+  const [awaiting, settled] = await Promise.all([
+    pagedQuery(
+      pages.awaiting ?? 1,
+      (from, to) =>
+        supabase
+          .from("invoices")
+          .select(invoiceColumns, { count: "exact" })
+          .is("cancelled_at", null)
+          .is("settlement_approved_at", null)
+          .order("issued_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, to),
+      "settlement.invoices.awaiting",
+    ),
+    pagedQuery(
+      pages.settled ?? 1,
+      (from, to) =>
+        supabase
+          .from("invoices")
+          .select(invoiceColumns, { count: "exact" })
+          .is("cancelled_at", null)
+          .not("settlement_approved_at", "is", null)
+          .order("issued_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, to),
+      "settlement.invoices.settled",
+    ),
   ]);
 
-  const awaiting = requireRows(awaitingRows, "settlement.invoices.awaiting");
-  const settled = requireRows(settledRows, "settlement.invoices.settled");
-
-  const invoiceRows = [...awaiting, ...settled];
+  const invoiceRows = [...awaiting.rows, ...settled.rows];
   const invoiceIds = invoiceRows.map((row) => row.id as string);
   const customerIds = [...new Set(invoiceRows.map((row) => row.customer_id as string))];
 
@@ -414,6 +555,7 @@ export async function loadSettlementQueue(
         .in("approval_type", ["payment_reversal", "credit_or_unpaid_balance"])
         .in("entity_id", decidableIds)
         .order("entity_id")
+        .order("id")
         .range(from, to),
     "settlement.approvals",
   );
@@ -494,7 +636,8 @@ export async function loadSettlementQueue(
     releasable: false,
   };
 
-  function toInvoice(row: Record<string, unknown>): SettlementInvoice {
+  function toInvoice(raw: unknown): SettlementInvoice {
+    const row = raw as Record<string, unknown>;
     const order = oneOf<{ order_no: string; is_cash_sale: boolean }>(row.orders);
     const customer = oneOf<{ name: string }>(row.customers);
     const id = row.id as string;
@@ -522,18 +665,8 @@ export async function loadSettlementQueue(
   }
 
   return {
-    awaiting: {
-      rows: awaiting.map((row) => toInvoice(row as Record<string, unknown>)),
-      total: awaitingRows.count ?? awaiting.length,
-      page: pages.awaiting ?? 1,
-      pageSize: QUEUE_PAGE_SIZE,
-    },
-    settled: {
-      rows: settled.map((row) => toInvoice(row as Record<string, unknown>)),
-      total: settledRows.count ?? settled.length,
-      page: pages.settled ?? 1,
-      pageSize: QUEUE_PAGE_SIZE,
-    },
+    awaiting: { ...awaiting, rows: awaiting.rows.map((row) => toInvoice(row)) },
+    settled: { ...settled, rows: settled.rows.map((row) => toInvoice(row)) },
     exposureByCustomer,
   };
 }
@@ -549,71 +682,43 @@ export type CashSale = {
 /**
  * Walk-in orders that are confirmed and have no invoice yet (product.md §12.4).
  *
- * Its own bounded query rather than a filter over the whole order list, because §12.4 says nothing
- * exists for these until payment: they are not in the invoice queue and would otherwise be
- * invisible to the Cashier who has to take the money.
+ * ONE READ OF ONE VIEW, and the view is what makes it correct. The "no invoice yet" test used to
+ * happen in TypeScript, after a limit of twenty-five: twenty-five completed sales from last week
+ * would fill the page and then be filtered away, leaving the Cashier an empty queue with a
+ * customer standing in front of them. `public.cash_sales_awaiting_payment` applies the anti-join
+ * before anything is limited or counted, so a page holds twenty-five sales that genuinely need
+ * paying and the total beside it counts the same thing.
  *
- * The amount is the LIVE PROFORMA total, which for an un-invoiced order is the only figure the
- * customer has been quoted. There is no invoice to read it from — creating one is what the payment
- * does.
+ * Ordered oldest-first — a till queue is cleared in the order people arrived — and closed on
+ * `order_id`, because two orders written in one second must not swap places between pages.
  */
-export async function loadCashSalesAwaitingPayment(): Promise<CashSale[]> {
+export async function loadCashSalesAwaitingPayment(page = 1): Promise<Page<CashSale>> {
   const supabase = await createServerSupabase();
 
-  const rows = requireRows(
-    await supabase
-      .from("orders")
-      .select("id, order_no, customers!inner(name)")
-      .eq("is_cash_sale", true)
-      .eq("status", "confirmed")
-      .order("created_at", { ascending: true })
-      .limit(QUEUE_PAGE_SIZE),
+  const result = await pagedQuery(
+    page,
+    (from, to) =>
+      supabase
+        .from("cash_sales_awaiting_payment")
+        .select("order_id, order_no, customer_name, total_tzs", { count: "exact" })
+        .order("created_at", { ascending: true })
+        .order("order_id", { ascending: true })
+        .range(from, to),
     "settlement.cash_sales",
   );
 
-  const ids = rows.map((row) => row.id as string);
-
-  // Which of them already have an invoice, and what each is quoted at — both asked as scoped
-  // questions rather than by reading every invoice and proforma in the business and subtracting.
-  const [invoiced, proformas] = await Promise.all([
-    scopedTo(
-      ids,
-      (from, to) =>
-        supabase
-          .from("invoices")
-          .select("order_id")
-          .in("order_id", ids)
-          .order("order_id")
-          .range(from, to),
-      "settlement.cash_sale_invoices",
-    ),
-    scopedTo(
-      ids,
-      (from, to) =>
-        supabase
-          .from("proformas")
-          .select("order_id, total_tzs")
-          .is("superseded_at", null)
-          .in("order_id", ids)
-          .order("order_id")
-          .range(from, to),
-      "settlement.cash_sale_proformas",
-    ),
-  ]);
-
-  const alreadyInvoiced = new Set(invoiced.map((row) => row.order_id as string));
-  const quotedFor = new Map(
-    proformas.map((row) => [row.order_id as string, Number(row.total_tzs)]),
-  );
-
-  return rows
-    .filter((row) => !alreadyInvoiced.has(row.id as string))
-    .map((row) => ({
-      id: row.id as string,
-      orderNo: row.order_no as string,
-      customerName: oneOf<{ name: string }>(row.customers)?.name ?? "",
-      totalTzs: quotedFor.get(row.id as string) ?? 0,
-    }));
+  return {
+    ...result,
+    rows: result.rows.map((raw) => {
+      const row = raw as Record<string, unknown>;
+      return {
+        id: row.order_id as string,
+        orderNo: row.order_no as string,
+        customerName: (row.customer_name as string) ?? "",
+        totalTzs: Number(row.total_tzs),
+      };
+    }),
+  };
 }
 
 export type DispatchQueue = {
@@ -639,10 +744,7 @@ export async function loadDispatchQueue(
     profiles!dispatches_assigned_by_fkey(full_name)
   `;
 
-  const releasedRange = rangeFor(pages.released ?? 1, QUEUE_PAGE_SIZE);
-  const unreleasedRange = rangeFor(pages.unreleased ?? 1, QUEUE_PAGE_SIZE);
-
-  const [live, releasedRows, outstandingRows] = await Promise.all([
+  const [live, released, outstanding] = await Promise.all([
     // No page, and that is the bound: a dispatch stops being live the moment it is released or
     // cancelled, so this set is the work in hand rather than the history of it. Batched all the
     // same, because "no page" must not quietly become "the first thousand".
@@ -653,31 +755,44 @@ export async function loadDispatchQueue(
           .select(dispatchColumns)
           .in("status", ["assigned", "note_recorded"])
           .order("assigned_at", { ascending: true })
+          .order("id", { ascending: true })
           .range(from, to),
       "settlement.dispatches.live",
     ),
-    supabase
-      .from("dispatches")
-      .select(dispatchColumns, { count: "exact" })
-      .eq("status", "released")
-      .order("released_at", { ascending: false })
-      .range(releasedRange.from, releasedRange.to),
-    supabase
-      .from("paid_but_unreleased")
-      .select(
-        `allocation_id, invoice_id, invoice_no, customer_name, product_id, outstanding_quantity,
-         days_waiting`,
-        { count: "exact" },
-      )
-      .order("days_waiting", { ascending: false })
-      .order("invoice_no", { ascending: true })
-      .range(unreleasedRange.from, unreleasedRange.to),
+    pagedQuery(
+      pages.released ?? 1,
+      (from, to) =>
+        supabase
+          .from("dispatches")
+          .select(dispatchColumns, { count: "exact" })
+          .eq("status", "released")
+          .order("released_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, to),
+      "settlement.dispatches.released",
+    ),
+    // `days_waiting` is a whole number of days, so on any ordinary morning most of this list ties
+    // on it, and `invoice_no` ties again across the lines of one invoice. `allocation_id` is what
+    // finally settles the order — without it a claim can sit on two pages, or on neither.
+    pagedQuery(
+      pages.unreleased ?? 1,
+      (from, to) =>
+        supabase
+          .from("paid_but_unreleased")
+          .select(
+            `allocation_id, invoice_id, invoice_no, customer_name, product_id, outstanding_quantity,
+             days_waiting`,
+            { count: "exact" },
+          )
+          .order("days_waiting", { ascending: false })
+          .order("invoice_no", { ascending: true })
+          .order("allocation_id", { ascending: true })
+          .range(from, to),
+      "settlement.paid_but_unreleased",
+    ),
   ]);
 
-  const released = requireRows(releasedRows, "settlement.dispatches.released");
-  const outstanding = requireRows(outstandingRows, "settlement.paid_but_unreleased");
-
-  const dispatchIds = [...live, ...released].map((row) => row.id as string);
+  const dispatchIds = [...live, ...released.rows].map((row) => (row as { id: string }).id);
 
   const lines = await scopedTo(
     dispatchIds,
@@ -704,7 +819,8 @@ export async function loadDispatchQueue(
     linesByDispatch.set(dispatchId, list);
   }
 
-  function toDispatch(row: Record<string, unknown>): Dispatch {
+  function toDispatch(raw: unknown): Dispatch {
+    const row = raw as Record<string, unknown>;
     const invoice = oneOf<{ invoice_no: string; orders: unknown }>(row.invoices);
     const order = oneOf<{ customers: unknown }>(invoice?.orders);
     const customer = oneOf<{ name: string }>(order?.customers);
@@ -726,7 +842,7 @@ export async function loadDispatchQueue(
     };
   }
 
-  const liveDispatches = live.map((row) => toDispatch(row as Record<string, unknown>));
+  const liveDispatches = live.map((row) => toDispatch(row));
 
   // How much of each claim an in-progress dispatch has already spoken for. `api.staff_assign_
   // dispatch` subtracts exactly this before it writes; the screen has to subtract it too, or it
@@ -741,15 +857,18 @@ export async function loadDispatchQueue(
     }
   }
 
-  const claims = outstanding.map((row) => ({
-    allocationId: row.allocation_id as string,
-    invoiceId: row.invoice_id as string,
-    invoiceNo: row.invoice_no as string,
-    customerName: row.customer_name as string,
-    productId: row.product_id as string,
-    outstandingQuantity: Number(row.outstanding_quantity),
-    daysWaiting: Number(row.days_waiting),
-  }));
+  const claims = outstanding.rows.map((raw) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      allocationId: row.allocation_id as string,
+      invoiceId: row.invoice_id as string,
+      invoiceNo: row.invoice_no as string,
+      customerName: row.customer_name as string,
+      productId: row.product_id as string,
+      outstandingQuantity: Number(row.outstanding_quantity),
+      daysWaiting: Number(row.days_waiting),
+    };
+  });
 
   // An invoice stays assignable while ANY of its claims has something left after the in-progress
   // dispatches are subtracted. A partial release therefore does not end the invoice's dispatch
@@ -776,18 +895,8 @@ export async function loadDispatchQueue(
 
   return {
     live: liveDispatches,
-    released: {
-      rows: released.map((row) => toDispatch(row as Record<string, unknown>)),
-      total: releasedRows.count ?? released.length,
-      page: pages.released ?? 1,
-      pageSize: QUEUE_PAGE_SIZE,
-    },
-    outstanding: {
-      rows: claims,
-      total: outstandingRows.count ?? claims.length,
-      page: pages.unreleased ?? 1,
-      pageSize: QUEUE_PAGE_SIZE,
-    },
+    released: { ...released, rows: released.rows.map((row) => toDispatch(row)) },
+    outstanding: { ...outstanding, rows: claims },
     assignable: [...byInvoice.values()],
   };
 }

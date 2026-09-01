@@ -525,6 +525,62 @@ grant select on public.customer_credit_exposure to fv_definer_owner;
 revoke all on public.customer_credit_exposure from service_role;
 
 -- ---------------------------------------------------------------------------
+-- cash_sales_awaiting_payment — walk-in orders with no invoice yet (product.md §12.4)
+--
+-- THE ANTI-JOIN IS THE WHOLE POINT, and doing it anywhere else is a defect. §12.4 says nothing
+-- exists for a walk-in order until payment: no invoice, no balance, no reservation. So "which
+-- walk-in orders still need paying" is "confirmed, and no invoice references them" — and if that
+-- second half is applied AFTER a limit, the query is wrong in a way that hides money.
+--
+-- It hid it like this: read the twenty-five oldest confirmed walk-in orders, then drop the ones
+-- already invoiced. Twenty-five completed sales from last week are twenty-five rows the limit
+-- spends before it reaches today, so the Cashier is shown an empty queue while a customer stands
+-- at the till waiting to pay. Excluding them HERE means the limit only ever spends rows that are
+-- genuinely waiting, and the exact count beside it counts the same thing.
+--
+-- The amount is the live proforma total, because there is no invoice to read one from — creating
+-- one is what the payment does. A LEFT JOIN LATERAL rather than a join, so an order that somehow
+-- has no live quotation still appears as work to do rather than vanishing from the queue.
+-- ---------------------------------------------------------------------------
+create view public.cash_sales_awaiting_payment
+with (security_invoker = true) as
+select o.id         as order_id,
+       o.order_no,
+       o.created_at,
+       c.name       as customer_name,
+       coalesce(quoted.total_tzs, 0)::bigint as total_tzs
+  from public.orders o
+  join public.customers c on c.id = o.customer_id
+  left join lateral (
+    select pr.total_tzs
+      from public.proformas pr
+     where pr.order_id = o.id
+       and pr.superseded_at is null
+     order by pr.version desc
+     limit 1
+  ) quoted on true
+ where o.is_cash_sale
+   and o.status = 'confirmed'
+   and not exists (
+     select 1 from public.invoices i where i.order_id = o.id
+   )
+   and (select api.staff_settlement_readable());
+
+comment on view public.cash_sales_awaiting_payment is
+  'Walk-in orders that are confirmed and still have no invoice (product.md §12.4). The '
+  '"no invoice yet" test is IN the view, so a page of this queue can never be filled with sales '
+  'that are already done.';
+
+-- Direct access to public.cash_sales_awaiting_payment
+--
+-- A view over `orders`, `customers` and `proformas`, so `security_invoker` applies their policies
+-- as the person asking, and the predicate above keeps it to the roles that settle invoices.
+grant select on public.cash_sales_awaiting_payment to authenticated;
+grant select on public.cash_sales_awaiting_payment to fv_definer_owner;
+
+revoke all on public.cash_sales_awaiting_payment from service_role;
+
+-- ---------------------------------------------------------------------------
 -- dispatches — one record per PHYSICAL dispatch note (product.md §14, AC-36)
 -- ---------------------------------------------------------------------------
 create table public.dispatches (

@@ -5,7 +5,11 @@ import { PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
 import { loadCatalogue } from "@/lib/catalogue/catalogue";
 import { loadStockOverview } from "@/lib/inventory/inventory";
-import { loadDispatchQueue, loadStorekeepers, pageNumber } from "@/lib/settlement/settlement";
+import {
+  loadDispatchQueue,
+  loadStorekeeperOptions,
+  pageNumber,
+} from "@/lib/settlement/settlement";
 
 /**
  * Dispatch queue (design.md §7.9, product.md §12.6 steps 9–14, §14).
@@ -36,7 +40,10 @@ export default async function DispatchPage({ searchParams }: PageProps<"/dispatc
       released: pageNumber(params.released),
       unreleased: pageNumber(params.unreleased),
     }),
-    loadStorekeepers(),
+    // The assignment SHAPE, not the personnel record: this board is a client component, and a
+    // storekeeper's phone number and start date have no business being serialised into a page
+    // that renders a name and a code.
+    loadStorekeeperOptions(),
     loadCatalogue(),
     loadStockOverview(),
   ]);
@@ -46,7 +53,7 @@ export default async function DispatchPage({ searchParams }: PageProps<"/dispatc
       <PageHeader title={t("title")} description={t("description")} />
       <DispatchBoard
         queue={queue}
-        storekeepers={storekeepers.filter((keeper) => keeper.isActive)}
+        storekeepers={storekeepers}
         products={catalogue.products}
         locations={overview.locations}
         role={viewer.role}

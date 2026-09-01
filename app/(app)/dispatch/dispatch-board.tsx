@@ -21,7 +21,7 @@ import type {
   AssignableInvoice,
   Dispatch,
   DispatchQueue,
-  Storekeeper,
+  StorekeeperOption,
 } from "@/lib/settlement/settlement";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
@@ -48,7 +48,8 @@ export function DispatchBoard({
   role,
 }: {
   queue: DispatchQueue;
-  storekeepers: Storekeeper[];
+  /** Three fields, and the loader selects only those three (design.md §7.10). */
+  storekeepers: StorekeeperOption[];
   products: CatalogueProduct[];
   locations: InventoryLocation[];
   role: AppRole;
@@ -472,7 +473,7 @@ function AssignCard({
 }: {
   invoice: AssignableInvoice;
   products: CatalogueProduct[];
-  storekeepers: Storekeeper[];
+  storekeepers: StorekeeperOption[];
   locations: InventoryLocation[];
 }) {
   const t = useTranslations();

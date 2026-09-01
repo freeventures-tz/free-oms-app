@@ -16,7 +16,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(99);
+select plan(105);
 
 create schema if not exists tests;
 
@@ -769,6 +769,63 @@ select is(
       and cmd = 'SELECT' and roles::text like '%authenticated%'),
   5,
   'and each of the five still has exactly one read policy for the roles that do need it');
+
+-- ---------------------------------------------------------------------------
+-- cash_sales_awaiting_payment — the anti-join, where it has to be
+--
+-- §12.4: nothing exists for a walk-in order until payment. So "still needs paying" is "confirmed,
+-- and no invoice references it", and that second half belongs in the view. Applied afterwards, in
+-- the application, a page of twenty-five completed sales filters down to nothing and the Cashier
+-- is told the queue is empty with a customer standing at the till.
+-- ---------------------------------------------------------------------------
+select tests.acting_as('b0000000-0000-0000-0000-000000000004'::uuid);   -- Sales Representative
+
+select is(
+  (api.staff_create_order(
+     (select id from public.customers where is_cash_customer),
+     jsonb_build_array(jsonb_build_object('product_id', tests.product('Marine 18 mm'),
+                                          'quantity', 1)),
+     'fx-walkin') ->> 'reason'),
+  'created', 'a second walk-in order is written');
+
+select is(
+  (api.staff_confirm_order(
+     -- The one walk-in order with no invoice against it: the first one in this file was paid, and
+     -- paying is what creates the invoice (§12.4 point 4).
+     (select o.id from public.orders o
+        join public.customers c on c.id = o.customer_id
+       where c.is_cash_customer
+         and not exists (select 1 from public.invoices i where i.order_id = o.id)
+       limit 1),
+     'fx-walkin-confirm') ->> 'reason'),
+  'confirmed_cash_sale',
+  'and confirmed, which still creates no invoice');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000003'::uuid);   -- Cashier
+
+select is(
+  (select count(*)::int from public.cash_sales_awaiting_payment),
+  1,
+  'exactly one walk-in sale is waiting: the paid one is GONE from the queue, not filtered out of a '
+  'page of it');
+
+select is(
+  (select count(*)::int from public.cash_sales_awaiting_payment q
+     join public.orders o on o.id = q.order_id
+    where exists (select 1 from public.invoices i where i.order_id = o.id)),
+  0,
+  'and nothing in the queue already has an invoice');
+
+select is(
+  (select total_tzs from public.cash_sales_awaiting_payment),
+  100000::bigint,
+  'the amount is the live quotation, because there is no invoice to read one from');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000004'::uuid);   -- Sales Representative
+
+select is(
+  (select count(*)::int from public.cash_sales_awaiting_payment), 0,
+  'and the queue refuses a Sales Representative, like every other settlement view');
 
 -- ---------------------------------------------------------------------------
 -- The privilege surface

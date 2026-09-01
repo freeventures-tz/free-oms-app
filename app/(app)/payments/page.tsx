@@ -28,13 +28,18 @@ export default async function PaymentsPage({ searchParams }: PageProps<"/payment
   const viewer = await requireAccess("/payments");
   const t = await getTranslations("settlement.payments");
 
+  // Every page parameter is normalised here and again in the loader: `pageNumber` turns anything
+  // that is not a positive integer into 1, and `pagedQuery` falls back to the real last page when
+  // the number is past the end. A hand-edited `?awaiting=999` therefore shows the last page of
+  // work rather than an empty queue over the top of it.
   const params = await searchParams;
   const awaitingPage = pageNumber(params.awaiting);
   const settledPage = pageNumber(params.settled);
+  const cashPage = pageNumber(params.cash);
 
   const [queue, awaitingCashSale] = await Promise.all([
     loadSettlementQueue({ awaiting: awaitingPage, settled: settledPage }),
-    loadCashSalesAwaitingPayment(),
+    loadCashSalesAwaitingPayment(cashPage),
   ]);
 
   return (
