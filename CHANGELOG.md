@@ -2,6 +2,76 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.0.5] — 2026-09-02
+
+**Making bricks.** This release adds the mixer batch, the materials it actually consumed, the
+bricks that came out of the mould, the 72 hours they spend curing, and the inspection that decides
+how many of them may be sold. Petty cash, reconciliation and reports are still not in the system.
+
+**The staff workflows in this release are not open for normal use yet.** Brick approval checks what
+is physically at the location; it does not yet refuse materials a customer has already been promised
+(§8.1). That correction ships as **v0.0.6**, and until it has been verified in production the
+production, sales and stock workflows stay closed to day-to-day operation. Nothing here activates an
+account or launches an operation.
+
+### New
+
+- **The batch form arrives already filled in.** One bag of Dangote Cement 42R, five buckets of
+  sand, five buckets of aggregate — the standard recipe, as the expected quantities. A Manager who
+  used exactly that types nothing and confirms; changing a figure is the exception, and the
+  difference from the standard appears beside it as they type. There is no field to type a
+  difference into, on the screen or in the database. Water is a utility cost and is never stock.
+- **Recording a batch moves nothing.** Approving it is what takes the materials out of the yard,
+  and the control says so before it is pressed. The same Manager may record a batch and later
+  approve it — two separate acts, each with its own actor, role and time. A rejection is a
+  completed decision that needs a reason, records no approver, and consumes nothing.
+- **The deduction is what was actually used, never the recipe.** A batch that used six buckets of
+  sand takes six. The variance is recorded at whatever size it is and never used to pull the
+  deduction back toward the standard. One bag of cement deducts one bag, not the fifty kilograms
+  inside it.
+- **Every material is answered for.** A batch that mentioned two of the three materials is refused:
+  silence about the third is not a confirmation of it. Confirming that a batch used **none** of
+  something is a different thing, and is accepted.
+- **A batch may produce five-inch bricks, six-inch bricks or both**, with the moulding rejects
+  counted separately. Twenty to twenty-five six-inch and twenty-five to thirty five-inch are the
+  expected ranges; a count outside one is **flagged and explained, never blocked**, and an
+  explanation offered for a normal batch is refused so that an explanation always means something
+  happened.
+- **Each size cures as its own lot, on its own clock.** Curing starts at the moulding-completion
+  time the Manager states — the form offers the yard's current time, in Dar es Salaam, whatever the
+  phone is set to — and only a time in the future is refused. Each lot shows when it is due and how
+  long is left, and a page left open catches up on its own when the deadline passes.
+- **Reaching the end of curing grants nothing.** After 72 hours a lot reads **Ready for
+  inspection**, and nothing more. Before that the inspection control is disabled with its reason
+  shown, and the database refuses an early inspection whatever the screen believes.
+- **Only what a Manager accepts becomes sellable.** The inspection accounts for the whole lot —
+  accepted plus rejected equals what cured — and the entire lot leaves curing once. A lot in which
+  nothing was accepted is a real outcome and writes no phantom balance. Rejects stay recorded on
+  the lot and never become stock.
+- **Reject reasons are four buttons**, at the mould and again at inspection: Broken, Cracked,
+  Undersized, Weak. There is no text field for one anywhere. A count with no reason is refused, and
+  so is a reason with nothing to explain.
+- **Drafts and curing lots are separate, paged queues.** A batch waiting for a decision stays
+  reachable however much history sits in front of it, and each section says how much is off screen.
+- **A Manager runs production and a Director reads it.** A Director is offered no control on the
+  board at all — not a greyed one. A Cashier and a Sales Representative cannot reach the screen,
+  its rows or its commands.
+- Everything on these screens is in English and Kiswahili, and works on a phone, a tablet and a
+  desktop.
+
+### Fixed
+
+- **The Stock screen no longer says the yard is empty while bricks are standing in it.** It says it
+  shows what is physically at each location and read only the sellable balance, so approving a
+  batch put twenty bricks in the yard that the page reported as none. Curing is now its own figure
+  on the card, never added to the sellable one and never left out.
+- **Previous and Next in a paged queue are back to a 44-pixel target on a tablet.** They had
+  dropped to 40, below the touch floor the design sets.
+
+### Improved
+
+None.
+
 ## [0.0.4] — 2026-09-01
 
 **Taking money, and letting the goods go.** This release adds payment, credit, settlement, the
