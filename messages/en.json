@@ -94,7 +94,9 @@
     "receiving": "Supplier receiving",
     "transfers": "Internal transfers",
     "adjustments": "Stock corrections",
-    "suppliers": "Suppliers"
+    "suppliers": "Suppliers",
+    "dispatch": "Dispatch",
+    "storekeepers": "Storekeepers"
   },
   "unavailable": {
     "title": "This page could not be loaded",
@@ -707,6 +709,230 @@
     "reason": {
       "tooShort": "Say why, in a few words.",
       "tooLong": "That reason is too long."
+    }
+  },
+  "settlement": {
+    "status": {
+      "unpaid": "Unpaid",
+      "partially_paid": "Partly paid",
+      "paid": "Paid",
+      "cancelled": "Cancelled",
+      "settled": "Ready to dispatch"
+    },
+    "methods": {
+      "cash": "Cash",
+      "mixx_by_yas": "Mixx by YAS",
+      "halopesa": "Halopesa",
+      "mwanga_hakika_transfer": "Mwanga Hakika transfer",
+      "crdb_transfer": "CRDB transfer",
+      "cheque": "Cheque"
+    },
+    "payments": {
+      "title": "Payments",
+      "description": "Invoices waiting for money, and what has already been settled.",
+      "awaitingHeading": "Waiting for settlement ({count})",
+      "nothingWaiting": "Nothing is waiting.",
+      "settledHeading": "Settled",
+      "noneSettled": "Nothing has been settled yet.",
+      "cashSalesHeading": "Walk-in sales waiting to be paid ({count})",
+      "cashSalesHelp": "A walk-in sale has no invoice and holds no stock until it is paid. Everything happens in one action here.",
+      "balanceDue": "Balance due",
+      "amountDue": "Amount due",
+      "ofTotal": "of {total}",
+      "history": "Money received",
+      "receivedBy": "Taken by {who} on {date}",
+      "take": "Take payment",
+      "recordHeading": "Record money received",
+      "method": "How was it paid?",
+      "amountReceived": "Amount received",
+      "amountHelp": "Whole shillings only. It is filled in with the balance due.",
+      "record": "Record payment",
+      "recorded": "Payment recorded.",
+      "approveSettlement": "Mark as settled",
+      "settleConsequence": "Marking it settled holds the goods for this customer and lets a storekeeper be assigned.",
+      "cannotSettleYet": "{outstanding} is still to be settled, by payment or approved credit.",
+      "settled": "Settled. The goods are held for this customer and a storekeeper can be assigned.",
+      "completeCashSale": "Take payment and complete the sale",
+      "cashSaleConsequence": "This takes the money, creates the invoice and holds the goods, all at once. If the stock has gone, nothing at all is recorded.",
+      "cashSaleCompleted": "Paid. The invoice is created and the goods are held for collection."
+    },
+    "credit": {
+      "heading": "Credit",
+      "carry": "Carry as credit",
+      "requestHeading": "Carry the balance as credit",
+      "recordsNoMoney": "Credit is not a payment. It records an approved unpaid balance, and the invoice stays unpaid until money arrives.",
+      "amountCarried": "Amount to carry as credit",
+      "reason": "Why?",
+      "submit": "Send for approval",
+      "requested": "{amount} asked for by {who}",
+      "requestedManager": "Sent to the Manager for approval.",
+      "requestedDirector": "Sent to a Director for approval.",
+      "needsManager": "Waiting for the Manager",
+      "needsDirector": "Waiting for a Director",
+      "exposure": "{who} already owes {amount} on approved credit.",
+      "approve": "Approve credit",
+      "approved": "Credit approved. No money has been recorded.",
+      "reject": "Reject",
+      "rejectReason": "Why are you rejecting it?",
+      "confirmReject": "Confirm rejection",
+      "rejected": "Credit rejected. The balance is still owed.",
+      "approvedBalance": "{amount} approved as credit"
+    },
+    "reversal": {
+      "label": "Reversal",
+      "request": "Ask to reverse this",
+      "reason": "Why is it being reversed?",
+      "submit": "Send to a Director",
+      "requested": "Sent to a Director. The money is still recorded until they decide.",
+      "pending": "Reversal waiting for a Director",
+      "approve": "Approve the reversal",
+      "approved": "Reversed. The money received has gone back down."
+    },
+    "dispatch": {
+      "title": "Dispatch",
+      "description": "Goods that are paid for and waiting to go, and the signed notes that release them.",
+      "paidUnreleasedHeading": "Paid and not yet collected ({count})",
+      "nothingUnreleased": "Nothing is waiting to be collected.",
+      "paidNotReleased": "Paid — not released",
+      "outstandingQuantity": "{count} waiting, {days} days",
+      "awaitingAssignmentHeading": "Waiting for a storekeeper ({count})",
+      "nothingAwaitingAssignment": "Nothing is waiting for a storekeeper.",
+      "assignedHeading": "Storekeeper assigned ({count})",
+      "nothingAssigned": "Nothing is assigned.",
+      "awaitingSignatureHeading": "Waiting for the customer signature ({count})",
+      "nothingAwaitingSignature": "Nothing is waiting for a signature.",
+      "releasedHeading": "Collected",
+      "nothingReleased": "Nothing has been collected yet.",
+      "noStorekeepers": "Register a storekeeper before assigning a dispatch.",
+      "storekeeper": "Storekeeper",
+      "chooseStorekeeper": "Choose a storekeeper",
+      "sourceLocation": "Collect from",
+      "whatToFetch": "What to fetch",
+      "stillOwed": "{count} still owed to this customer",
+      "assign": "Assign storekeeper",
+      "assigned": "Storekeeper assigned. No stock has moved.",
+      "assignConsequence": "Assigning does not move any stock. The goods stay where they are.",
+      "assignedTo": "{who} · collecting from {location}",
+      "noteNumber": "Dispatch note {no}",
+      "noteNumberLabel": "Dispatch note number",
+      "noteNumberHelp": "From the carbon-copy book. The system does not print dispatch notes, so this comes off the paper.",
+      "recordNote": "Save note number",
+      "noteRecorded": "Note number saved. Nothing has moved yet.",
+      "confirmRelease": "Confirm the customer signed",
+      "blockedByNote": "Save the dispatch note number first. The release cannot be confirmed without it.",
+      "releaseConsequence": "Confirming means the customer has signed for the goods. The stock leaves the yard now, and this cannot be undone.",
+      "released": "Released. The stock has left the yard.",
+      "status": {
+        "assigned": "Storekeeper assigned",
+        "note_recorded": "Waiting for signature",
+        "released": "Collected",
+        "cancelled": "Cancelled"
+      }
+    },
+    "storekeepers": {
+      "title": "Storekeepers",
+      "description": "The people who fetch and hand over goods. They do not sign in — the record exists so they can be named on a dispatch.",
+      "descriptionManager": "The people who fetch and hand over goods. Only a Director can add or switch one off.",
+      "notAUser": "A storekeeper has no login and no permissions. This is a record, not an account.",
+      "addHeading": "Register a storekeeper",
+      "fullName": "Full name",
+      "phone": "Phone number",
+      "phoneHelp": "Optional. Not used to sign in.",
+      "startDate": "Started on",
+      "note": "Note",
+      "noteHelp": "Optional. Anything short worth remembering.",
+      "submit": "Register storekeeper",
+      "added": "Storekeeper registered.",
+      "empty": "No storekeepers yet.",
+      "count": "{count} storekeepers",
+      "since": "Since {date}",
+      "active": "Working",
+      "inactive": "Switched off",
+      "deactivate": "Switch off",
+      "reactivate": "Switch on",
+      "deactivateHelp": "A storekeeper who is switched off cannot be assigned to a new dispatch. Past dispatches still name them.",
+      "deactivated": "Storekeeper switched off.",
+      "reactivated": "Storekeeper switched on."
+    }
+  },
+  "settlementErrors": {
+    "generic": "That did not work. Try again.",
+    "not_permitted": "You are not allowed to do that.",
+    "idempotency_key_conflict": "Reload the page and try again.",
+    "storekeeper_name_required": "Enter their full name.",
+    "storekeeper_exists": "There is already a storekeeper with that name.",
+    "storekeeper_unchanged": "That storekeeper is already in that state.",
+    "storekeeper_state_required": "Choose whether they are working or switched off.",
+    "start_date_invalid": "Choose a start date that is not in the future.",
+    "no_storekeeper": "That storekeeper is not available. Reload the page.",
+    "no_invoice": "That invoice no longer exists. Reload the page.",
+    "no_order": "That order no longer exists. Reload the page.",
+    "invoice_cancelled": "That invoice has been cancelled.",
+    "amount_invalid": "Enter an amount in whole shillings.",
+    "payment_exceeds_balance": "That is more than is owed.",
+    "credit_exceeds_balance": "That is more than is owed.",
+    "credit_already_requested": "Credit has already been asked for on this invoice.",
+    "no_credit_request": "That credit request no longer exists. Reload the page.",
+    "director_approval_required": "This is beyond a Manager limit. A Director has to approve it.",
+    "director_approval_required_detail": "{amount_tzs} shillings asked for, against a Manager limit of {manager_limit_tzs}.",
+    "balance_detail": "{outstanding} is owed, {offered} was offered.",
+    "not_settled": "The invoice is not fully settled yet.",
+    "already_settled": "That was already done. Reload the page to see the outcome.",
+    "not_a_cash_sale": "That order is not a walk-in sale.",
+    "order_not_confirmable": "That order has not been confirmed by the customer yet.",
+    "cash_sale_must_be_paid_in_full": "A walk-in sale must be paid in full. It cannot be part-paid or carried on credit.",
+    "insufficient_stock": "There is not enough stock for one of these items.",
+    "insufficient_stock_detail": "{available} available, {requested} needed.",
+    "insufficient_stock_at_location": "The goods are not at that location.",
+    "not_releasable": "This invoice is not ready to dispatch. Settle it first.",
+    "no_location": "Choose a location.",
+    "no_allocation": "That item is not on this invoice. Reload the page.",
+    "lines_required": "Choose at least one item to fetch.",
+    "line_invalid": "Check the quantities.",
+    "quantity_invalid": "Enter a whole number of units.",
+    "exceeds_outstanding": "That is more than is still owed to the customer.",
+    "outstanding_detail": "{outstanding} still owed, {requested} asked for.",
+    "no_dispatch": "That dispatch no longer exists. Reload the page.",
+    "dispatch_not_assignable": "That dispatch has moved on. Reload the page.",
+    "dispatch_note_required": "Enter the dispatch note number.",
+    "dispatch_note_in_use": "That dispatch note number is already recorded on another dispatch.",
+    "dispatch_note_missing": "Save the dispatch note number first.",
+    "no_payment": "That payment no longer exists. Reload the page.",
+    "cannot_reverse_a_reversal": "A reversal cannot itself be reversed.",
+    "already_reversed": "That payment has already been reversed.",
+    "reversal_already_pending": "A reversal is already waiting for a Director.",
+    "no_approval_request": "There is nothing to decide here. Reload the page.",
+    "reason_required": "Say why.",
+    "amount": {
+      "invalid": "Enter an amount in whole shillings, with no cents.",
+      "tooLarge": "That amount looks too large. Check it."
+    },
+    "method": {
+      "required": "Choose how it was paid."
+    },
+    "reason": {
+      "tooShort": "Say why, in a few words.",
+      "tooLong": "That reason is too long."
+    },
+    "note": {
+      "tooLong": "That note is too long."
+    },
+    "phone": {
+      "tooLong": "That number is too long."
+    },
+    "startDate": {
+      "invalid": "Choose the date they started."
+    },
+    "storekeeperName": {
+      "tooShort": "Enter their full name.",
+      "tooLong": "That name is too long."
+    },
+    "dispatchNote": {
+      "tooShort": "Enter the dispatch note number.",
+      "tooLong": "That number is too long."
+    },
+    "location": {
+      "required": "Choose a location."
     }
   }
 }

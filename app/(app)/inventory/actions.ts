@@ -109,6 +109,8 @@ function revalidateStock() {
   revalidatePath("/inventory");
   revalidatePath("/inventory/receiving");
   revalidatePath("/inventory/transfers");
+  // Create New Order shows what can be sold (§8.1), so a movement changes that screen too.
+  revalidatePath("/orders/new");
 }
 
 /**
