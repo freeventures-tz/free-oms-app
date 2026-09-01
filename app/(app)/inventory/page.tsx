@@ -38,6 +38,7 @@ export default async function InventoryPage() {
       <StockBoard
         locations={overview.locations}
         balances={overview.balances}
+        curing={overview.curing}
         movements={overview.recentMovements}
         products={catalogue.products}
         units={catalogue.units}

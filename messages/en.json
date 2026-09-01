@@ -102,7 +102,8 @@
     "adjustments": "Stock corrections",
     "suppliers": "Suppliers",
     "dispatch": "Dispatch",
-    "storekeepers": "Storekeepers"
+    "storekeepers": "Storekeepers",
+    "production": "Brick production"
   },
   "unavailable": {
     "title": "This page could not be loaded",
@@ -304,7 +305,8 @@
       "quantityWithUnit": "{count} {unit}",
       "notCounted": "Not counted yet",
       "movements": "{count} movements",
-      "movementBy": "Recorded by {actor}, approved by {approver}"
+      "movementBy": "Recorded by {actor}, approved by {approver}",
+      "curingWithUnit": "{count} {unit} curing, not yet for sale"
     },
     "movementKind": {
       "opening_stock": "Opening stock",
@@ -950,5 +952,137 @@
     "location": {
       "required": "Choose a location."
     }
+  },
+  "production": {
+    "title": "Brick production",
+    "description": "What each batch used, what came out of the mould, and what a Manager accepted after curing. Stock changes only on approval and on inspection.",
+    "enter": {
+      "open": "Record a batch",
+      "heading": "New batch",
+      "location": "Made at",
+      "mouldedAt": "Moulding finished",
+      "mouldedAtHelp": "Curing counts from when moulding actually finished, not from now. Correct it if it was earlier.",
+      "materials": "Materials used",
+      "materialsHelp": "Already filled in with the standard recipe. Change a figure only where the batch used something different.",
+      "material": "Material",
+      "standard": "Standard",
+      "actual": "Actually used",
+      "actualFor": "Actually used, {material}",
+      "variance": "Difference",
+      "output": "What came out",
+      "expectedRange": "Expected {min} to {max}",
+      "moulded": "Moulded",
+      "outsideRange": "Outside the expected range. Say what happened below.",
+      "rejectedAtMoulding": "Thrown away at the mould",
+      "rejectReason": "Why",
+      "yieldNote": "What happened",
+      "yieldNoteHelp": "Recorded with the batch. The figure is kept as counted either way.",
+      "submit": "Save the batch",
+      "consequence": "Saving records the batch. Nothing leaves the yard until a Manager approves it."
+    },
+    "batch": {
+      "entered": "Batch recorded. Nothing has left the yard yet.",
+      "approved": "Approved. The materials are deducted and the bricks are curing.",
+      "rejected": "Rejected. Nothing was deducted.",
+      "enteredBy": "Recorded by {who} ({role})",
+      "decidedByRole": "Decided by {who} ({role})",
+      "reasonGiven": "Reason: {reason}",
+      "yieldNote": "Yield note: {note}",
+      "lotLine": "{product}: {moulded} moulded, {rejected} thrown away at the mould",
+      "inspectionOutcome": "Inspected {when}: {accepted} accepted, {rejected} rejected",
+      "approve": "Approve",
+      "reject": "Reject",
+      "rejectReason": "Why it is being rejected",
+      "confirmReject": "Confirm rejection",
+      "approveConsequence": "Approving takes the materials out of the yard and starts curing."
+    },
+    "inspection": {
+      "recorded": "Inspection recorded. Only the accepted bricks are now for sale."
+    },
+    "status": {
+      "draft": "Waiting for approval",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "rejectReasons": {
+      "broken": "Broken",
+      "cracked": "Cracked",
+      "undersized": "Undersized",
+      "weak": "Weak"
+    },
+    "drafts": {
+      "heading": "Waiting for approval ({count})",
+      "none": "No batch is waiting for approval."
+    },
+    "curing": {
+      "heading": "Curing ({count})",
+      "explanation": "Bricks cure for 72 hours. Reaching the end of that does not make them sellable — a Manager has to inspect them and say how many were good.",
+      "none": "Nothing is curing.",
+      "readyForInspection": "Ready for inspection",
+      "stillCuring": "Still curing",
+      "startedAt": "Curing started {when}",
+      "readyAt": "Ready for inspection {when}",
+      "timeRemaining": "{hours}h {minutes}m left",
+      "inCuring": "In curing",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "mustAccountForAll": "{curing} cured and you have accounted for {offered}. The two must match.",
+      "recordInspection": "Record the inspection",
+      "acceptedConsequence": "Only the accepted bricks become available for sale.",
+      "notYetReason": "The 72 hours are not up yet. Inspection opens when they are."
+    },
+    "settled": {
+      "heading": "Decided batches",
+      "none": "No batch has been decided yet."
+    }
+  },
+  "productionErrors": {
+    "generic": "That did not work. Try again.",
+    "not_permitted": "You cannot do that.",
+    "idempotency_key_conflict": "That was already sent. Reload the page and check before trying again.",
+    "location": {
+      "required": "Choose where the batch was made."
+    },
+    "quantity": {
+      "invalid": "Enter a whole number.",
+      "tooLarge": "That number is too big."
+    },
+    "reason": {
+      "tooShort": "Give a reason of at least three characters.",
+      "tooLong": "That reason is too long."
+    },
+    "yield_note": {
+      "invalid": "Say what happened, in at least three characters."
+    },
+    "no_location": "That place does not exist.",
+    "no_product": "That product does not exist.",
+    "moulded_at_invalid": "Moulding cannot have finished in the future.",
+    "inputs_required": "Record what the batch used.",
+    "outputs_required": "Record what came out of the mould.",
+    "line_invalid": "One of the lines is incomplete.",
+    "duplicate_product_line": "The same product is listed twice.",
+    "incomplete_recipe_inputs": "Confirm every material the recipe lists.",
+    "incomplete_recipe_inputs_detail": "The recipe has {expected} materials and {confirmed} were confirmed.",
+    "not_a_recipe_input": "That material is not part of the standard recipe.",
+    "not_a_produced_product": "A batch makes bricks. That is not one.",
+    "quantity_invalid": "That quantity cannot be used.",
+    "quantity_not_whole": "Quantities are counted in whole units.",
+    "rejects_exceed_output": "You cannot throw away more than came out.",
+    "reject_reason_required": "Choose why they were thrown away.",
+    "reject_reason_invalid": "Choose one of the four reasons.",
+    "reject_reason_without_rejects": "Nothing was thrown away, so there is nothing to explain.",
+    "yield_explanation_required": "The count is outside the expected range. Say what happened.",
+    "yield_within_range": "The count is normal, so there is nothing to explain.",
+    "no_batch": "That batch does not exist.",
+    "already_settled": "That batch has already been decided.",
+    "reason_required": "Give a reason of at least three characters.",
+    "insufficient_stock": "There is not enough in the yard.",
+    "insufficient_stock_detail": "There are {available} and the batch needs {requested}.",
+    "no_lot": "That lot does not exist.",
+    "batch_not_approved": "The batch has not been approved.",
+    "already_inspected": "That lot has already been inspected.",
+    "still_curing": "The 72 hours are not up yet.",
+    "inspection_must_account_for_all": "Everything that cured has to be accounted for."
   }
 }

@@ -34,6 +34,8 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/inventory/receiving", labelKey: "nav.receiving" },
     { href: "/inventory/transfers", labelKey: "nav.transfers" },
     { href: "/inventory/adjustments", labelKey: "nav.adjustments" },
+    // §4.1 gives batch entry, approval and inspection to the Manager, and names no alternate.
+    { href: "/production", labelKey: "nav.production" },
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
   ],
@@ -52,6 +54,9 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/inventory/transfers", labelKey: "nav.transfers" },
     // Corrections are the one stock screen where the Director is the decider (§4.1).
     { href: "/inventory/adjustments", labelKey: "nav.adjustments" },
+    // A Director READS production and decides nothing on it, for the same reason as receiving:
+    // §4.1 names the Manager for every step and no alternate.
+    { href: "/production", labelKey: "nav.production" },
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/suppliers", labelKey: "nav.suppliers" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },

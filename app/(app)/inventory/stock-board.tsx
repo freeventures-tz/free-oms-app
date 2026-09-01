@@ -23,6 +23,7 @@ import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 export function StockBoard({
   locations,
   balances,
+  curing,
   movements,
   products,
   units,
@@ -32,6 +33,8 @@ export function StockBoard({
 }: {
   locations: InventoryLocation[];
   balances: StockBalance[];
+  /** Bricks inside their curing period: physically here, and sellable by nobody (§8, AC-44). */
+  curing: StockBalance[];
   movements: LedgerEntry[];
   products: CatalogueProduct[];
   units: Unit[];
@@ -52,6 +55,10 @@ export function StockBoard({
     balances.map((balance) => [`${balance.productId}:${balance.locationCode}`, balance]),
   );
 
+  const curingFor = new Map(
+    curing.map((balance) => [`${balance.productId}:${balance.locationCode}`, balance]),
+  );
+
   // Every product is listed at the active location, including the ones holding none. A product
   // missing from the list because its balance is zero would be indistinguishable from a product
   // that does not exist, and a Manager looking for cement needs to be told there is none rather
@@ -61,6 +68,9 @@ export function StockBoard({
     .map((product) => ({
       product,
       balance: balanceFor.get(`${product.id}:${activeLocation}`) ?? null,
+      // Kept apart from the balance on purpose: §8 makes Available and Curing two states, and
+      // one number covering both would be the merge the document forbids.
+      curing: curingFor.get(`${product.id}:${activeLocation}`)?.quantity ?? 0,
       openingStockEntered: entered.has(`${product.id}:${activeLocation}`),
     }));
 
@@ -117,6 +127,7 @@ export function StockBoard({
                 : row.product.unitCode
             }
             quantity={row.balance?.quantity ?? 0}
+            curing={row.curing}
             openingStockEntered={row.openingStockEntered}
             movements={movements.filter(
               (movement) =>
@@ -135,12 +146,14 @@ function StockRow({
   product,
   unitName,
   quantity,
+  curing,
   openingStockEntered,
   movements,
 }: {
   product: CatalogueProduct;
   unitName: string;
   quantity: number;
+  curing: number;
   openingStockEntered: boolean;
   movements: LedgerEntry[];
   productsById: Map<string, CatalogueProduct>;
@@ -182,6 +195,21 @@ function StockRow({
           >
             {t("inventory.stock.quantityWithUnit", { count: quantity, unit: unitName })}
           </p>
+
+          {/* Physically here and sellable by nobody (§8, §11.4, AC-44). Shown as its OWN figure,
+              never added to the one above: this page says it shows what is at the location, and
+              leaving curing bricks out of it would make that sentence false the moment a batch
+              was approved — while adding them in would offer twenty bricks for sale that no
+              Manager has inspected. */}
+          {curing > 0 ? (
+            <p
+              className="fv-numeric text-xs text-muted-foreground"
+              data-testid="stock-curing"
+              data-quantity={curing}
+            >
+              {t("inventory.stock.curingWithUnit", { count: curing, unit: unitName })}
+            </p>
+          ) : null}
 
           {/* "Nobody has counted this yet" and "we counted, and there is none" are different
               answers and must not look alike. Without an opening-stock entry a zero is the first,

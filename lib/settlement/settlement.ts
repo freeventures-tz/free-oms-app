@@ -194,13 +194,20 @@ function rangeFor(page: number, pageSize: number): { from: number; to: number } 
 }
 
 /**
+ * EXPORTED FOR ONE REASON, and it is worth stating: brick production has the same two work queues
+ * and the same bounded history, and a second implementation of the reasoning below would be a
+ * second place to get "that page is not there" wrong. Nothing about the behaviour changes by
+ * being importable.
+ */
+
+/**
  * A counted read of one range, as PostgREST answers it.
  *
  * `code` is on the error because one particular code is not a failure: `PGRST103` is what comes
  * back when the range starts past the last row, and that is a page number to correct rather than
  * an outage to report.
  */
-type CountedResult<T> = {
+export type CountedResult<T> = {
   data: T[] | null;
   error: { message: string; code?: string } | null;
   count: number | null;
@@ -227,7 +234,7 @@ const RANGE_PAST_END = "PGRST103";
  * non-deterministic order is not a page: rows with equal timestamps can appear on two pages or on
  * none, and nothing about the result says so.
  */
-async function pagedQuery<T>(
+export async function pagedQuery<T>(
   page: number,
   read: (from: number, to: number) => PromiseLike<CountedResult<T>>,
   label: string,
@@ -326,7 +333,7 @@ const MAX_BATCHES = 20;
  * The reads that use this are all ordered, because a range over an unordered result is not a page
  * of anything.
  */
-async function readEvery<T>(
+export async function readEvery<T>(
   read: (from: number, to: number) => PromiseLike<QueryResult<T>>,
   label: string,
 ): Promise<T[]> {
@@ -351,7 +358,7 @@ async function readEvery<T>(
  * reached" on a queue that is simply empty. The short circuit is the difference between an empty
  * queue and an outage, which is a distinction this codebase spends a lot of care on elsewhere.
  */
-async function scopedTo<T>(
+export async function scopedTo<T>(
   ids: string[],
   read: (from: number, to: number) => PromiseLike<QueryResult<T>>,
   label: string,

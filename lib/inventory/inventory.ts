@@ -214,6 +214,15 @@ const PENDING: ApprovalState = {
 export type StockOverview = {
   locations: InventoryLocation[];
   balances: StockBalance[];
+  /**
+   * Bricks inside their 72-hour curing period (product.md §8, §11.4).
+   *
+   * A SEPARATE list rather than a second field on `balances`, because §8 makes Available and
+   * Curing two states and merging them into one number is exactly what the document forbids.
+   * They are physically at the location — which is what the Stock screen says it shows — and
+   * not one of them may be sold until a Manager accepts it (AC-44).
+   */
+  curing: StockBalance[];
   recentMovements: LedgerEntry[];
 };
 
@@ -223,12 +232,21 @@ export async function loadStockOverview(): Promise<StockOverview> {
   // Concurrent, because neither read depends on the other. Awaiting them in sequence would cost an
   // extra crossing for nothing — the lesson the Stage 10 Part A measurement recorded about
   // `getViewer` (plans/stage-10-catalogue-suppliers-inventory.md §0).
-  const [locationRows, balanceRows, movementRows] = await Promise.all([
+  const [locationRows, balanceRows, curingRows, movementRows] = await Promise.all([
     supabase.from("inventory_locations").select("code, sort_order").order("sort_order"),
     supabase
       .from("current_stock")
       .select("product_id, location_code, stock_state, quantity, last_movement_at")
       .eq("stock_state", "available"),
+    // Read separately rather than filtered out of one query, so the two states arrive as two
+    // answers. §8 keeps them apart and so does this. A failure here is a FAILED READ like any
+    // other, never a quiet zero: `requireRows` throws and the page says the system could not be
+    // reached, rather than reporting an empty curing shed on a yard full of bricks.
+    supabase
+      .from("current_stock")
+      .select("product_id, location_code, stock_state, quantity, last_movement_at")
+      .eq("stock_state", "curing")
+      .gt("quantity", 0),
     supabase
       .from("inventory_ledger")
       // A no-substitution template literal, NOT a concatenation. supabase-js infers the row type
@@ -248,6 +266,7 @@ export async function loadStockOverview(): Promise<StockOverview> {
 
   const locations = requireRows(locationRows, "inventory.locations");
   const balances = requireRows(balanceRows, "inventory.current_stock");
+  const curing = requireRows(curingRows, "inventory.curing_stock");
   const movements = requireRows(movementRows, "inventory.ledger");
 
   return {
@@ -256,6 +275,12 @@ export async function loadStockOverview(): Promise<StockOverview> {
       sortOrder: Number(row.sort_order),
     })),
     balances: balances.map((row) => ({
+      productId: row.product_id as string,
+      locationCode: row.location_code as string,
+      quantity: Number(row.quantity),
+      lastMovementAt: (row.last_movement_at as string | null) ?? null,
+    })),
+    curing: curing.map((row) => ({
       productId: row.product_id as string,
       locationCode: row.location_code as string,
       quantity: Number(row.quantity),
@@ -274,6 +299,24 @@ export async function loadStockOverview(): Promise<StockOverview> {
       occurredAt: row.occurred_at as string,
     })),
   };
+}
+
+/**
+ * The three locations, and nothing else (product.md §7).
+ *
+ * Split out for the production batch form, which needs the list for one dropdown. Calling
+ * `loadStockOverview` for it would read every current balance and a hundred ledger rows to fill
+ * in a `<select>` with three options.
+ */
+export async function loadInventoryLocations(): Promise<InventoryLocation[]> {
+  const supabase = await createServerSupabase();
+
+  const rows = requireRows(
+    await supabase.from("inventory_locations").select("code, sort_order").order("sort_order"),
+    "inventory.locations",
+  );
+
+  return rows.map((row) => ({ code: row.code as string, sortOrder: Number(row.sort_order) }));
 }
 
 export async function loadSuppliers(): Promise<Supplier[]> {

@@ -22,7 +22,9 @@ type Call = { command: string; args: string[] };
  * `failOn` names the step that should blow up: `"proof"` fails the partial reset that starts the
  * proof, `"restore"` fails the full reset at the end, and both may be named at once.
  */
-function harness(failOn: Array<"proof" | "restore" | "preservation"> = []) {
+function harness(
+  failOn: Array<"proof" | "restore" | "preservation" | "v005-preservation"> = [],
+) {
   const calls: Call[] = [];
   const out: string[] = [];
   const errors: string[] = [];
@@ -53,7 +55,12 @@ function harness(failOn: Array<"proof" | "restore" | "preservation"> = []) {
       const empty = "d751713988987e9331980363e24189ce";
       // The second read of a fixture is the "after" one. Changing it here stands in for a migration
       // that moved a product or a price, which is the thing the whole harness exists to catch.
-      const moved = failOn.includes("preservation") && reads === 2;
+      //
+      // Reads 1–4 belong to the two Part C fixtures; reads 5 and 6 are the populated v0.0.4
+      // fixture this release adds, so read 6 is that phase's "after".
+      const moved =
+        (failOn.includes("preservation") && reads === 2) ||
+        (failOn.includes("v005-preservation") && reads === 6);
       const products = moved ? "20" : "21";
       const digest = moved ? "0000000000000000000000000000dead" : empty;
       return priced
@@ -84,12 +91,38 @@ describe("the migration-chain command's verdict", () => {
     expect(out).toContain("migration-chain: PASS");
     expect(errors).toBe("");
 
-    // Both fixtures ran: the zero-price database production is in today, and one with a real price.
+    // Both Part C fixtures ran: the zero-price database production is in today, and one with a
+    // real price.
     expect(out).toContain("no prices at all");
     expect(out).toContain("one real price row");
 
+    // …and so did the populated v0.0.4 upgrade this release adds. Two phases, not one.
+    expect(out).toContain("customers, orders, invoices, money, credit and a signed dispatch");
+    expect(out).toContain("migrations 33 and 34");
+
+    // The state BETWEEN the two new migrations is measured too, by resetting to migration 33
+    // exactly. Nothing else in the repository can look at it.
+    expect(
+      calls.filter(
+        (call) => call.command === "supabase" && call.args.includes("20260822001100"),
+      ),
+      "the migration-33 boundary was never visited",
+    ).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.args[0]?.includes("05_assert_migration33_boundary")),
+    ).toHaveLength(1);
+
     // And the database was put back, on the happy path too.
     expect(fullResets(calls)).toHaveLength(1);
+  });
+
+  it("fails when the v0.0.4 upgrade loses data, naming that phase rather than Part C", () => {
+    const { code, out, errors } = harness(["v005-preservation"]);
+
+    expect(code).toBe(1);
+    expect(out).not.toContain("migration-chain: PASS");
+    expect(errors).toContain("migrations 33 and 34 did not preserve the v0.0.4 database");
+    expect(errors).toContain("after:  20 products");
   });
 
   it("fails, and prints no PASS, when the restore fails after a good proof", () => {

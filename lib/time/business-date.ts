@@ -31,3 +31,126 @@ export function businessDate(instant: Date = new Date()): string {
 
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
+
+/**
+ * The same reasoning, extended to a time of day — added for brick production (product.md §11.4).
+ *
+ * Curing starts at the moulding-completion time and runs for 72 hours, so a batch is the first
+ * record in this system where the HOUR decides something. A phone left on another zone would
+ * pre-fill a time three hours out and start the countdown in the wrong place, and the deadline
+ * shown beside it would disagree with the one the database enforces.
+ */
+
+/**
+ * The wall clock in the yard, as `<input type="datetime-local">` writes it: `YYYY-MM-DDTHH:mm`.
+ *
+ * `hourCycle: "h23"` rather than `hour12: false`, because the two are not the same: `hour12:
+ * false` resolves to the `h24` cycle in several locales and renders midnight as `24:00`, which no
+ * datetime-local input accepts.
+ */
+const LOCAL_INPUT_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function businessParts(instant: Date): Record<string, string> {
+  const parts: Record<string, string> = {};
+  for (const part of LOCAL_INPUT_PARTS.formatToParts(instant)) parts[part.type] = part.value;
+  return parts;
+}
+
+export function businessDateTimeLocal(instant: Date = new Date()): string {
+  const p = businessParts(instant);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+
+/** How far the business zone is ahead of UTC at a given instant, in milliseconds. */
+function businessOffsetMs(instant: Date): number {
+  const p = businessParts(instant);
+  const asIfUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour),
+    Number(p.minute),
+    Number(p.second),
+  );
+  return asIfUtc - instant.getTime();
+}
+
+const LOCAL_INPUT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+/**
+ * A `datetime-local` value read as a time IN THE YARD, or `null` if it is not one.
+ *
+ * `new Date("2026-08-22T14:30")` reads that string in whatever zone the runtime happens to be set
+ * to — the browser's on the client, UTC on most servers — so the same typed time became two
+ * different instants depending on where it was parsed. Everything downstream of that is wrong by
+ * the offset: the curing clock, the 72-hour deadline, and the refusal that compares a moulding
+ * time against `now()`.
+ *
+ * NULL RATHER THAN AN INVALID DATE. `2026-02-30T08:00` is well formed and not a day, and
+ * `Date.UTC` rolls it silently into 2 March; the round-trip below is what catches that, and a
+ * caller gets an answer it has to handle rather than a plausible wrong instant.
+ *
+ * The offset is resolved twice because it is a property of the instant, not of the wall clock: the
+ * first pass gives an approximate instant, and the second asks the zone what the offset actually
+ * was there. Tanzania has kept a fixed +03:00 with no daylight saving since 1961, so the two passes
+ * agree — the second one is what keeps this correct if that ever stops being true.
+ */
+export function instantFromBusinessLocal(value: string): Date | null {
+  const match = LOCAL_INPUT.exec(value.trim());
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second] = match;
+  const y = Number(year);
+  const mo = Number(month);
+  const d = Number(day);
+  const h = Number(hour);
+  const mi = Number(minute);
+  const s = Number(second ?? "0");
+
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) return null;
+
+  const wallClock = Date.UTC(y, mo - 1, d, h, mi, s);
+  const rolled = new Date(wallClock);
+  if (
+    rolled.getUTCFullYear() !== y ||
+    rolled.getUTCMonth() !== mo - 1 ||
+    rolled.getUTCDate() !== d
+  ) {
+    return null;
+  }
+
+  const firstPass = new Date(wallClock - businessOffsetMs(rolled));
+  return new Date(wallClock - businessOffsetMs(firstPass));
+}
+
+/**
+ * A stored instant, rendered in the yard's zone and the reader's language.
+ *
+ * The formatter is built once per locale and kept, for the reason the receiving board records:
+ * constructing an `Intl.DateTimeFormat` resolves locale data every time, and a production board
+ * renders several timestamps per card.
+ */
+const STAMP_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+
+export function formatBusinessStamp(iso: string, locale: string): string {
+  const tag = locale === "sw" ? "sw-TZ" : "en-GB";
+  let formatter = STAMP_FORMATTERS.get(tag);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(tag, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: BUSINESS_TIME_ZONE,
+    });
+    STAMP_FORMATTERS.set(tag, formatter);
+  }
+  return formatter.format(new Date(iso));
+}

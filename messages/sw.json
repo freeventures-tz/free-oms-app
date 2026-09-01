@@ -102,7 +102,8 @@
     "adjustments": "Marekebisho ya bohari",
     "suppliers": "Wauzaji",
     "dispatch": "Utoaji",
-    "storekeepers": "Wahifadhi"
+    "storekeepers": "Wahifadhi",
+    "production": "Uzalishaji wa tofali"
   },
   "unavailable": {
     "title": "Ukurasa huu haukuweza kupakiwa",
@@ -304,7 +305,8 @@
       "quantityWithUnit": "{unit} {count}",
       "notCounted": "Bado hazijahesabiwa",
       "movements": "Mienendo {count}",
-      "movementBy": "Imeandikwa na {actor}, imeidhinishwa na {approver}"
+      "movementBy": "Imeandikwa na {actor}, imeidhinishwa na {approver}",
+      "curingWithUnit": "{unit} {count} zinakomaa, bado haziuzwi"
     },
     "movementKind": {
       "opening_stock": "Bidhaa za kuanzia",
@@ -950,5 +952,137 @@
     "location": {
       "required": "Chagua sehemu."
     }
+  },
+  "production": {
+    "title": "Uzalishaji wa tofali",
+    "description": "Kila mkupuo ulitumia nini, ulitoa tofali ngapi, na Meneja alikubali ngapi baada ya kukomaa. Bohari inabadilika wakati wa kuidhinisha na wakati wa ukaguzi tu.",
+    "enter": {
+      "open": "Andika mkupuo",
+      "heading": "Mkupuo mpya",
+      "location": "Umefyatuliwa",
+      "mouldedAt": "Kufyatua kumeisha",
+      "mouldedAtHelp": "Muda wa kukomaa unahesabiwa tangu kufyatua kulipoisha, siyo tangu sasa. Rekebisha kama kulikuwa mapema.",
+      "materials": "Vitu vilivyotumika",
+      "materialsHelp": "Vimeandikwa tayari kwa kipimo cha kawaida. Badilisha namba pale tu mkupuo ulipotumia kingine.",
+      "material": "Kitu",
+      "standard": "Kawaida",
+      "actual": "Vilivyotumika",
+      "actualFor": "Vilivyotumika, {material}",
+      "variance": "Tofauti",
+      "output": "Vilivyotoka",
+      "expectedRange": "Vinatarajiwa {min} hadi {max}",
+      "moulded": "Zilizofyatuliwa",
+      "outsideRange": "Nje ya kiwango kinachotarajiwa. Eleza kilichotokea hapo chini.",
+      "rejectedAtMoulding": "Zilizotupwa wakati wa kufyatua",
+      "rejectReason": "Kwa nini",
+      "yieldNote": "Kilichotokea",
+      "yieldNoteHelp": "Kinahifadhiwa pamoja na mkupuo. Namba inabaki kama ilivyohesabiwa vyovyote vile.",
+      "submit": "Hifadhi mkupuo",
+      "consequence": "Kuhifadhi kunaandika mkupuo. Hakuna kinachotoka uwanjani hadi Meneja aidhinishe."
+    },
+    "batch": {
+      "entered": "Mkupuo umeandikwa. Bado hakuna kilichotoka uwanjani.",
+      "approved": "Umeidhinishwa. Vitu vimetolewa na tofali zinakomaa.",
+      "rejected": "Umekataliwa. Hakuna kilichotolewa.",
+      "enteredBy": "Umeandikwa na {who} ({role})",
+      "decidedByRole": "Uamuzi umefanywa na {who} ({role})",
+      "reasonGiven": "Sababu: {reason}",
+      "yieldNote": "Maelezo ya kiasi: {note}",
+      "lotLine": "{product}: {moulded} zimefyatuliwa, {rejected} zimetupwa wakati wa kufyatua",
+      "inspectionOutcome": "Imekaguliwa {when}: {accepted} zimekubaliwa, {rejected} zimekataliwa",
+      "approve": "Idhinisha",
+      "reject": "Kataa",
+      "rejectReason": "Kwa nini unakataa",
+      "confirmReject": "Thibitisha kukataa",
+      "approveConsequence": "Kuidhinisha kunatoa vitu uwanjani na kunaanzisha kukomaa."
+    },
+    "inspection": {
+      "recorded": "Ukaguzi umeandikwa. Tofali zilizokubaliwa tu ndizo zinazouzwa sasa."
+    },
+    "status": {
+      "draft": "Unasubiri idhini",
+      "approved": "Umeidhinishwa",
+      "rejected": "Umekataliwa",
+      "cancelled": "Umefutwa"
+    },
+    "rejectReasons": {
+      "broken": "Zimevunjika",
+      "cracked": "Zimepasuka",
+      "undersized": "Ndogo kuliko kipimo",
+      "weak": "Dhaifu"
+    },
+    "drafts": {
+      "heading": "Zinasubiri idhini ({count})",
+      "none": "Hakuna mkupuo unaosubiri idhini."
+    },
+    "curing": {
+      "heading": "Zinakomaa ({count})",
+      "explanation": "Tofali zinakomaa kwa saa 72. Saa hizo kuisha hakuzifanyi ziuzwe — Meneja lazima azikague na aseme ngapi ni nzuri.",
+      "none": "Hakuna zinazokomaa.",
+      "readyForInspection": "Tayari kwa ukaguzi",
+      "stillCuring": "Bado zinakomaa",
+      "startedAt": "Kukomaa kulianza {when}",
+      "readyAt": "Tayari kwa ukaguzi {when}",
+      "timeRemaining": "Zimebaki saa {hours} na dakika {minutes}",
+      "inCuring": "Zinakomaa",
+      "accepted": "Zilizokubaliwa",
+      "rejected": "Zilizokataliwa",
+      "mustAccountForAll": "{curing} zimekomaa na umehesabu {offered}. Namba mbili lazima zilingane.",
+      "recordInspection": "Andika ukaguzi",
+      "acceptedConsequence": "Tofali zilizokubaliwa tu ndizo zinazokuwa tayari kuuzwa.",
+      "notYetReason": "Saa 72 bado hazijaisha. Ukaguzi utafunguliwa zitakapoisha."
+    },
+    "settled": {
+      "heading": "Mikupuo iliyoamuliwa",
+      "none": "Hakuna mkupuo uliokwisha amuliwa."
+    }
+  },
+  "productionErrors": {
+    "generic": "Haikufanikiwa. Jaribu tena.",
+    "not_permitted": "Huwezi kufanya hilo.",
+    "idempotency_key_conflict": "Hilo lilishatumwa. Pakia upya ukurasa na uangalie kabla ya kujaribu tena.",
+    "location": {
+      "required": "Chagua mahali mkupuo ulipofyatuliwa."
+    },
+    "quantity": {
+      "invalid": "Andika namba nzima.",
+      "tooLarge": "Namba hiyo ni kubwa mno."
+    },
+    "reason": {
+      "tooShort": "Toa sababu yenye angalau herufi tatu.",
+      "tooLong": "Sababu hiyo ni ndefu mno."
+    },
+    "yield_note": {
+      "invalid": "Eleza kilichotokea, kwa angalau herufi tatu."
+    },
+    "no_location": "Mahali hapo hapapo.",
+    "no_product": "Bidhaa hiyo haipo.",
+    "moulded_at_invalid": "Kufyatua hakuwezi kuisha siku zijazo.",
+    "inputs_required": "Andika mkupuo ulitumia nini.",
+    "outputs_required": "Andika kilichotoka kwenye kufyatua.",
+    "line_invalid": "Mstari mmoja haujakamilika.",
+    "duplicate_product_line": "Bidhaa hiyo hiyo imeandikwa mara mbili.",
+    "incomplete_recipe_inputs": "Thibitisha kila kitu kilichoorodheshwa kwenye kipimo cha kawaida.",
+    "incomplete_recipe_inputs_detail": "Kipimo kina vitu {expected} na vilivyothibitishwa ni {confirmed}.",
+    "not_a_recipe_input": "Kitu hicho si sehemu ya kipimo cha kawaida.",
+    "not_a_produced_product": "Mkupuo unatengeneza tofali. Hiyo si tofali.",
+    "quantity_invalid": "Kiasi hicho hakiwezi kutumika.",
+    "quantity_not_whole": "Vipimo vinahesabiwa kwa namba nzima.",
+    "rejects_exceed_output": "Huwezi kutupa nyingi kuliko zilizotoka.",
+    "reject_reason_required": "Chagua kwa nini zimetupwa.",
+    "reject_reason_invalid": "Chagua moja kati ya sababu nne.",
+    "reject_reason_without_rejects": "Hakuna iliyotupwa, hivyo hakuna cha kueleza.",
+    "yield_explanation_required": "Hesabu iko nje ya kiwango kinachotarajiwa. Eleza kilichotokea.",
+    "yield_within_range": "Hesabu ni ya kawaida, hivyo hakuna cha kueleza.",
+    "no_batch": "Mkupuo huo haupo.",
+    "already_settled": "Mkupuo huo ulishaamuliwa.",
+    "reason_required": "Toa sababu yenye angalau herufi tatu.",
+    "insufficient_stock": "Hakuna vya kutosha uwanjani.",
+    "insufficient_stock_detail": "Zipo {available} na mkupuo unahitaji {requested}.",
+    "no_lot": "Kundi hilo halipo.",
+    "batch_not_approved": "Mkupuo haujaidhinishwa.",
+    "already_inspected": "Kundi hilo lilishakaguliwa.",
+    "still_curing": "Saa 72 bado hazijaisha.",
+    "inspection_must_account_for_all": "Kila kilichokomaa lazima kihesabiwe."
   }
 }

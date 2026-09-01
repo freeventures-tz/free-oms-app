@@ -18,6 +18,10 @@ import { Button } from "@/components/ui/button";
  * `loading.tsx` paints a skeleton shaped like the queue while the server answers. Nothing here
  * needs client state, so nothing here can get stuck pending, and nothing here moves — which is
  * what `prefers-reduced-motion` asks of it (§12.7 rule 6).
+ *
+ * `min-h-11` on the two links is the 44×44 touch floor of design.md §9.9, restored at the tablet
+ * tier: `size="small"` steps down to 40px there, and a tablet has a touch screen. Desktop keeps
+ * the compact control it was measured for.
  */
 export function Pager({
   page,
@@ -67,14 +71,14 @@ export function Pager({
       {pages > 1 ? (
         <span className="flex items-center gap-2">
           {current > 1 ? (
-            <Button asChild variant="secondary" size="small">
+            <Button asChild variant="secondary" size="small" className="min-h-11 md:min-h-11 xl:min-h-0">
               <Link href={href(current - 1)} data-testid={`pager-previous-${param}`}>
                 {t("previous")}
               </Link>
             </Button>
           ) : null}
           {current < pages ? (
-            <Button asChild variant="secondary" size="small">
+            <Button asChild variant="secondary" size="small" className="min-h-11 md:min-h-11 xl:min-h-0">
               <Link href={href(current + 1)} data-testid={`pager-next-${param}`}>
                 {t("next")}
               </Link>
