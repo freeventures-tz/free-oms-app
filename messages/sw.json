@@ -13,6 +13,12 @@
     "swahili": "Kiswahili",
     "menu": "Menyu",
     "signedInAs": "Umeingia kama {name}",
+    "pager": {
+      "showing": "Inaonyesha {first}–{last} kati ya {total}",
+      "none": "Hakuna cha kuonyesha",
+      "previous": "Iliyotangulia",
+      "next": "Ifuatayo"
+    },
     "actionFailed": "Haikufanikiwa. Jaribu tena."
   },
   "auth": {
@@ -94,7 +100,9 @@
     "receiving": "Kupokea kutoka kwa wauzaji",
     "transfers": "Kuhamisha ndani",
     "adjustments": "Marekebisho ya bohari",
-    "suppliers": "Wauzaji"
+    "suppliers": "Wauzaji",
+    "dispatch": "Utoaji",
+    "storekeepers": "Wahifadhi"
   },
   "unavailable": {
     "title": "Ukurasa huu haukuweza kupakiwa",
@@ -707,6 +715,240 @@
     "reason": {
       "tooShort": "Eleza kwa nini, kwa maneno machache.",
       "tooLong": "Maelezo hayo ni marefu mno."
+    }
+  },
+  "settlement": {
+    "status": {
+      "unpaid": "Haijalipwa",
+      "partially_paid": "Imelipwa kiasi",
+      "paid": "Imelipwa",
+      "cancelled": "Imeghairiwa",
+      "settled": "Tayari kutolewa"
+    },
+    "methods": {
+      "cash": "Fedha taslimu",
+      "mixx_by_yas": "Mixx by YAS",
+      "halopesa": "Halopesa",
+      "mwanga_hakika_transfer": "Uhamisho wa Mwanga Hakika",
+      "crdb_transfer": "Uhamisho wa CRDB",
+      "cheque": "Hundi"
+    },
+    "payments": {
+      "title": "Malipo",
+      "description": "Ankara zinazosubiri fedha, na zilizokwisha lipwa.",
+      "awaitingHeading": "Zinasubiri kulipwa ({count})",
+      "nothingWaiting": "Hakuna kinachosubiri.",
+      "settledHeading": "Zilizolipwa",
+      "noneSettled": "Bado hakuna iliyolipwa.",
+      "cashSalesHeading": "Mauzo ya papo hapo yanayosubiri malipo ({count})",
+      "cashSalesHelp": "Mauzo ya papo hapo hayana ankara wala bidhaa zilizohifadhiwa hadi yalipwe. Kila kitu hufanyika kwa hatua moja hapa.",
+      "balanceDue": "Deni lililobaki",
+      "amountDue": "Kiasi kinachodaiwa",
+      "ofTotal": "kati ya {total}",
+      "history": "Fedha zilizopokelewa",
+      "receivedBy": "Zimepokelewa na {who} tarehe {date}",
+      "take": "Pokea malipo",
+      "recordHeading": "Andika fedha zilizopokelewa",
+      "method": "Zililipwaje?",
+      "amountReceived": "Kiasi kilichopokelewa",
+      "amountHelp": "Shilingi nzima tu. Kimejazwa na deni lililobaki.",
+      "record": "Andika malipo",
+      "recorded": "Malipo yameandikwa.",
+      "approveSettlement": "Thibitisha kuwa imelipwa",
+      "settleConsequence": "Kuthibitisha kunahifadhi bidhaa kwa mteja huyu na kunaruhusu mhifadhi kupangiwa.",
+      "cannotSettleYet": "Bado {outstanding} zinasubiri, kwa malipo au mkopo ulioidhinishwa.",
+      "settled": "Imelipwa. Bidhaa zimehifadhiwa kwa mteja huyu na mhifadhi anaweza kupangiwa.",
+      "completeCashSale": "Pokea malipo na kamilisha mauzo",
+      "cashSaleConsequence": "Hii inapokea fedha, inatengeneza ankara na kuhifadhi bidhaa, vyote kwa pamoja. Kama bidhaa zimeisha, hakuna chochote kinachoandikwa.",
+      "cashSaleCompleted": "Imelipwa. Ankara imetengenezwa na bidhaa zimehifadhiwa kwa kuchukuliwa.",
+      "cashSaleTitle": "Uchukue fedha na ukamilishe mauzo?",
+      "cashSaleConfirmConsequence": "Hii inaandika {amount} zilizopokelewa kwa {method}, inatengeneza ankara na inahifadhi bidhaa kwa ajili ya kuchukuliwa — yote kwa pamoja. Kama bidhaa zimeisha, hakuna kinachoandikwa kabisa.",
+      "confirmCashSale": "Ndiyo, kamilisha mauzo"
+    },
+    "credit": {
+      "heading": "Mkopo",
+      "carry": "Beba kama mkopo",
+      "requestHeading": "Beba deni kama mkopo",
+      "recordsNoMoney": "Mkopo si malipo. Unaandika deni lililoidhinishwa, na ankara inabaki haijalipwa hadi fedha zifike.",
+      "amountCarried": "Kiasi cha kubeba kama mkopo",
+      "reason": "Kwa nini?",
+      "submit": "Peleka kwa idhini",
+      "requested": "{amount} zimeombwa na {who}",
+      "requestedManager": "Imepelekwa kwa Meneja kwa idhini.",
+      "requestedDirector": "Imepelekwa kwa Mkurugenzi kwa idhini.",
+      "needsManager": "Inasubiri Meneja",
+      "needsDirector": "Inasubiri Mkurugenzi",
+      "exposure": "{who} tayari anadaiwa {amount} kwa mkopo ulioidhinishwa.",
+      "approveTitle": "Uidhinishe mkopo huu?",
+      "approveConsequence": "Hii inaidhinisha {amount} kwa {who} kulipa baadaye. Haiandiki fedha yoyote, na ankara inabaki haijalipwa hadi fedha zifike.",
+      "confirmApprove": "Ndiyo, idhinisha mkopo",
+      "beyondManagerLimit": "Deni hili liko juu ya kiwango cha Meneja, hivyo Mkurugenzi pekee ndiye anaweza kuidhinisha au kukataa.",
+      "approve": "Idhinisha mkopo",
+      "approved": "Mkopo umeidhinishwa. Hakuna fedha zilizoandikwa.",
+      "reject": "Kataa",
+      "rejectReason": "Kwa nini unakataa?",
+      "confirmReject": "Thibitisha kukataa",
+      "rejected": "Mkopo umekataliwa. Deni bado linadaiwa.",
+      "approvedBalance": "{amount} zimeidhinishwa kama mkopo"
+    },
+    "reversal": {
+      "label": "Kutengua",
+      "request": "Omba kutengua",
+      "reason": "Kwa nini kunatenguliwa?",
+      "submit": "Peleka kwa Mkurugenzi",
+      "requested": "Imepelekwa kwa Mkurugenzi. Fedha bado zimeandikwa hadi aamue.",
+      "pending": "Kutengua kunasubiri Mkurugenzi",
+      "approve": "Idhinisha kutengua",
+      "approved": "Kumetenguliwa. Fedha zilizopokelewa zimepungua."
+    },
+    "dispatch": {
+      "title": "Utoaji",
+      "description": "Bidhaa zilizolipiwa zinazosubiri kuchukuliwa, na hati zilizosainiwa zinazoziachia.",
+      "paidUnreleasedHeading": "Zimelipiwa na hazijachukuliwa ({count})",
+      "nothingUnreleased": "Hakuna kinachosubiri kuchukuliwa.",
+      "paidNotReleased": "Imelipiwa — haijatolewa",
+      "outstandingQuantity": "{count} zinasubiri, siku {days}",
+      "awaitingAssignmentHeading": "Zinasubiri mhifadhi ({count})",
+      "nothingAwaitingAssignment": "Hakuna kinachosubiri mhifadhi.",
+      "assignedHeading": "Mhifadhi amepangiwa ({count})",
+      "nothingAssigned": "Hakuna kilichopangiwa.",
+      "awaitingSignatureHeading": "Zinasubiri saini ya mteja ({count})",
+      "nothingAwaitingSignature": "Hakuna kinachosubiri saini.",
+      "releasedHeading": "Zilizochukuliwa",
+      "nothingReleased": "Bado hakuna kilichochukuliwa.",
+      "noStorekeepers": "Sajili mhifadhi kabla ya kupanga utoaji.",
+      "storekeeper": "Mhifadhi",
+      "chooseStorekeeper": "Chagua mhifadhi",
+      "sourceLocation": "Chukua kutoka",
+      "whatToFetch": "Cha kuchukua",
+      "stillOwed": "{count} bado zinadaiwa na mteja huyu",
+      "assign": "Panga mhifadhi",
+      "assigned": "Mhifadhi amepangiwa. Hakuna bidhaa zilizohama.",
+      "assignConsequence": "Kupanga hakuhamishi bidhaa yoyote. Zinabaki zilipo.",
+      "assignedTo": "{who} · anachukua kutoka {location}",
+      "noteNumber": "Hati ya utoaji {no}",
+      "noteNumberLabel": "Namba ya hati ya utoaji",
+      "noteNumberHelp": "Kutoka kwenye kitabu cha nakala. Mfumo hauchapishi hati za utoaji, kwa hivyo namba inatoka kwenye karatasi.",
+      "recordNote": "Hifadhi namba ya hati",
+      "noteRecorded": "Namba ya hati imehifadhiwa. Bado hakuna kilichohama.",
+      "confirmRelease": "Thibitisha mteja amesaini",
+      "blockedByNote": "Hifadhi namba ya hati ya utoaji kwanza. Kutolewa hakuwezi kuthibitishwa bila hiyo.",
+      "releaseConsequence": "Kuthibitisha kunamaanisha mteja amesaini kupokea bidhaa. Bidhaa zinatoka uwanjani sasa hivi, na hili haliwezi kutenguliwa.",
+      "released": "Zimetolewa. Bidhaa zimetoka uwanjani.",
+      "releaseTitle": "Uthibitishe mteja amesaini?",
+      "releaseConfirmConsequence": "Hii inatoa vipande {count} kwa {who} kutoka {location}. Bidhaa zinaondoka eneo sasa, na hili haliwezi kutenguliwa.",
+      "confirmReleaseYes": "Ndiyo, mteja amesaini",
+      "status": {
+        "assigned": "Mhifadhi amepangiwa",
+        "note_recorded": "Inasubiri saini",
+        "released": "Zimechukuliwa",
+        "cancelled": "Imeghairiwa"
+      }
+    },
+    "storekeepers": {
+      "title": "Wahifadhi",
+      "description": "Watu wanaochukua na kukabidhi bidhaa. Hawaingii kwenye mfumo — rekodi ipo ili watajwe kwenye utoaji.",
+      "descriptionManager": "Watu wanaochukua na kukabidhi bidhaa. Mkurugenzi pekee ndiye anaweza kuongeza au kuzima mmoja.",
+      "notAUser": "Mhifadhi hana akaunti wala ruhusa. Hii ni rekodi, si akaunti.",
+      "addHeading": "Sajili mhifadhi",
+      "fullName": "Jina kamili",
+      "phone": "Namba ya simu",
+      "phoneHelp": "Si lazima. Haitumiki kuingia kwenye mfumo.",
+      "startDate": "Alianza tarehe",
+      "note": "Maelezo",
+      "noteHelp": "Si lazima. Kitu chochote kifupi cha kukumbuka.",
+      "submit": "Sajili mhifadhi",
+      "added": "Mhifadhi amesajiliwa.",
+      "empty": "Bado hakuna wahifadhi.",
+      "count": "Wahifadhi {count}",
+      "since": "Tangu {date}",
+      "active": "Anafanya kazi",
+      "inactive": "Amezimwa",
+      "deactivate": "Zima",
+      "reactivate": "Washa",
+      "deactivateHelp": "Mhifadhi aliyezimwa hawezi kupangiwa utoaji mpya. Utoaji wa zamani bado unamtaja.",
+      "deactivated": "Mhifadhi amezimwa.",
+      "reactivated": "Mhifadhi amewashwa."
+    }
+  },
+  "settlementErrors": {
+    "generic": "Haikufanikiwa. Jaribu tena.",
+    "not_permitted": "Huruhusiwi kufanya hivyo.",
+    "idempotency_key_conflict": "Pakia ukurasa upya kisha jaribu tena.",
+    "storekeeper_name_required": "Weka jina lake kamili.",
+    "storekeeper_exists": "Tayari kuna mhifadhi mwenye jina hilo.",
+    "storekeeper_unchanged": "Mhifadhi huyo tayari yupo katika hali hiyo.",
+    "storekeeper_state_required": "Chagua kama anafanya kazi au amezimwa.",
+    "start_date_invalid": "Chagua tarehe ya kuanza isiyokuwa ya mbeleni.",
+    "no_storekeeper": "Mhifadhi huyo hapatikani. Pakia ukurasa upya.",
+    "no_invoice": "Ankara hiyo haipo tena. Pakia ukurasa upya.",
+    "no_order": "Oda hiyo haipo tena. Pakia ukurasa upya.",
+    "invoice_cancelled": "Ankara hiyo imeghairiwa.",
+    "amount_invalid": "Weka kiasi kwa shilingi nzima.",
+    "payment_exceeds_balance": "Hiyo ni zaidi ya inayodaiwa.",
+    "credit_exceeds_balance": "Hiyo ni zaidi ya inayodaiwa.",
+    "credit_already_requested": "Mkopo tayari umeombwa kwenye ankara hii.",
+    "no_credit_request": "Ombi hilo la mkopo halipo tena. Pakia ukurasa upya.",
+    "director_approval_required": "Hii inazidi kikomo cha Meneja. Mkurugenzi lazima aidhinishe.",
+    "director_approval_required_detail": "Shilingi {amount_tzs} zimeombwa, dhidi ya kikomo cha Meneja cha {manager_limit_tzs}.",
+    "balance_detail": "{outstanding} zinadaiwa, {offered} zimetolewa.",
+    "not_settled": "Ankara bado haijalipwa kikamilifu.",
+    "already_settled": "Hilo tayari limefanyika. Pakia ukurasa upya uone matokeo.",
+    "not_a_cash_sale": "Oda hiyo si mauzo ya papo hapo.",
+    "order_not_confirmable": "Oda hiyo bado haijathibitishwa na mteja.",
+    "cash_sale_must_be_paid_in_full": "Mauzo ya papo hapo lazima yalipwe kikamilifu. Hayawezi kulipwa kiasi au kubebwa kama mkopo.",
+    "insufficient_stock": "Hakuna bidhaa za kutosha kwa mojawapo ya vitu hivi.",
+    "insufficient_stock_detail": "{available} zipo, {requested} zinahitajika.",
+    "insufficient_stock_at_location": "Bidhaa hazipo sehemu hiyo.",
+    "not_releasable": "Ankara hii bado haijawa tayari kutolewa. Ilipwe kwanza.",
+    "no_location": "Chagua sehemu.",
+    "no_allocation": "Kitu hicho hakipo kwenye ankara hii. Pakia ukurasa upya.",
+    "lines_required": "Chagua angalau kitu kimoja cha kuchukua.",
+    "line_invalid": "Hakiki viasi.",
+    "quantity_invalid": "Weka idadi ya vipimo vizima.",
+    "exceeds_outstanding": "Hiyo ni zaidi ya inayodaiwa na mteja.",
+    "outstanding_detail": "{outstanding} bado zinadaiwa, {requested} zimeombwa.",
+    "no_dispatch": "Utoaji huo haupo tena. Pakia ukurasa upya.",
+    "dispatch_not_assignable": "Utoaji huo umeendelea. Pakia ukurasa upya.",
+    "dispatch_note_required": "Weka namba ya hati ya utoaji.",
+    "dispatch_note_in_use": "Namba hiyo ya hati tayari imeandikwa kwenye utoaji mwingine.",
+    "dispatch_note_missing": "Hifadhi namba ya hati ya utoaji kwanza.",
+    "no_payment": "Malipo hayo hayapo tena. Pakia ukurasa upya.",
+    "cannot_reverse_a_reversal": "Kutengua hakuwezi kutenguliwa tena.",
+    "already_reversed": "Malipo hayo tayari yametenguliwa.",
+    "reversal_already_pending": "Kutengua tayari kunasubiri Mkurugenzi.",
+    "no_approval_request": "Hakuna cha kuamua hapa. Pakia ukurasa upya.",
+    "reason_required": "Eleza kwa nini.",
+    "amount": {
+      "invalid": "Weka kiasi kwa shilingi nzima, bila senti.",
+      "tooLarge": "Kiasi hicho kinaonekana kikubwa mno. Kihakiki."
+    },
+    "method": {
+      "required": "Chagua zililipwaje."
+    },
+    "reason": {
+      "tooShort": "Eleza kwa nini, kwa maneno machache.",
+      "tooLong": "Maelezo hayo ni marefu mno."
+    },
+    "note": {
+      "tooLong": "Maelezo hayo ni marefu mno."
+    },
+    "phone": {
+      "tooLong": "Namba hiyo ni ndefu mno."
+    },
+    "startDate": {
+      "invalid": "Chagua tarehe aliyoanza."
+    },
+    "storekeeperName": {
+      "tooShort": "Weka jina lake kamili.",
+      "tooLong": "Jina hilo ni refu mno."
+    },
+    "dispatchNote": {
+      "tooShort": "Weka namba ya hati ya utoaji.",
+      "tooLong": "Namba hiyo ni ndefu mno."
+    },
+    "location": {
+      "required": "Chagua sehemu."
     }
   }
 }

@@ -19,6 +19,8 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
   ],
   cashier: [
     { href: "/payments", labelKey: "nav.payments" },
+    // §12.6 step 9 puts dispatch assignment on the Cashier, so the queue is theirs to clear.
+    { href: "/dispatch", labelKey: "nav.dispatch" },
     { href: "/orders", labelKey: "nav.orders" },
     { href: "/inventory/receiving", labelKey: "nav.receiving" },
   ],
@@ -26,16 +28,22 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/dashboard", labelKey: "nav.dashboard" },
     { href: "/orders", labelKey: "nav.orders" },
     { href: "/payments", labelKey: "nav.payments" },
+    // §12.6 steps 11 and 13 are the Manager's: the physical note number, and the signed release.
+    { href: "/dispatch", labelKey: "nav.dispatch" },
     { href: "/inventory", labelKey: "nav.inventory" },
     { href: "/inventory/receiving", labelKey: "nav.receiving" },
     { href: "/inventory/transfers", labelKey: "nav.transfers" },
     { href: "/inventory/adjustments", labelKey: "nav.adjustments" },
     { href: "/settings/products", labelKey: "nav.products" },
+    { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
   ],
   director: [
     { href: "/dashboard", labelKey: "nav.dashboard" },
     { href: "/orders", labelKey: "nav.orders" },
     { href: "/payments", labelKey: "nav.payments" },
+    // A Director READS the dispatch queue and decides nothing on it: §12.6 gives every step to a
+    // Cashier or a Manager. What IS theirs here is approving a payment reversal (§4.1).
+    { href: "/dispatch", labelKey: "nav.dispatch" },
     { href: "/inventory", labelKey: "nav.inventory" },
     // A Director READS receiving (design.md §4.2) and decides nothing on it: §4.1 names three
     // enterers and one approver, and a Director is none of them. The screen offers them no control
@@ -46,6 +54,7 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/inventory/adjustments", labelKey: "nav.adjustments" },
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/suppliers", labelKey: "nav.suppliers" },
+    { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
     { href: "/admin/accounts", labelKey: "nav.accounts" },
   ],
 };

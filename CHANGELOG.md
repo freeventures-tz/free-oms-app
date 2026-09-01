@@ -2,6 +2,74 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.0.4] — 2026-09-01
+
+**Taking money, and letting the goods go.** This release adds payment, credit, settlement, the
+walk-in sale that completes at the till, payment reversal, the storekeeper records a dispatch is
+assigned to, and the signed release that finally takes stock out of the yard. Brick production,
+petty cash, reconciliation and reports are still not in the system.
+
+### New
+
+- **A Cashier's payment queue.** Every invoice waiting for money is a card, and the balance due is
+  the largest figure on it. Six ways of paying are buttons — cash, Mixx by YAS, Halopesa, a Mwanga
+  Hakika transfer, a CRDB transfer, a cheque — and the amount arrives already filled in with the
+  whole balance, so a full payment is one tap and a confirmation. Amounts are whole shillings.
+  Taking more than is owed is refused, and the refusal says what is owed and what was offered.
+- **Nobody chooses an invoice's status.** Unpaid, Partly paid and Paid are worked out from the
+  money recorded against the invoice, and there is no control anywhere to set one by hand.
+- **Credit is not money, and the screen never pretends otherwise.** It sits apart from the six
+  tender buttons, and choosing it changes the panel from *amount received* to *amount to be carried
+  as credit, pending approval*. An invoice carried entirely on credit still reads **Unpaid**, with
+  the approved balance recorded beside it. A Manager may approve up to TZS 500,000 on one invoice;
+  above that it is a Director's, and the screen names the limit that was crossed rather than
+  offering a decision it is going to refuse. Approving and rejecting are separate records, and a
+  rejection has to say why.
+- **Settling is its own deliberate act.** A fully paid invoice is marked settled by the Cashier;
+  an approved credit balance can settle one without pretending money arrived. Settling changes what
+  the stock is held for — from a confirmed order's reservation to goods committed to that
+  customer — **without changing the quantity and without moving anything**.
+- **A walk-in sale is one action at the counter.** Taking the money re-checks that the goods are
+  still there, creates the invoice, records the payment against it and commits the stock, all in
+  one go. If any part of it fails there is no invoice, no payment and no hold — nothing at all is
+  left behind. A walk-in sale must be paid in full: it cannot be part-paid, carried on credit, or
+  held before payment.
+- **A payment can be put right without being rewritten.** A Cashier or a Manager asks for a
+  reversal and only a Director approves it. The approved reversal is a new, negative entry pointing
+  at the payment it undoes, and the original stays exactly as it was recorded. The same payment
+  cannot be reversed twice, and a reversal cannot itself be reversed.
+- **Storekeepers are a record, not a login.** A Director registers one with a name, an optional
+  phone number, the date they started and an optional note; the system generates their code. A
+  storekeeper is switched off, never deleted, so past dispatches keep naming the person who
+  actually moved the goods, and only somebody currently working can be assigned to a new one. A
+  Manager reads the list and is offered no controls at all.
+- **Handing goods over takes four steps, and only the last one moves stock.** A Cashier assigns a
+  settled invoice to a storekeeper and says which location the goods come from, for all of what is
+  owed or part of it — and the screen says plainly that assigning moves nothing. A Manager types
+  the number off the physical carbon-copy book; the system does not print dispatch notes and says
+  so, and the same number cannot be recorded twice. Confirming the release is refused, with the
+  reason shown, until that number exists. Only a Manager confirms the customer has signed, and
+  **only that confirmation takes the stock out of the yard**. A partial release leaves the rest
+  committed and still waiting.
+- **Paid and not yet collected is a list of its own**, with the invoice, the customer, what is
+  still owed to them and how many days it has been waiting. Goods in that state are physically in
+  the yard and cannot be sold to anybody else.
+- **Each role is offered only its own work.** A Manager reads payments and is offered no way to
+  take money; a Cashier is offered no way to confirm a release; a Sales Representative cannot reach
+  dispatch at all.
+- Everything on these screens is in English and Kiswahili, and works on a phone, a tablet and a
+  desktop.
+
+### Fixed
+
+- **Create New Order no longer shows a stale catalogue.** Adding a product, setting a price or
+  moving stock now refreshes the order screen straight away, instead of leaving a Sales
+  Representative to wonder why something they were told about is not there yet.
+
+### Improved
+
+None.
+
 ## [0.0.3] — 2026-08-31
 
 **Selling.** This release adds customers, orders, quotations, invoices, discounts and the stock a

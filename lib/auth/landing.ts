@@ -34,6 +34,13 @@ export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   // costs. Restricting the route is a navigation decision; nothing here is a secret.
   { prefix: "/settings/products", roles: ["manager", "director"] },
 
+  // Dispatch: every role that touches a release. A Sales Representative is not one of them —
+  // §12.6 steps 9 to 14 name the Cashier and the Manager, and a Director reads for oversight.
+  { prefix: "/dispatch", roles: ["cashier", "manager", "director"] },
+
+  // Storekeeper records: Director registers, Manager reads (product.md §3.2, design.md §4.2).
+  { prefix: "/settings/storekeepers", roles: ["manager", "director"] },
+
   // Suppliers: Director registers, Manager reads (product.md §9 requires the record; who creates
   // one is a derived decision recorded in the Stage 10D plan).
   { prefix: "/settings/suppliers", roles: ["manager", "director"] },

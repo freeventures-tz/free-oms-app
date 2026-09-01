@@ -70,6 +70,11 @@ export async function addProductAction(
   if (!result.ok) return { error: errorKey(result.reason) };
 
   revalidatePath("/settings/products");
+  // The order form offers this catalogue and quotes these prices, so a change here changes what a
+  // Sales Representative can sell. Without this, a Director adds a product and it is missing from
+  // Create New Order until the route cache happens to expire — which an E2E run found, and which
+  // would have read in the yard as "the system has not got it yet".
+  revalidatePath("/orders/new");
   return { successKey: "catalogue.add.added", successName: parsed.data.name };
 }
 
@@ -136,5 +141,6 @@ export async function setPriceAction(
   if (!result.ok) return { error: errorKey(result.reason) };
 
   revalidatePath("/settings/products");
+  revalidatePath("/orders/new");
   return { successKey: "catalogue.price.saved" };
 }
