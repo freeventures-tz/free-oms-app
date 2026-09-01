@@ -102,8 +102,10 @@ create index storekeepers_listing_idx    on public.storekeepers (is_active, full
 -- unprotected in between, and a reader has to hold two files in their head to answer the only two
 -- questions that matter about it.
 --
--- READ: every live role. Storekeepers are a picker for a Cashier and a name on a Manager's
--- release, so every live role may read the list. Only a Director may add to it (§3.2).
+-- READ: the three roles §12.6 gives dispatch work to. Storekeepers are a picker for a Cashier and
+-- a name on a Manager's release, and a Director reads for oversight. A Sales Representative is not
+-- on that list: §12.6 steps 9 to 14 name nobody in their role, and a person's phone number and
+-- working state are not order information.
 --
 -- WRITE: nobody, through PostgREST. `authenticated` holds no INSERT, UPDATE or DELETE grant and no
 -- policy for those actions either, so a hand-rolled call fails on privilege before a policy is
@@ -115,7 +117,7 @@ grant select on public.storekeepers to authenticated;
 create policy storekeepers_select_live_staff on public.storekeepers
   for select to authenticated
   using ( (select private.authorize(
-             array['director','manager','cashier','sales_rep']::public.app_role[])) );
+             array['director','manager','cashier']::public.app_role[])) );
 
 grant select, insert on public.storekeepers to fv_definer_owner;
 grant update         on public.storekeepers to fv_definer_owner;
@@ -212,9 +214,13 @@ revoke execute on function private.refuse_payment_edit()
 
 -- Direct access to public.payments
 --
--- Money is not a secret from the people who handle the order it belongs to. A Sales Representative
--- who cannot see whether an invoice is paid cannot answer the customer standing in front of them,
--- and §12.3 makes the status a calculated fact rather than a privileged one.
+-- WHO READS IT: a Director, a Manager and a Cashier, and nobody else.
+--
+-- The Sales Representative was here and has been taken out, by Owner decision on the v0.0.4
+-- review. §12.6 hands settlement to the Cashier at step 6 and the approval to a Manager at step 8;
+-- neither step, and no screen a Sales Representative can reach, needs a row of this table. What
+-- they were being handed instead was every tender, every amount and every till operator in the
+-- business, on a table PostgREST exposes directly.
 --
 -- The definer owner gets INSERT and nothing else: there is no UPDATE or DELETE grant on this table
 -- for ANY role, and the append-only trigger above refuses those anyway. Two independent reasons a
@@ -227,7 +233,7 @@ grant select on public.payments to authenticated;
 create policy payments_select_live_staff on public.payments
   for select to authenticated
   using ( (select private.authorize(
-             array['director','manager','cashier','sales_rep']::public.app_role[])) );
+             array['director','manager','cashier']::public.app_role[])) );
 
 grant select, insert on public.payments to fv_definer_owner;
 
@@ -278,8 +284,9 @@ create unique index credit_one_live_idx
 
 -- Direct access to public.credit_authorisations
 --
--- Read by every live role for the same reason as `payments`: the credit decision is half the
--- answer to "has this invoice been settled?". INSERT belongs to the definer owner alone, and there
+-- Read by the same three roles as `payments`, and for the same reason: a credit decision is a
+-- settlement fact, and settlement is Cashier, Manager and Director work. INSERT belongs to the
+-- definer owner alone, and there
 -- is no UPDATE for anybody — a credit request is a fact, and the verdict on it lives in
 -- `approval_requests`/`approval_decisions` where §4.3 is already enforced.
 alter table public.credit_authorisations enable row level security;
@@ -289,7 +296,7 @@ grant select on public.credit_authorisations to authenticated;
 create policy credit_select_live_staff on public.credit_authorisations
   for select to authenticated
   using ( (select private.authorize(
-             array['director','manager','cashier','sales_rep']::public.app_role[])) );
+             array['director','manager','cashier']::public.app_role[])) );
 
 grant select, insert on public.credit_authorisations to fv_definer_owner;
 
@@ -374,6 +381,44 @@ comment on view public.product_availability is
   'product.md §8.1: available = physical − reserved − committed, where a claim counts only for the '
   'part that has NOT yet left against a signed dispatch note.';
 
+
+-- ---------------------------------------------------------------------------
+-- api.staff_settlement_readable — the one thing a `security_invoker` view cannot ask
+--
+-- Both views below are `security_invoker`, so every read of them obeys the policies on the tables
+-- underneath as the person asking. That is the behaviour wanted, and on its own it is not enough.
+--
+-- `invoice_settlement` LEFT JOINs `payments` and `credit_authorisations`. Take the Sales
+-- Representative off those two tables, as this release does, and the join stops finding rows —
+-- so the view would answer "amount paid: 0, status: unpaid" for every invoice in the business.
+-- That is not a refusal and it is not an empty result. It is a confident false statement about
+-- money, which is the one thing this system may never make.
+--
+-- A view cannot call `private.authorize` for the same reason `paid_but_unreleased` inlines the
+-- business date below: `authenticated` holds EXECUTE on nothing in `private`, by design and
+-- asserted by pgTAP test 003. So the predicate is an `api` function of the shape this database
+-- already uses for a deliberate, bounded definer call — `api.staff_order_creator_name` is the
+-- precedent. It answers ONE question about the CALLER'S OWN session and nothing about any row.
+-- ---------------------------------------------------------------------------
+create or replace function api.staff_settlement_readable()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select private.authorize(array['director','manager','cashier']::public.app_role[]);
+$$;
+
+comment on function api.staff_settlement_readable() is
+  'Whether the caller may read settlement facts at all (design.md §4.2). Exists so the settlement '
+  'views can REFUSE a role rather than report zero money to it.';
+
+alter function api.staff_settlement_readable() owner to fv_definer_owner;
+revoke execute on function api.staff_settlement_readable()
+  from public, anon, service_role;
+grant execute on function api.staff_settlement_readable() to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- invoice_settlement — product.md §12.3, as a view
 --
@@ -413,7 +458,10 @@ select i.id as invoice_id,
         on r.entity_type = 'credit_authorisation' and r.entity_id = c.id
        and r.approval_type = 'credit_or_unpaid_balance' and r.status = 'approved'
      group by c.invoice_id
-  ) credit on credit.invoice_id = i.id;
+  ) credit on credit.invoice_id = i.id
+ -- Wrapped in a scalar sub-select so PostgreSQL evaluates it once per query rather than per row,
+ -- the same reason every policy in this database wraps `private.authorize`.
+ where (select api.staff_settlement_readable());
 
 comment on view public.invoice_settlement is
   'Invoice status, always CALCULATED from money actually received (product.md §12.3, AC-14). '
@@ -429,6 +477,52 @@ grant select on public.invoice_settlement to authenticated;
 grant select on public.invoice_settlement to fv_definer_owner;
 
 revoke all on public.invoice_settlement from service_role;
+
+
+-- ---------------------------------------------------------------------------
+-- customer_credit_exposure — what one customer already owes on approved credit
+--
+-- design.md §7.8 puts it third in the approval screen's hierarchy, after the requested amount and
+-- the limit result, because it is what the per-invoice limit of product.md §4 cannot see: a
+-- Manager approving TZS 400,000 is inside their authority on THIS invoice and may be handing the
+-- same customer their fourth unpaid balance of the week.
+--
+-- IT IS AGGREGATED HERE RATHER THAN IN THE APPLICATION, and the reason is completeness. The
+-- payments screen reads one page of invoices; a customer's exposure is the sum across every
+-- invoice they hold, page or no page. Summing what the page happens to have loaded would quietly
+-- understate a debt, which is the direction that gets credit approved that should not be.
+--
+-- EXPOSURE IS MONEY OUT, NOT THE SUM OF THE APPROVALS. An approval is a decision and stays in the
+-- record; exposure falls as the customer pays. So each invoice contributes
+-- `least(approved credit, outstanding)` — never more than was approved, never more than is still
+-- owed — and a cancelled invoice contributes nothing, because it is owed by nobody.
+--
+-- `security_invoker`, so it inherits the refusal `invoice_settlement` already makes.
+-- ---------------------------------------------------------------------------
+create view public.customer_credit_exposure
+with (security_invoker = true) as
+select i.customer_id,
+       sum(greatest(0, least(s.approved_credit_tzs, s.outstanding_tzs)))::bigint as exposure_tzs
+  from public.invoices i
+  join public.invoice_settlement s on s.invoice_id = i.id
+ where i.cancelled_at is null
+   and s.approved_credit_tzs > 0
+   and s.outstanding_tzs > 0
+ group by i.customer_id;
+
+comment on view public.customer_credit_exposure is
+  'What each customer still owes on APPROVED credit, across every live invoice (design.md §7.8). '
+  'Each invoice contributes least(approved, outstanding): an approval is a decision, exposure is '
+  'money out, and it falls as the customer pays.';
+
+-- Direct access to public.customer_credit_exposure
+--
+-- A view over `invoice_settlement`, so `security_invoker` carries that view's refusal down to it
+-- and no separate role check is needed.
+grant select on public.customer_credit_exposure to authenticated;
+grant select on public.customer_credit_exposure to fv_definer_owner;
+
+revoke all on public.customer_credit_exposure from service_role;
 
 -- ---------------------------------------------------------------------------
 -- dispatches — one record per PHYSICAL dispatch note (product.md §14, AC-36)
@@ -490,9 +584,9 @@ create index dispatches_location_idx    on public.dispatches (source_location);
 
 -- Direct access to public.dispatches
 --
--- Read by every live role: design.md §4.2 puts the dispatch queue in front of a Cashier who
--- assigns and a Manager who releases, a Director reads it for oversight, and a Sales
--- Representative answers the customer asking when the goods go out.
+-- Read by the three roles the queue belongs to: design.md §4.2 puts it in front of a Cashier who
+-- assigns and a Manager who releases, and a Director reads it for oversight. `/dispatch` refuses a
+-- Sales Representative at the route, and this refuses them at the table, so the two agree.
 --
 -- UPDATE for the definer owner only, and the `dispatch_status_shape` constraint above decides
 -- which transitions are legal regardless of who asks.
@@ -503,7 +597,7 @@ grant select on public.dispatches to authenticated;
 create policy dispatches_select_live_staff on public.dispatches
   for select to authenticated
   using ( (select private.authorize(
-             array['director','manager','cashier','sales_rep']::public.app_role[])) );
+             array['director','manager','cashier']::public.app_role[])) );
 
 grant select, insert, update on public.dispatches to fv_definer_owner;
 
@@ -544,7 +638,7 @@ grant select on public.dispatch_lines to authenticated;
 create policy dispatch_lines_select_live_staff on public.dispatch_lines
   for select to authenticated
   using ( (select private.authorize(
-             array['director','manager','cashier','sales_rep']::public.app_role[])) );
+             array['director','manager','cashier']::public.app_role[])) );
 
 grant select, insert on public.dispatch_lines to fv_definer_owner;
 
@@ -586,7 +680,8 @@ select a.id            as allocation_id,
   join public.customers c on c.id = o.customer_id
  where a.state = 'committed'
    and a.quantity > a.released_quantity
-   and i.cancelled_at is null;
+   and i.cancelled_at is null
+   and (select api.staff_settlement_readable());
 
 comment on view public.paid_but_unreleased is
   'Goods that are settled and have not left (product.md §8, design.md §7.12). Physically present, '

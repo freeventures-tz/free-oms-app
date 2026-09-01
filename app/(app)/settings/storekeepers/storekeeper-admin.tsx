@@ -17,18 +17,16 @@ import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 export function StorekeeperAdmin({
   storekeepers,
   canEdit,
-  idempotencyKey,
 }: {
   storekeepers: Storekeeper[];
   canEdit: boolean;
-  idempotencyKey: string;
 }) {
   const t = useTranslations("settlement.storekeepers");
 
   return (
     <div className="flex flex-col gap-4">
       {/* Hidden from a Manager, not disabled (design.md §4.3, §4.4). */}
-      {canEdit ? <AddStorekeeperForm idempotencyKey={idempotencyKey} /> : null}
+      {canEdit ? <AddStorekeeperForm /> : null}
 
       {storekeepers.length === 0 ? (
         <Card>
@@ -48,13 +46,13 @@ export function StorekeeperAdmin({
   );
 }
 
-function AddStorekeeperForm({ idempotencyKey }: { idempotencyKey: string }) {
+function AddStorekeeperForm() {
   const t = useTranslations();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [startDate, setStartDate] = useState("");
   const [note, setNote] = useState("");
-  const [key, setKey] = useState(idempotencyKey);
+  const [key, setKey] = useState(() => crypto.randomUUID());
 
   const action = useGuardedAction<"add", SettlementActionState>({
     failureKey: "settlementErrors.generic",

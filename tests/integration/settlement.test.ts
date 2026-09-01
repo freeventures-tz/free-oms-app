@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -15,6 +16,37 @@ import {
  * browser takes, and cover the one thing pgTAP structurally cannot: reaching AROUND the commands as
  * `authenticated`, a role a GRANT actually constrains.
  */
+
+/**
+ * Runs SQL as the database owner, for the one thing a test cannot do through the product: put a
+ * database into a state that takes years of trading to reach.
+ *
+ * `scripts/run-advisors.mjs` reaches the database exactly this way, with the same docker fallback,
+ * so this is the established path rather than a new one. It is used ONLY to seed volume — every
+ * assertion below still goes through PostgREST as a signed-in person.
+ */
+function asOwner(sql: string): void {
+  const url =
+    process.env.SUPABASE_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+  try {
+    execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-f", "-"], {
+      input: sql,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code !== "ENOENT") throw error;
+    execFileSync(
+      "docker",
+      [
+        "exec", "-i",
+        process.env.SUPABASE_DB_CONTAINER ?? "supabase_db_free-oms-app",
+        "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q",
+      ],
+      { input: sql, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
+    );
+  }
+}
 
 let director: Fixture;
 let manager: Fixture;
@@ -115,6 +147,27 @@ async function settlementOf(invoiceId: string) {
     status: data!.status as string,
     releasable: data!.releasable as boolean,
   };
+}
+
+/**
+ * What is still ASSIGNABLE on one claim: what the customer is owed, less whatever an in-progress
+ * dispatch already covers. The screen computes this the same way, and the command checks it again.
+ */
+async function assignableOn(allocationId: string): Promise<number> {
+  const { data: claim } = await director.read
+    .from("stock_allocations")
+    .select("quantity, released_quantity")
+    .eq("id", allocationId)
+    .single();
+
+  const { data: lines } = await director.read
+    .from("dispatch_lines")
+    .select("quantity, dispatches!inner(status)")
+    .eq("allocation_id", allocationId)
+    .in("dispatches.status", ["assigned", "note_recorded"]);
+
+  const claimed = (lines ?? []).reduce((total, row) => total + Number(row.quantity), 0);
+  return Number(claim!.quantity) - Number(claim!.released_quantity) - claimed;
 }
 
 /** The approval request behind one credit authorisation, for reading its decision history. */
@@ -834,6 +887,326 @@ describe("a storekeeper who has been switched off (product.md §3.2)", () => {
     });
     expect(assigned?.ok, JSON.stringify(assigned)).toBe(true);
   });
+});
+
+describe("the approved role boundary (design.md §4.2)", () => {
+  /**
+   * The five raw tables and the three views, asked for directly over HTTP as each role.
+   *
+   * This is the layer that matters: a policy is a claim about a query nobody has run. These run
+   * the query, as a real signed-in Sales Representative, against PostgREST — the surface a
+   * hand-rolled call would actually use.
+   */
+  const RAW_TABLES = [
+    "payments",
+    "credit_authorisations",
+    "dispatches",
+    "dispatch_lines",
+    "storekeepers",
+  ];
+
+  const VIEWS = ["invoice_settlement", "paid_but_unreleased", "customer_credit_exposure"];
+
+  beforeAll(async () => {
+    // Something in every one of them, so "zero rows" is a refusal rather than an empty database.
+    const settled = await settledInvoice(2);
+    await cashier.api.rpc("staff_assign_dispatch", {
+      p_invoice_id: settled.invoiceId,
+      p_storekeeper_id: storekeeperId,
+      p_source_location: "store",
+      p_lines: [{ allocation_id: settled.allocationId, quantity: 1 }],
+      p_idempotency_key: randomUUID(),
+    });
+    const credited = await invoicedOrder(3);
+    await cashier.api.rpc("staff_request_credit", {
+      p_invoice_id: credited.invoiceId,
+      p_amount_tzs: 300_000,
+      p_reason: "boundary fixture",
+      p_idempotency_key: randomUUID(),
+    });
+    await manager.api.rpc("staff_approve_credit", {
+      p_credit_id: (
+        await director.read
+          .from("credit_authorisations")
+          .select("id")
+          .eq("invoice_id", credited.invoiceId)
+          .single()
+      ).data!.id as string,
+      p_idempotency_key: randomUUID(),
+    });
+  });
+
+  it("shows a Sales Representative nothing in any settlement table", async () => {
+    for (const table of RAW_TABLES) {
+      const { data, error } = await salesRep.read.from(table).select("*");
+      expect(error, `${table} errored for a Sales Representative`).toBeNull();
+      expect(data, `a Sales Representative read ${table}`).toHaveLength(0);
+    }
+  });
+
+  it("shows a Sales Representative nothing in any settlement view either", async () => {
+    // Not zero money — NOTHING. `invoice_settlement` LEFT JOINs the payments they cannot see, so
+    // without the guard on the view it would call every invoice in the business unpaid.
+    for (const view of VIEWS) {
+      const { data, error } = await salesRep.read.from(view).select("*");
+      expect(error, `${view} errored for a Sales Representative`).toBeNull();
+      expect(data, `a Sales Representative read ${view}`).toHaveLength(0);
+    }
+  });
+
+  it("still shows a Cashier, a Manager and a Director everything they work with", async () => {
+    for (const who of [cashier, manager, director]) {
+      for (const relation of [...RAW_TABLES, ...VIEWS]) {
+        const { data, error } = await who.read.from(relation).select("*");
+        expect(error, `${relation} errored for a ${who.role}`).toBeNull();
+        expect(
+          (data ?? []).length,
+          `a ${who.role} could not read ${relation}`,
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("leaves the Sales Representative everything an order needs", async () => {
+    // The boundary takes settlement facts away and nothing else: they still write and read orders,
+    // which is the work §12.6 steps 1 to 4 give them.
+    for (const relation of ["orders", "invoices", "customers", "order_lines", "invoice_lines"]) {
+      const { data, error } = await salesRep.read.from(relation).select("*");
+      expect(error, `${relation} errored for a Sales Representative`).toBeNull();
+      expect((data ?? []).length, `a Sales Representative lost ${relation}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("refuses a Sales Representative every settlement command", async () => {
+    const attempts: [string, Record<string, unknown>][] = [
+      ["staff_record_payment", {
+        p_invoice_id: randomUUID(), p_method: "cash", p_amount_tzs: 1,
+        p_idempotency_key: randomUUID(),
+      }],
+      ["staff_approve_settlement", {
+        p_invoice_id: randomUUID(), p_idempotency_key: randomUUID(),
+      }],
+      ["staff_assign_dispatch", {
+        p_invoice_id: randomUUID(), p_storekeeper_id: randomUUID(), p_source_location: "store",
+        p_lines: [], p_idempotency_key: randomUUID(),
+      }],
+    ];
+
+    for (const [command, args] of attempts) {
+      const { error } = await salesRep.api.rpc(command, args);
+      expect(error, `a Sales Representative ran ${command}`).not.toBeNull();
+    }
+  });
+});
+
+describe("a queue larger than one page, and larger than the API row cap", () => {
+  it("counts every unsettled invoice and reads a page of them without losing money", async () => {
+    const created = await invoicedOrder(4); // 400 000
+
+    // ONE THOUSAND AND SIXTY payments against a single invoice — more than PostgREST will return
+    // in one response. Seeded directly, because reaching this state through the product would take
+    // a thousand round trips, and the point is what the READ does with it.
+    //
+    // A payment is append-only and signed (§12.5), so these are ordinary positive rows; the total
+    // they add up to is the figure the queue has to get exactly right.
+    asOwner(`
+      insert into public.payments
+        (invoice_id, amount_tzs, method, received_by, received_role, business_date, correlation_id)
+      select '${created.invoiceId}'::uuid, 1, 'cash', '${cashier.userId}'::uuid, 'cashier',
+             current_date, gen_random_uuid()
+        from generate_series(1, 1060);
+    `);
+
+    const { data, error } = await cashier.read
+      .from("invoice_settlement")
+      .select("amount_paid_tzs, outstanding_tzs")
+      .eq("invoice_id", created.invoiceId)
+      .single();
+
+    expect(error, error?.message).toBeNull();
+    // The view aggregates in SQL, so it is right whatever the row cap is — this is the figure the
+    // application's own batched read has to reproduce.
+    expect(Number(data!.amount_paid_tzs)).toBe(1060);
+
+    // And the rows themselves are past the cap: one unbounded request cannot return them all.
+    const capped = await cashier.read
+      .from("payments")
+      .select("id")
+      .eq("invoice_id", created.invoiceId);
+    expect(capped.error, capped.error?.message).toBeNull();
+    expect(
+      (capped.data ?? []).length,
+      "PostgREST returned more than its own max-rows, so this test proves nothing",
+    ).toBeLessThan(1060);
+
+    // Read the way `readEvery` does — by explicit range until a short batch comes back — and the
+    // count is exact again.
+    let total = 0;
+    for (let from = 0; from < 5000; from += 1000) {
+      const batch = await cashier.read
+        .from("payments")
+        .select("id")
+        .eq("invoice_id", created.invoiceId)
+        .order("entry_seq")
+        .range(from, from + 999);
+      expect(batch.error, batch.error?.message).toBeNull();
+      total += (batch.data ?? []).length;
+      if ((batch.data ?? []).length < 1000) break;
+    }
+    expect(total).toBe(1060);
+  });
+
+  it("reports an exact count of unsettled invoices, not the size of a page", async () => {
+    const { count, error } = await cashier.read
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .is("cancelled_at", null)
+      .is("settlement_approved_at", null);
+
+    expect(error, error?.message).toBeNull();
+
+    const firstPage = await cashier.read
+      .from("invoices")
+      .select("id")
+      .is("cancelled_at", null)
+      .is("settlement_approved_at", null)
+      .order("issued_at", { ascending: true })
+      .range(0, 24);
+
+    expect(firstPage.error, firstPage.error?.message).toBeNull();
+    // A page is at most twenty-five; the count is the truth about how much work there is, and the
+    // screen shows it so nothing is silently off the end.
+    expect((firstPage.data ?? []).length).toBeLessThanOrEqual(25);
+    expect(count).toBeGreaterThanOrEqual((firstPage.data ?? []).length);
+  });
+
+  it("totals a customer's exposure across every invoice, not across a page", async () => {
+    const { data: customer } = await salesRep.api.rpc("staff_add_customer", {
+      p_name: `Exposure Customer ${randomUUID().slice(0, 8)}`,
+      p_idempotency_key: randomUUID(),
+    });
+    const exposedCustomerId = (customer!.customer as { id: string }).id;
+
+    // Three invoices, three approved credits, each inside the Manager limit.
+    for (let i = 0; i < 3; i += 1) {
+      const { data: order } = await salesRep.api.rpc("staff_create_order", {
+        p_customer_id: exposedCustomerId,
+        p_lines: [{ product_id: productId, quantity: 1 }],
+        p_idempotency_key: randomUUID(),
+      });
+      const orderId = (order!.order as { id: string }).id;
+      const { data: confirmed } = await salesRep.api.rpc("staff_confirm_order", {
+        p_order_id: orderId,
+        p_idempotency_key: randomUUID(),
+      });
+      const invoiceId = (confirmed!.invoice as { id: string }).id;
+
+      const { data: requested } = await cashier.api.rpc("staff_request_credit", {
+        p_invoice_id: invoiceId,
+        p_amount_tzs: UNIT_PRICE,
+        p_reason: "exposure fixture",
+        p_idempotency_key: randomUUID(),
+      });
+      await manager.api.rpc("staff_approve_credit", {
+        p_credit_id: requested!.credit_id,
+        p_idempotency_key: randomUUID(),
+      });
+    }
+
+    const { data, error } = await manager.read
+      .from("customer_credit_exposure")
+      .select("exposure_tzs")
+      .eq("customer_id", exposedCustomerId)
+      .single();
+
+    expect(error, error?.message).toBeNull();
+    // Three invoices, one aggregate: a screen showing one page of them still reads the whole debt.
+    expect(Number(data!.exposure_tzs)).toBe(3 * UNIT_PRICE);
+  });
+});
+
+describe("a second dispatch after a partial release", () => {
+  it("leaves the remainder assignable, and the assignable figure is what the command accepts",
+    async () => {
+      const settled = await settledInvoice(10);
+
+      // FIRST DISPATCH: four of the ten.
+      const { data: first } = await cashier.api.rpc("staff_assign_dispatch", {
+        p_invoice_id: settled.invoiceId,
+        p_storekeeper_id: storekeeperId,
+        p_source_location: "store",
+        p_lines: [{ allocation_id: settled.allocationId, quantity: 4 }],
+        p_idempotency_key: randomUUID(),
+      });
+      expect(first?.ok, JSON.stringify(first)).toBe(true);
+      const firstId = (first.dispatch as { id: string }).id;
+
+      // While it is in progress, only six are assignable — the four are spoken for.
+      expect(await assignableOn(settled.allocationId)).toBe(6);
+
+      const overreach = await cashier.api.rpc("staff_assign_dispatch", {
+        p_invoice_id: settled.invoiceId,
+        p_storekeeper_id: storekeeperId,
+        p_source_location: "store",
+        p_lines: [{ allocation_id: settled.allocationId, quantity: 7 }],
+        p_idempotency_key: randomUUID(),
+      });
+      expect(overreach.data?.ok).toBe(false);
+      expect(overreach.data.reason).toBe("exceeds_outstanding");
+      expect(Number(overreach.data.outstanding)).toBe(6);
+
+      await manager.api.rpc("staff_record_dispatch_note", {
+        p_dispatch_id: firstId,
+        p_note_no: `DN-${randomUUID().slice(0, 8)}`,
+        p_idempotency_key: randomUUID(),
+      });
+      const released = await manager.api.rpc("staff_confirm_release", {
+        p_dispatch_id: firstId,
+        p_idempotency_key: randomUUID(),
+      });
+      expect(released.data?.ok, JSON.stringify(released.data)).toBe(true);
+
+      // AFTER THE PARTIAL RELEASE the remainder is still committed and still assignable — which is
+      // what the dispatch screen has to keep offering, and did not before this correction.
+      const { data: claim } = await manager.read
+        .from("paid_but_unreleased")
+        .select("outstanding_quantity")
+        .eq("allocation_id", settled.allocationId)
+        .single();
+      expect(Number(claim!.outstanding_quantity)).toBe(6);
+      expect(await assignableOn(settled.allocationId)).toBe(6);
+
+      // SECOND DISPATCH: the remaining six, through the same command the screen calls.
+      const { data: second } = await cashier.api.rpc("staff_assign_dispatch", {
+        p_invoice_id: settled.invoiceId,
+        p_storekeeper_id: storekeeperId,
+        p_source_location: "store",
+        p_lines: [{ allocation_id: settled.allocationId, quantity: 6 }],
+        p_idempotency_key: randomUUID(),
+      });
+      expect(second?.ok, JSON.stringify(second)).toBe(true);
+      const secondId = (second.dispatch as { id: string }).id;
+
+      expect(await assignableOn(settled.allocationId)).toBe(0);
+
+      await manager.api.rpc("staff_record_dispatch_note", {
+        p_dispatch_id: secondId,
+        p_note_no: `DN-${randomUUID().slice(0, 8)}`,
+        p_idempotency_key: randomUUID(),
+      });
+      const finalRelease = await manager.api.rpc("staff_confirm_release", {
+        p_dispatch_id: secondId,
+        p_idempotency_key: randomUUID(),
+      });
+      expect(finalRelease.data?.ok, JSON.stringify(finalRelease.data)).toBe(true);
+
+      // Nothing left owed, and nothing left in the paid-but-unreleased list for this claim.
+      const { data: gone } = await manager.read
+        .from("paid_but_unreleased")
+        .select("allocation_id")
+        .eq("allocation_id", settled.allocationId);
+      expect(gone).toHaveLength(0);
+    });
 });
 
 describe("the settlement tables, from outside the database", () => {

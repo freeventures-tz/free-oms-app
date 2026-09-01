@@ -593,6 +593,12 @@ comment on function api.staff_approve_credit(uuid, text) is
 
 -- ---------------------------------------------------------------------------
 -- api.staff_reject_credit
+--
+-- THE MANAGER LIMIT APPLIES TO A REJECTION TOO, and product.md §4.3 is why: a rejection is a
+-- COMPLETED DECISION, not the absence of one. A Manager who could refuse a balance only a
+-- Director may approve would be deciding it either way — the customer gets nothing, the request
+-- is settled, and no Director ever sees it. `api.staff_reject_discount` learned this in v0.0.3
+-- and it is the same rule on a different object.
 -- ---------------------------------------------------------------------------
 create or replace function api.staff_reject_credit(
   p_credit_id       uuid,
@@ -655,6 +661,14 @@ begin
                               'status', v_req.status::text);
   end if;
 
+  -- Checked against the amount actually on the request rather than against a `required_role`
+  -- written when it was raised, for the same reason the approval path is.
+  if v_role = 'manager' and private.credit_needs_director(v_credit.amount_tzs) then
+    return jsonb_build_object(
+      'ok', false, 'reason', 'director_approval_required',
+      'amount_tzs', v_credit.amount_tzs, 'manager_limit_tzs', 500000);
+  end if;
+
   insert into public.idempotency_keys (key, operation, result_ref, created_by, request)
   values (p_idempotency_key, 'settlement.reject_credit', p_credit_id, v_actor, v_request)
   on conflict (key) do nothing;
@@ -688,8 +702,8 @@ end;
 $$;
 
 comment on function api.staff_reject_credit(uuid, text, text) is
-  'Rejects an unpaid balance. Records no approver (product.md §4.3) and leaves the invoice owing '
-  'exactly what it owed.';
+  'Rejects an unpaid balance, within the same authority limit as approving one (product.md §4, '
+  '§4.3). Records no approver and leaves the invoice owing exactly what it owed.';
 
 -- ---------------------------------------------------------------------------
 -- api.staff_approve_settlement — §4.1: "Fully paid invoice — Cashier / Cashier"

@@ -13,6 +13,12 @@
     "swahili": "Kiswahili",
     "menu": "Menyu",
     "signedInAs": "Umeingia kama {name}",
+    "pager": {
+      "showing": "Inaonyesha {first}–{last} kati ya {total}",
+      "none": "Hakuna cha kuonyesha",
+      "previous": "Iliyotangulia",
+      "next": "Ifuatayo"
+    },
     "actionFailed": "Haikufanikiwa. Jaribu tena."
   },
   "auth": {
@@ -754,7 +760,10 @@
       "settled": "Imelipwa. Bidhaa zimehifadhiwa kwa mteja huyu na mhifadhi anaweza kupangiwa.",
       "completeCashSale": "Pokea malipo na kamilisha mauzo",
       "cashSaleConsequence": "Hii inapokea fedha, inatengeneza ankara na kuhifadhi bidhaa, vyote kwa pamoja. Kama bidhaa zimeisha, hakuna chochote kinachoandikwa.",
-      "cashSaleCompleted": "Imelipwa. Ankara imetengenezwa na bidhaa zimehifadhiwa kwa kuchukuliwa."
+      "cashSaleCompleted": "Imelipwa. Ankara imetengenezwa na bidhaa zimehifadhiwa kwa kuchukuliwa.",
+      "cashSaleTitle": "Uchukue fedha na ukamilishe mauzo?",
+      "cashSaleConfirmConsequence": "Hii inaandika {amount} zilizopokelewa kwa {method}, inatengeneza ankara na inahifadhi bidhaa kwa ajili ya kuchukuliwa — yote kwa pamoja. Kama bidhaa zimeisha, hakuna kinachoandikwa kabisa.",
+      "confirmCashSale": "Ndiyo, kamilisha mauzo"
     },
     "credit": {
       "heading": "Mkopo",
@@ -770,6 +779,10 @@
       "needsManager": "Inasubiri Meneja",
       "needsDirector": "Inasubiri Mkurugenzi",
       "exposure": "{who} tayari anadaiwa {amount} kwa mkopo ulioidhinishwa.",
+      "approveTitle": "Uidhinishe mkopo huu?",
+      "approveConsequence": "Hii inaidhinisha {amount} kwa {who} kulipa baadaye. Haiandiki fedha yoyote, na ankara inabaki haijalipwa hadi fedha zifike.",
+      "confirmApprove": "Ndiyo, idhinisha mkopo",
+      "beyondManagerLimit": "Deni hili liko juu ya kiwango cha Meneja, hivyo Mkurugenzi pekee ndiye anaweza kuidhinisha au kukataa.",
       "approve": "Idhinisha mkopo",
       "approved": "Mkopo umeidhinishwa. Hakuna fedha zilizoandikwa.",
       "reject": "Kataa",
@@ -822,6 +835,9 @@
       "blockedByNote": "Hifadhi namba ya hati ya utoaji kwanza. Kutolewa hakuwezi kuthibitishwa bila hiyo.",
       "releaseConsequence": "Kuthibitisha kunamaanisha mteja amesaini kupokea bidhaa. Bidhaa zinatoka uwanjani sasa hivi, na hili haliwezi kutenguliwa.",
       "released": "Zimetolewa. Bidhaa zimetoka uwanjani.",
+      "releaseTitle": "Uthibitishe mteja amesaini?",
+      "releaseConfirmConsequence": "Hii inatoa vipande {count} kwa {who} kutoka {location}. Bidhaa zinaondoka eneo sasa, na hili haliwezi kutenguliwa.",
+      "confirmReleaseYes": "Ndiyo, mteja amesaini",
       "status": {
         "assigned": "Mhifadhi amepangiwa",
         "note_recorded": "Inasubiri saini",

@@ -116,6 +116,32 @@ async function confirmOrder(page: Page, consequence: RegExp) {
 }
 
 /**
+ * Opens a confirmation, checks it NAMES THE CONSEQUENCE, and takes the second, separate press.
+ *
+ * design.md §11.8 lists the three actions on these screens that require one: approving credit,
+ * completing a walk-in sale, and confirming a signed release. §10.8 adds that the dialog must name
+ * the specific consequence rather than asking "are you sure?", which is what the `consequence`
+ * argument asserts.
+ */
+async function confirmThrough(
+  page: Page,
+  open: Locator,
+  consequence: RegExp,
+  confirmLabel: RegExp,
+) {
+  await open.click();
+  const sheet = page.getByRole("alertdialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText(consequence);
+
+  // It does not dismiss itself: an irreversible confirmation requires an explicit choice (§10.8).
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeVisible();
+
+  await sheet.getByRole("button", { name: confirmLabel }).click();
+}
+
+/**
  * The balance-due figure on an invoice card.
  *
  * Scoped to the element that carries it, because the same amount also appears in "of TZS 600,000"
@@ -282,7 +308,13 @@ test("an invoice is settled and the goods leave", async ({ page }) => {
 
     const card = page.getByRole("article", { name: invoiceNo, exact: true });
     await expect(card.getByText(/waiting for the manager/i)).toBeVisible();
-    await card.getByRole("button", { name: /approve credit/i }).click();
+
+    await confirmThrough(
+      page,
+      card.getByRole("button", { name: /^approve credit$/i }),
+      /records no money, and the invoice stays unpaid until money arrives/i,
+      /yes, approve the credit/i,
+    );
 
     // The DURABLE outcome, in place. Approving revalidates the route and the decision panel — with
     // its success line — is gone, correctly, because there is nothing left to decide. Waiting for
@@ -377,9 +409,15 @@ test("an invoice is settled and the goods leave", async ({ page }) => {
       .getByRole("article", { name: new RegExp(`${invoiceNo}.*${STOREKEEPER}`) })
       .first();
 
-    // The exact consequence, before it happens (design.md §10.8).
+    // The exact consequence, before it happens (design.md §10.8, §11.8) — and now behind an
+    // explicit confirmation, because this is the one action that takes stock out of the yard.
     await expect(card.getByText(/the stock leaves the yard now/i)).toBeVisible();
-    await card.getByRole("button", { name: /confirm the customer signed/i }).click();
+    await confirmThrough(
+      page,
+      card.getByRole("button", { name: /confirm the customer signed/i }),
+      /releases 6 units to .* from /i,
+      /yes, the customer signed/i,
+    );
     // Likewise: the release is what makes the stock leave, so wait for the release.
     await expect(card.getByText(/^collected$/i)).toBeVisible();
 
@@ -428,9 +466,17 @@ test("a credit balance beyond a Manager's limit needs a Director", async ({ page
     await expect(exposure).toContainText(/TZS [\d,]+/);
     await expect(exposure).not.toContainText(/TZS 0\b/);
 
-    await card.getByRole("button", { name: /approve credit/i }).click();
-    await expect(card.getByText(/beyond a manager limit/i)).toBeVisible();
-    await expect(card.getByText(/against a manager limit of/i)).toBeVisible();
+    // The control is UNAVAILABLE with its reason stated (design.md §4.4), rather than enabled and
+    // then refused by the database. §4.3 makes a rejection a completed decision too, so a Manager
+    // is offered neither: being able to refuse it would be deciding it either way.
+    await expect(card.getByRole("button", { name: /^approve credit$/i })).toBeDisabled();
+    await expect(card.getByRole("button", { name: /^reject$/i })).toBeDisabled();
+    await expect(card.getByTestId(/^credit-blocked-/)).toContainText(
+      /beyond a manager's limit, so only a director can approve or reject it/i,
+    );
+
+    // And nothing was submitted: the invoice is untouched and still waiting for its Director.
+    await expect(card.getByText(/waiting for a director/i)).toBeVisible();
   });
 
   await test.step("a Director approves it, and no money is recorded", async () => {
@@ -438,7 +484,12 @@ test("a credit balance beyond a Manager's limit needs a Director", async ({ page
     await page.goto(PAYMENTS_HREF);
 
     const card = page.getByRole("article", { name: invoiceNo, exact: true });
-    await card.getByRole("button", { name: /approve credit/i }).click();
+    await confirmThrough(
+      page,
+      card.getByRole("button", { name: /^approve credit$/i }),
+      /approves TZS 800,000 for .* to pay later/i,
+      /yes, approve the credit/i,
+    );
 
     // AC-93: the approved balance is recorded, and the invoice is still Unpaid, because approving
     // credit records no money.
@@ -494,7 +545,12 @@ test("a walk-in sale is completed in one action at the till", async ({ page }) =
     await expect(card.getByText(/if the stock has gone, nothing at all is recorded/i)).toBeVisible();
 
     await card.getByTestId("cash-method-cash").click();
-    await card.getByRole("button", { name: /take payment and complete the sale/i }).click();
+    await confirmThrough(
+      page,
+      card.getByRole("button", { name: /take payment and complete the sale/i }),
+      /creates the invoice and holds the goods for collection — all at once/i,
+      /yes, complete the sale/i,
+    );
 
     // The DURABLE outcome, not the transient success line. §12.4 and AC-16: taking the money is
     // what creates the invoice, so the walk-in card leaves the queue the moment the route
@@ -516,6 +572,180 @@ test("a walk-in sale is completed in one action at the till", async ({ page }) =
     await expect(balanceOn(invoiced)).toHaveText("TZS 0");
     // AC-16 is a FULL settlement: the walk-in path exists for nothing else.
     await expect(page.getByRole("article", { name: orderNo, exact: true })).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+test("two invoices are settled one after another, without reloading the page", async ({ page }) => {
+  let first = "";
+  let second = "";
+
+  await test.step("a Sales Representative sells twice", async () => {
+    await signInAs(page, "salesRep");
+    first = await sellTo(page, CUSTOMER, 1);
+    second = await sellTo(page, CUSTOMER, 2);
+  });
+
+  await test.step("the Cashier clears both without a reload between them", async () => {
+    await switchTo(page, "cashier");
+    await page.goto(PAYMENTS_HREF);
+
+    // EVERY CARD OWNS ITS IDEMPOTENCY KEY, and this is the test that says so. One key handed to
+    // the whole page is claimed by whichever card acts first; the second card then sends a key the
+    // database has already recorded against a different command and request, and is refused with
+    // `idempotency_key_conflict` — which reads, at the till, as the system breaking for no reason.
+    //
+    // There is deliberately NO navigation in this step. A reload would mint fresh keys and hide
+    // exactly the defect being tested.
+    for (const [invoiceNo, amount] of [[first, "100000"], [second, "200000"]] as const) {
+      const card = page.getByRole("article", { name: invoiceNo, exact: true });
+
+      await card.getByRole("button", { name: /take payment/i }).click();
+      await card.getByTestId("method-cash").click();
+      await card.getByLabel(/amount received/i).fill(amount);
+      await card.getByRole("button", { name: /^record payment$/i }).click();
+      await expect(card.getByText(/payment recorded/i)).toBeVisible();
+
+      await card.getByRole("button", { name: /mark as settled/i }).click();
+      await expect(card.getByText(/ready to dispatch/i)).toBeVisible();
+    }
+
+    // The refusal this test exists to prevent, named so a failure says why it failed.
+    await expect(page.getByText(/reload the page and try again/i)).toHaveCount(0);
+  });
+
+  await test.step("and both are settled when the page is asked again", async () => {
+    await page.goto(PAYMENTS_HREF);
+    for (const invoiceNo of [first, second]) {
+      await expect(
+        page.getByRole("article", { name: invoiceNo, exact: true }).getByText(/ready to dispatch/i),
+      ).toBeVisible();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+test("a partial release leaves the rest assignable, and the rest goes out too", async ({ page }) => {
+  let invoiceNo = "";
+  let before = 0;
+
+  await test.step("a Sales Representative sells ten, and the Cashier settles it", async () => {
+    await signInAs(page, "salesRep");
+    invoiceNo = await sellTo(page, CUSTOMER, 10);
+
+    await switchTo(page, "cashier");
+    await page.goto(PAYMENTS_HREF);
+
+    const card = page.getByRole("article", { name: invoiceNo, exact: true });
+    await card.getByRole("button", { name: /take payment/i }).click();
+    await card.getByTestId("method-cash").click();
+    await card.getByRole("button", { name: /^record payment$/i }).click();
+    await expect(card.getByText(/payment recorded/i)).toBeVisible();
+
+    await card.getByRole("button", { name: /mark as settled/i }).click();
+    await expect(card.getByText(/ready to dispatch/i)).toBeVisible();
+  });
+
+  await test.step("the Cashier assigns four of the ten", async () => {
+    before = await stockInStore(page);
+
+    await page.goto(DISPATCH_HREF);
+    const card = page.getByRole("article", { name: invoiceNo, exact: true });
+    await expect(card.getByText(/10 still owed/i)).toBeVisible();
+
+    await selectByPrefix(card.getByLabel(/^storekeeper$/i), STOREKEEPER);
+    await card.getByLabel(/collect from/i).selectOption("store");
+    await card.getByLabel(new RegExp(PRODUCT, "i")).fill("4");
+    await card.getByRole("button", { name: /assign storekeeper/i }).click();
+
+    await expect(
+      page.getByRole("article", { name: new RegExp(`${invoiceNo}.*${STOREKEEPER}`) }).first(),
+    ).toBeVisible();
+  });
+
+  await test.step("six remain assignable while the four are in progress", async () => {
+    await page.goto(DISPATCH_HREF);
+    // The assign card is still here — this is the control the review found missing — and it now
+    // offers SIX, because four are spoken for by a dispatch that has not gone out yet.
+    const card = page.getByRole("article", { name: invoiceNo, exact: true });
+    await expect(card).toBeVisible();
+    await expect(card.getByText(/6 still owed/i)).toBeVisible();
+  });
+
+  await test.step("a Manager notes the number and releases the four", async () => {
+    await switchTo(page, "manager");
+    await page.goto(DISPATCH_HREF);
+
+    const card = page
+      .getByRole("article", { name: new RegExp(`${invoiceNo}.*${STOREKEEPER}`) })
+      .first();
+
+    await card.getByLabel(/dispatch note number/i).fill(unique("DN").replace(" ", "-"));
+    await card.getByRole("button", { name: /save note number/i }).click();
+    await expect(card.getByText(/waiting for signature/i)).toBeVisible();
+
+    await confirmThrough(
+      page,
+      card.getByRole("button", { name: /confirm the customer signed/i }),
+      /releases 4 units/i,
+      /yes, the customer signed/i,
+    );
+    await expect(card.getByText(/^collected$/i)).toBeVisible();
+
+    expect(await stockInStore(page)).toBe(before - 4);
+  });
+
+  await test.step("the remaining six are still assignable, and go out on a second dispatch", async () => {
+    await switchTo(page, "cashier");
+    await page.goto(DISPATCH_HREF);
+
+    // AFTER a partial release. Before this correction the invoice vanished from the assignment
+    // list the moment it had any dispatch at all, so the other six could never be handed over.
+    const card = page.getByRole("article", { name: invoiceNo, exact: true });
+    await expect(card).toBeVisible();
+    await expect(card.getByText(/6 still owed/i)).toBeVisible();
+
+    await selectByPrefix(card.getByLabel(/^storekeeper$/i), STOREKEEPER);
+    await card.getByLabel(/collect from/i).selectOption("store");
+    await card.getByRole("button", { name: /assign storekeeper/i }).click();
+
+    await switchTo(page, "manager");
+    await page.goto(DISPATCH_HREF);
+
+    // Two dispatches now carry this invoice and this storekeeper, so the card is found by the one
+    // thing that tells them apart: the note number about to go on it. Filtering by the save
+    // control would stop matching the instant that control is used, which is what a first attempt
+    // at this test did.
+    const noteNo = unique("DN").replace(" ", "-");
+    const assigned = page
+      .getByRole("article", { name: new RegExp(`${invoiceNo}.*${STOREKEEPER}`) })
+      .filter({ has: page.getByRole("button", { name: /save note number/i }) })
+      .first();
+
+    await assigned.getByLabel(/dispatch note number/i).fill(noteNo);
+    await assigned.getByRole("button", { name: /save note number/i }).click();
+
+    const second = page
+      .getByRole("article", { name: new RegExp(`${invoiceNo}.*${STOREKEEPER}`) })
+      .filter({ hasText: noteNo })
+      .first();
+    await expect(second.getByText(/waiting for signature/i)).toBeVisible();
+
+    await confirmThrough(
+      page,
+      second.getByRole("button", { name: /confirm the customer signed/i }),
+      /releases 6 units/i,
+      /yes, the customer signed/i,
+    );
+
+    // All ten have now left the yard, in two dispatches against one invoice.
+    await expect(second.getByText(/^collected$/i)).toBeVisible();
+    expect(await stockInStore(page)).toBe(before - 10);
+
+    // And nothing is left to assign on it.
+    await switchTo(page, "cashier");
+    await page.goto(DISPATCH_HREF);
+    await expect(page.getByRole("article", { name: invoiceNo, exact: true })).toHaveCount(0);
   });
 });
 
@@ -559,6 +789,21 @@ test.describe("what the settlement screens offer", () => {
     await expect(navigation.getByRole("link", { name: /^dispatch$/i })).toBeVisible();
     // §3.2 registration is a Director's, so the destination is not offered at all.
     await expect(navigation.getByRole("link", { name: /^storekeepers$/i })).toHaveCount(0);
+  });
+
+  test("every queue says how much of it is off the page", async ({ page }) => {
+    await signInAs(page, "cashier");
+
+    // A queue that shows the first twenty-five and says nothing is a queue that loses the oldest
+    // unsettled invoice in the business. The count is always stated (design.md §12.3 in spirit:
+    // an empty result and a truncated one are different answers).
+    await page.goto(PAYMENTS_HREF);
+    await expect(page.getByTestId("pager-count-awaiting")).toBeVisible();
+    await expect(page.getByTestId("pager-count-settled")).toBeVisible();
+
+    await page.goto(DISPATCH_HREF);
+    await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
+    await expect(page.getByTestId("pager-count-released")).toBeVisible();
   });
 
   test("neither payments nor dispatch scrolls the page sideways", async ({ page }) => {

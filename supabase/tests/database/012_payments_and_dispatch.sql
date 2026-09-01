@@ -16,7 +16,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(78);
+select plan(99);
 
 create schema if not exists tests;
 
@@ -98,7 +98,12 @@ select is(
 
 -- ---------------------------------------------------------------------------
 -- Invoice status is CALCULATED, and nobody can choose it (§12.3, AC-14)
+--
+-- Read as the Cashier, because settlement facts are Cashier, Manager and Director work and the
+-- views refuse everybody else. That refusal is asserted at the end of this file.
 -- ---------------------------------------------------------------------------
+select tests.acting_as('b0000000-0000-0000-0000-000000000003'::uuid);   -- Cashier
+
 select is(
   tests.status_of(tests.invoice_of((select id from public.orders limit 1))),
   'unpaid',
@@ -207,6 +212,14 @@ select is(
   (select approved_credit_tzs from public.invoice_settlement),
   250000::bigint,
   'the approved balance sits BESIDE the payment figures, separately (§12.5)');
+
+-- design.md §7.8: what the customer already owes on approved credit, which the per-invoice limit
+-- of §4 cannot see. 250 000 approved against 250 000 still owed.
+select is(
+  (select exposure_tzs from public.customer_credit_exposure
+    where customer_id = (select id from public.customers where name = 'Settlement Co')),
+  250000::bigint,
+  'the customer''s credit exposure is what is approved AND still owed');
 
 -- ---------------------------------------------------------------------------
 -- Settlement approval is a separate act (§4.1, §4.2, §12.6 step 7)
@@ -591,6 +604,171 @@ select is(
   (select private.stock_on_hand(tests.product('Marine 18 mm'), 'store', 'available')),
   196::bigint,
   'and nothing has physically left: a walk-in customer still signs for their goods');
+
+-- ---------------------------------------------------------------------------
+-- A balance beyond a Manager's authority cannot be DECIDED by a Manager, either way
+--
+-- product.md §4.3: a rejection is a COMPLETED DECISION, not the absence of one. A Manager able to
+-- refuse what only a Director may approve would settle it either way — the customer gets nothing,
+-- the request is closed, and no Director ever sees it.
+-- ---------------------------------------------------------------------------
+select tests.acting_as('b0000000-0000-0000-0000-000000000004'::uuid);   -- Sales Representative
+
+select is(
+  (api.staff_add_customer('Credit Limit Co', 'fx-cust') ->> 'reason'),
+  'added', 'a second customer, to test the authority limit against');
+
+select is(
+  (api.staff_create_order(
+     (select id from public.customers where name = 'Credit Limit Co'),
+     jsonb_build_array(jsonb_build_object('product_id', tests.product('Marine 18 mm'),
+                                          'quantity', 8)),
+     'fx-order') ->> 'reason'),
+  'created', 'and an order for eight sheets: eight hundred thousand');
+
+select is(
+  (api.staff_confirm_order(
+     (select id from public.orders o
+       where o.customer_id = (select id from public.customers where name = 'Credit Limit Co')),
+     'fx-confirm') ->> 'reason'),
+  'confirmed', 'confirmed, so there is an invoice to carry on credit');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000003'::uuid);   -- Cashier
+
+select is(
+  (api.staff_request_credit(
+     (select i.id from public.invoices i
+        join public.orders o on o.id = i.order_id
+       where o.customer_id = (select id from public.customers where name = 'Credit Limit Co')),
+     800000, 'large customer, agreed terms', 'fx-credit')
+   ->> 'required_role'),
+  'director',
+  'eight hundred thousand is beyond a Manager''s TZS 500 000 limit (§4)');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000002'::uuid);   -- Manager
+
+select is(
+  (api.staff_approve_credit(
+     (select id from public.credit_authorisations
+       where reason = 'large customer, agreed terms'), 'fx-mgr-approve')
+   ->> 'reason'),
+  'director_approval_required',
+  'a Manager cannot APPROVE it, and is told which limit was crossed');
+
+select is(
+  (api.staff_reject_credit(
+     (select id from public.credit_authorisations
+       where reason = 'large customer, agreed terms'), 'too much', 'fx-mgr-reject')
+   ->> 'reason'),
+  'director_approval_required',
+  'and cannot REJECT it either, because §4.3 makes a rejection a completed decision');
+
+select is(
+  (select status::text from public.approval_requests
+    where entity_type = 'credit_authorisation'
+      and entity_id = (select id from public.credit_authorisations
+                        where reason = 'large customer, agreed terms')),
+  'pending',
+  'so the request is still waiting for the Director it belongs to');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000001'::uuid);   -- Director
+
+select is(
+  (api.staff_approve_credit(
+     (select id from public.credit_authorisations
+       where reason = 'large customer, agreed terms'), 'fx-dir-approve')
+   ->> 'reason'),
+  'approved',
+  'the Director approves it');
+
+select is(
+  (select exposure_tzs from public.customer_credit_exposure
+    where customer_id = (select id from public.customers where name = 'Credit Limit Co')),
+  800000::bigint,
+  'and the whole eight hundred thousand is now exposure: none of it has been paid');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000003'::uuid);   -- Cashier
+
+select is(
+  (api.staff_record_payment(
+     (select i.id from public.invoices i
+        join public.orders o on o.id = i.order_id
+       where o.customer_id = (select id from public.customers where name = 'Credit Limit Co')),
+     'cash', 300000, 'fx-part-pay') ->> 'reason'),
+  'recorded',
+  'the customer pays three hundred thousand of it');
+
+-- EXPOSURE IS MONEY OUT, NOT THE SUM OF THE APPROVALS. The approval still says 800 000; what is
+-- still owed is 500 000, and that is what the business is exposed for.
+select is(
+  (select exposure_tzs from public.customer_credit_exposure
+    where customer_id = (select id from public.customers where name = 'Credit Limit Co')),
+  500000::bigint,
+  'exposure falls as they pay: least(approved, outstanding), never the approval alone');
+
+select is(
+  (select count(*)::int from public.customer_credit_exposure e
+     join public.customers c on c.id = e.customer_id
+    where c.is_cash_customer),
+  0,
+  'a customer with no approved credit has no exposure row at all');
+
+-- ---------------------------------------------------------------------------
+-- The approved role boundary (design.md §4.2, Owner decision on the v0.0.4 review)
+--
+-- A Sales Representative reads orders and invoices. They do not read the money against them, who
+-- carried a balance, which storekeeper fetched what, or what is sitting in the yard.
+--
+-- The two settlement VIEWS refuse rather than report zero, which is the difference between an
+-- honest refusal and a confident false statement: `invoice_settlement` LEFT JOINs the payments a
+-- Sales Representative can no longer see, so without the guard it would call every invoice in the
+-- business unpaid.
+-- ---------------------------------------------------------------------------
+select tests.acting_as('b0000000-0000-0000-0000-000000000004'::uuid);   -- Sales Representative
+
+select is(
+  api.staff_settlement_readable(), false,
+  'a Sales Representative may not read settlement facts');
+
+select is(
+  (select count(*)::int from public.invoice_settlement), 0,
+  'so invoice_settlement answers them with nothing, rather than with zero money');
+
+select is(
+  (select count(*)::int from public.paid_but_unreleased), 0,
+  'and paid_but_unreleased shows them nothing');
+
+select is(
+  (select count(*)::int from public.customer_credit_exposure), 0,
+  'and neither does the exposure total');
+
+select tests.acting_as('b0000000-0000-0000-0000-000000000003'::uuid);   -- Cashier
+
+select is(
+  api.staff_settlement_readable(), true,
+  'a Cashier may, because settling invoices is their work (§12.6 step 6)');
+
+select isnt(
+  (select count(*)::int from public.invoice_settlement), 0,
+  'and the same view answers them normally');
+
+select is(
+  (select count(*)::int from pg_policies
+    where schemaname = 'public'
+      and tablename in ('payments', 'credit_authorisations', 'dispatches', 'dispatch_lines',
+                        'storekeepers')
+      and qual like '%sales_rep%'),
+  0,
+  'no policy on a settlement table names a Sales Representative');
+
+select is(
+  (select count(*)::int from pg_policies
+    where schemaname = 'public'
+      and tablename in ('payments', 'credit_authorisations', 'dispatches', 'dispatch_lines',
+                        'storekeepers')
+      and cmd = 'SELECT' and roles::text like '%authenticated%'),
+  5,
+  'and each of the five still has exactly one read policy for the roles that do need it');
 
 -- ---------------------------------------------------------------------------
 -- The privilege surface

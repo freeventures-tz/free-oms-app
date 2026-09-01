@@ -13,6 +13,12 @@
     "swahili": "Kiswahili",
     "menu": "Menu",
     "signedInAs": "Signed in as {name}",
+    "pager": {
+      "showing": "Showing {first}–{last} of {total}",
+      "none": "Nothing to show",
+      "previous": "Previous",
+      "next": "Next"
+    },
     "actionFailed": "That did not work. Try again."
   },
   "auth": {
@@ -754,7 +760,10 @@
       "settled": "Settled. The goods are held for this customer and a storekeeper can be assigned.",
       "completeCashSale": "Take payment and complete the sale",
       "cashSaleConsequence": "This takes the money, creates the invoice and holds the goods, all at once. If the stock has gone, nothing at all is recorded.",
-      "cashSaleCompleted": "Paid. The invoice is created and the goods are held for collection."
+      "cashSaleCompleted": "Paid. The invoice is created and the goods are held for collection.",
+      "cashSaleTitle": "Take the money and complete the sale?",
+      "cashSaleConfirmConsequence": "This records {amount} received by {method}, creates the invoice and holds the goods for collection — all at once. If the stock has gone, nothing at all is recorded.",
+      "confirmCashSale": "Yes, complete the sale"
     },
     "credit": {
       "heading": "Credit",
@@ -770,6 +779,10 @@
       "needsManager": "Waiting for the Manager",
       "needsDirector": "Waiting for a Director",
       "exposure": "{who} already owes {amount} on approved credit.",
+      "approveTitle": "Approve this credit?",
+      "approveConsequence": "This approves {amount} for {who} to pay later. It records no money, and the invoice stays unpaid until money arrives.",
+      "confirmApprove": "Yes, approve the credit",
+      "beyondManagerLimit": "This balance is beyond a Manager's limit, so only a Director can approve or reject it.",
       "approve": "Approve credit",
       "approved": "Credit approved. No money has been recorded.",
       "reject": "Reject",
@@ -822,6 +835,9 @@
       "blockedByNote": "Save the dispatch note number first. The release cannot be confirmed without it.",
       "releaseConsequence": "Confirming means the customer has signed for the goods. The stock leaves the yard now, and this cannot be undone.",
       "released": "Released. The stock has left the yard.",
+      "releaseTitle": "Confirm the customer signed?",
+      "releaseConfirmConsequence": "This releases {count} units to {who} from {location}. The stock leaves the yard now, and this cannot be undone.",
+      "confirmReleaseYes": "Yes, the customer signed",
       "status": {
         "assigned": "Storekeeper assigned",
         "note_recorded": "Waiting for signature",

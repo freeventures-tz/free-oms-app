@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import { getTranslations } from "next-intl/server";
 
 import { StorekeeperAdmin } from "@/app/(app)/settings/storekeepers/storekeeper-admin";
@@ -30,11 +28,7 @@ export default async function StorekeepersPage() {
         title={t("title")}
         description={viewer.role === "director" ? t("description") : t("descriptionManager")}
       />
-      <StorekeeperAdmin
-        storekeepers={storekeepers}
-        canEdit={viewer.role === "director"}
-        idempotencyKey={randomUUID()}
-      />
+      <StorekeeperAdmin storekeepers={storekeepers} canEdit={viewer.role === "director"} />
     </>
   );
 }

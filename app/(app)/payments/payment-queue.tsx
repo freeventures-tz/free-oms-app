@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   approveCreditAction,
@@ -16,14 +16,14 @@ import {
   type SettlementActionState,
 } from "@/app/(app)/payments/actions";
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 import { Field, FieldError, FormError, FormSuccess, Help, Input, Label } from "@/components/ui/field";
+import { Pager } from "@/components/ui/pager";
 import { Card, StatusChip } from "@/components/ui/surface";
 import { formatTzs } from "@/lib/money";
-import type { OrderSummary } from "@/lib/sales/sales";
 import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/settlement/methods";
-import type { SettlementInvoice } from "@/lib/settlement/settlement";
+import type { CashSale, SettlementInvoice, SettlementQueue } from "@/lib/settlement/settlement";
 import type { AppRole } from "@/lib/auth/roles";
-import { creditExposureByCustomer } from "@/lib/settlement/exposure";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
 const STATUS_TONE: Record<string, "neutral" | "success" | "attention" | "danger"> = {
@@ -33,29 +33,37 @@ const STATUS_TONE: Record<string, "neutral" | "success" | "attention" | "danger"
   cancelled: "danger",
 };
 
+const PAYMENTS_PATH = "/payments";
+
+/**
+ * A fresh idempotency key, owned by ONE form and ONE command.
+ *
+ * Every actionable card on this screen calls this for itself. A key shared between cards is a
+ * conflict waiting for the second Cashier action of the session: the database claims a key for the
+ * exact operation and request it first saw, so an invoice settled with the key its neighbour
+ * already spent is refused with `idempotency_key_conflict` — a refusal that reads, to the person
+ * at the till, as the system breaking for no reason.
+ *
+ * It is generated in a `useState` initialiser rather than on the server, and that is deliberate:
+ * the value is never rendered, so there is nothing for hydration to disagree about, and a card
+ * that mounts gets a key nothing else has ever held.
+ */
+function newKey(): string {
+  return crypto.randomUUID();
+}
+
 export function PaymentQueue({
-  invoices,
+  queue,
   awaitingCashSale,
   role,
-  idempotencyKey,
 }: {
-  invoices: SettlementInvoice[];
-  awaitingCashSale: OrderSummary[];
+  queue: SettlementQueue;
+  awaitingCashSale: CashSale[];
   role: AppRole;
-  idempotencyKey: string;
 }) {
   const t = useTranslations("settlement.payments");
 
-  const awaitingSettlement = invoices.filter(
-    (invoice) => invoice.cancelledAt === null && invoice.settlementApprovedAt === null,
-  );
-  // What each customer ALREADY owes on approved credit, totalled once for the whole queue rather
-  // than per card (design.md §7.8). A per-invoice limit cannot see a customer's fourth unpaid
-  // balance of the week; this can.
-  const exposure = creditExposureByCustomer(invoices);
-  const settled = invoices.filter(
-    (invoice) => invoice.cancelledAt === null && invoice.settlementApprovedAt !== null,
-  );
+  const { awaiting, settled, exposureByCustomer } = queue;
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,32 +76,33 @@ export function PaymentQueue({
               payment, in one action. */}
           <Help>{t("cashSalesHelp")}</Help>
           {awaitingCashSale.map((order) => (
-            <CashSaleCard
-              key={order.id}
-              order={order}
-              canTakeMoney={role === "cashier"}
-              idempotencyKey={idempotencyKey}
-            />
+            <CashSaleCard key={order.id} order={order} canTakeMoney={role === "cashier"} />
           ))}
         </section>
       ) : null}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold">
-          {t("awaitingHeading", { count: awaitingSettlement.length })}
-        </h2>
-        {awaitingSettlement.length === 0 ? (
+        <h2 className="text-sm font-semibold">{t("awaitingHeading", { count: awaiting.total })}</h2>
+        <Pager
+          page={awaiting.page}
+          pageSize={awaiting.pageSize}
+          total={awaiting.total}
+          param="awaiting"
+          basePath={PAYMENTS_PATH}
+          otherParams={{ settled: settled.page }}
+          label={t("awaitingHeading", { count: awaiting.total })}
+        />
+        {awaiting.rows.length === 0 ? (
           <Card>
             <p className="text-sm text-muted-foreground">{t("nothingWaiting")}</p>
           </Card>
         ) : (
-          awaitingSettlement.map((invoice) => (
+          awaiting.rows.map((invoice) => (
             <InvoiceCard
               key={invoice.id}
               invoice={invoice}
               role={role}
-              exposureTzs={exposure.get(invoice.customerId) ?? 0}
-              idempotencyKey={idempotencyKey}
+              exposureTzs={exposureByCustomer[invoice.customerId] ?? 0}
             />
           ))
         )}
@@ -101,18 +110,26 @@ export function PaymentQueue({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold">{t("settledHeading")}</h2>
-        {settled.length === 0 ? (
+        <Pager
+          page={settled.page}
+          pageSize={settled.pageSize}
+          total={settled.total}
+          param="settled"
+          basePath={PAYMENTS_PATH}
+          otherParams={{ awaiting: awaiting.page }}
+          label={t("settledHeading")}
+        />
+        {settled.rows.length === 0 ? (
           <Card>
             <p className="text-sm text-muted-foreground">{t("noneSettled")}</p>
           </Card>
         ) : (
-          settled.map((invoice) => (
+          settled.rows.map((invoice) => (
             <InvoiceCard
               key={invoice.id}
               invoice={invoice}
               role={role}
-              exposureTzs={exposure.get(invoice.customerId) ?? 0}
-              idempotencyKey={idempotencyKey}
+              exposureTzs={exposureByCustomer[invoice.customerId] ?? 0}
             />
           ))
         )}
@@ -125,13 +142,11 @@ function InvoiceCard({
   invoice,
   role,
   exposureTzs,
-  idempotencyKey,
 }: {
   invoice: SettlementInvoice;
   role: AppRole;
   /** What this customer already owes on approved credit, across every invoice (design.md §7.8). */
   exposureTzs: number;
-  idempotencyKey: string;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -193,7 +208,6 @@ function InvoiceCard({
             invoice={invoice}
             canRequestReversal={canRequestReversal}
             canApproveReversal={canApproveReversal}
-            idempotencyKey={idempotencyKey}
           />
         ) : null}
 
@@ -201,13 +215,13 @@ function InvoiceCard({
           <CreditDecision
             invoice={invoice}
             canDecide={canDecideCredit}
+            role={role}
             exposureTzs={exposureTzs}
-            idempotencyKey={idempotencyKey}
           />
         ) : null}
 
         {invoice.cancelledAt === null && invoice.settlementApprovedAt === null && canTakeMoney ? (
-          <SettlementPanel invoice={invoice} idempotencyKey={idempotencyKey} />
+          <SettlementPanel invoice={invoice} />
         ) : null}
       </div>
     </Card>
@@ -218,21 +232,50 @@ function PaymentHistory({
   invoice,
   canRequestReversal,
   canApproveReversal,
-  idempotencyKey,
 }: {
   invoice: SettlementInvoice;
   canRequestReversal: boolean;
   canApproveReversal: boolean;
-  idempotencyKey: string;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const [reversing, setReversing] = useState<string | null>(null);
   const [reason, setReason] = useState("");
-  const [key] = useState(idempotencyKey);
+
+  /**
+   * A key per payment and per decision, minted on demand and kept until that decision succeeds.
+   *
+   * A reversal request on one payment and a Director's approval of another are two commands with
+   * two request bodies. One key between them is the conflict this map exists to prevent, and a key
+   * that rotated on every render would break retry identity instead.
+   */
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  function keyFor(scope: string): string {
+    const existing = keys[scope];
+    if (existing) return existing;
+    const minted = newKey();
+    setKeys((current) => ({ ...current, [scope]: minted }));
+    return minted;
+  }
+  function rotate(scope: string) {
+    setKeys((current) => ({ ...current, [scope]: newKey() }));
+  }
+
+  // A ref rather than state, and the difference matters: `onSettled` runs inside the transition
+  // `run` started, so it sees the render closure from BEFORE the click. A state value set in the
+  // same handler would not be there yet, and the wrong key would rotate.
+  const lastScope = useRef<string | null>(null);
 
   const action = useGuardedAction<"request" | "approve", SettlementActionState>({
     failureKey: "settlementErrors.generic",
+    onSettled: (outcome) => {
+      // Only a server-confirmed success retires a key. A refusal keeps it, so the retry that
+      // follows addresses the same command rather than issuing a second one.
+      if (!outcome.successKey) return;
+      if (lastScope.current) rotate(lastScope.current);
+      setReversing(null);
+      setReason("");
+    },
   });
   const { pending, running, result } = action;
 
@@ -242,7 +285,25 @@ function PaymentHistory({
         {t("settlement.payments.history")}
       </h3>
 
-      {result.error ? <FormError>{t(result.error)}</FormError> : null}
+      {result.error ? (
+        <div className="flex flex-col gap-2">
+          <FormError>{t(result.error)}</FormError>
+          {action.retry ? (
+            <div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                pending={pending}
+                pendingLabel={t("common.loading")}
+                onClick={action.retry}
+              >
+                {t("common.retry")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <FormSuccess>{result.successKey ? t(result.successKey) : null}</FormSuccess>
 
       <ul className="flex flex-col gap-2 text-xs">
@@ -281,9 +342,11 @@ function PaymentHistory({
                       pendingLabel={t("common.loading")}
                       disabled={pending}
                       onClick={() => {
+                        const scope = `approve:${payment.id}`;
+                        lastScope.current = scope;
                         const data = new FormData();
                         data.set("entityId", payment.id);
-                        data.set("idempotencyKey", key);
+                        data.set("idempotencyKey", keyFor(scope));
                         action.run("approve", approvePaymentReversalAction, data);
                       }}
                     >
@@ -317,14 +380,17 @@ function PaymentHistory({
                         type="button"
                         variant="danger"
                         size="small"
+                        data-testid={`submit-reversal-${payment.id}`}
                         pending={running === "request"}
                         pendingLabel={t("common.loading")}
                         disabled={pending}
                         onClick={() => {
+                          const scope = `request:${payment.id}`;
+                          lastScope.current = scope;
                           const data = new FormData();
                           data.set("entityId", payment.id);
                           data.set("reason", reason);
-                          data.set("idempotencyKey", key);
+                          data.set("idempotencyKey", keyFor(scope));
                           action.run("request", requestPaymentReversalAction, data);
                         }}
                       >
@@ -367,26 +433,47 @@ function PaymentHistory({
 function CreditDecision({
   invoice,
   canDecide,
+  role,
   exposureTzs,
-  idempotencyKey,
 }: {
   invoice: SettlementInvoice;
   canDecide: boolean;
+  role: AppRole;
   exposureTzs: number;
-  idempotencyKey: string;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const [rejecting, setRejecting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
-  const [key] = useState(idempotencyKey);
+  const [approveKey, setApproveKey] = useState(newKey);
+  const [rejectKey, setRejectKey] = useState(newKey);
 
   const action = useGuardedAction<"approve" | "reject", SettlementActionState>({
     failureKey: "settlementErrors.generic",
+    onSettled: (outcome) => {
+      if (!outcome.successKey) return;
+      setConfirming(false);
+      setRejecting(false);
+      setReason("");
+      setApproveKey(newKey());
+      setRejectKey(newKey());
+    },
   });
   const { pending, running, result } = action;
 
   const credit = invoice.credit!;
+
+  /**
+   * A Manager looking at a balance only a Director may decide.
+   *
+   * product.md §4 caps a Manager at TZS 500,000 on one invoice, and §4.3 makes a rejection a
+   * COMPLETED DECISION — so a Manager who could refuse this would be deciding it either way: the
+   * customer gets nothing, the request is settled, and no Director ever sees it. Both controls are
+   * therefore unavailable, with the reason stated where the decision would have been made
+   * (design.md §4.4, §7.8). The database refuses the same thing independently.
+   */
+  const beyondManagerLimit = credit.requiredRole === "director" && role === "manager";
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-3">
@@ -482,7 +569,7 @@ function CreditDecision({
                   const data = new FormData();
                   data.set("entityId", credit.id);
                   data.set("reason", reason);
-                  data.set("idempotencyKey", key);
+                  data.set("idempotencyKey", rejectKey);
                   action.run("reject", rejectCreditAction, data);
                 }}
               >
@@ -500,38 +587,86 @@ function CreditDecision({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 md:flex-row">
-            <Button
-              type="button"
-              size="small"
-              data-testid={`approve-credit-${invoice.id}`}
-              pending={running === "approve"}
-              pendingLabel={t("common.loading")}
-              disabled={pending}
-              onClick={() => {
-                const data = new FormData();
-                data.set("entityId", credit.id);
-                data.set("idempotencyKey", key);
-                action.run("approve", approveCreditAction, data);
-              }}
-            >
-              {t("settlement.credit.approve")}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="small"
-              data-testid={`reject-credit-${invoice.id}`}
-              disabled={pending}
-              onClick={() => setRejecting(true)}
-            >
-              {t("settlement.credit.reject")}
-            </Button>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 md:flex-row">
+              <Button
+                type="button"
+                size="small"
+                data-testid={`approve-credit-${invoice.id}`}
+                disabled={pending || beyondManagerLimit}
+                onClick={() => setConfirming(true)}
+              >
+                {t("settlement.credit.approve")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                data-testid={`reject-credit-${invoice.id}`}
+                disabled={pending || beyondManagerLimit}
+                onClick={() => setRejecting(true)}
+              >
+                {t("settlement.credit.reject")}
+              </Button>
+            </div>
+
+            {/* A disabled control always carries its reason (design.md §4.4). */}
+            {beyondManagerLimit ? (
+              <Help data-testid={`credit-blocked-${invoice.id}`}>
+                {t("settlement.credit.beyondManagerLimit")}
+              </Help>
+            ) : null}
           </div>
         )
       ) : null}
 
-      <Help>{t("settlement.credit.recordsNoMoney")}</Help>
+      {/* Approving credit is an authority decision that changes what the business is owed, so it
+          names its consequence and takes a second, separate press (design.md §10.8, §11.8). */}
+      <ConfirmSheet
+        open={confirming}
+        onOpenChange={(next) => {
+          setConfirming(next);
+          if (!next) action.clear();
+        }}
+        title={t("settlement.credit.approveTitle")}
+        consequence={t("settlement.credit.approveConsequence", {
+          amount: formatTzs(credit.amountTzs, locale),
+          who: invoice.customerName,
+        })}
+        confirmLabel={t("settlement.credit.confirmApprove")}
+        confirmId={`confirm-approve-credit-${invoice.id}`}
+        cancelLabel={t("common.cancel")}
+        pending={running === "approve"}
+        pendingLabel={t("common.loading")}
+        onConfirm={() => {
+          const data = new FormData();
+          data.set("entityId", credit.id);
+          data.set("idempotencyKey", approveKey);
+          action.run("approve", approveCreditAction, data);
+        }}
+      >
+        {/* The refusal renders INSIDE the dialog, because the dialog traps focus and a message
+            behind it is a message nobody sees. */}
+        {result.error ? (
+          <div className="flex flex-col gap-2">
+            <FormError>{t(result.error)}</FormError>
+            {action.retry ? (
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  pending={pending}
+                  pendingLabel={t("common.loading")}
+                  onClick={action.retry}
+                >
+                  {t("common.retry")}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </ConfirmSheet>
     </div>
   );
 }
@@ -543,14 +678,12 @@ function CreditDecision({
  * balance and no payment at all (§12.5), and the panel changes its language accordingly — "amount
  * received" against "amount to be carried as credit". Presenting them as one control with seven
  * options is the mistake §12.5 exists to prevent.
+ *
+ * THREE COMMANDS, THREE KEYS. Recording money, asking for credit and confirming settlement are
+ * different operations against the same invoice. One key across them is claimed by whichever runs
+ * first and refused to the other two.
  */
-function SettlementPanel({
-  invoice,
-  idempotencyKey,
-}: {
-  invoice: SettlementInvoice;
-  idempotencyKey: string;
-}) {
+function SettlementPanel({ invoice }: { invoice: SettlementInvoice }) {
   const t = useTranslations();
   const locale = useLocale();
 
@@ -559,16 +692,24 @@ function SettlementPanel({
   // Pre-filled with the balance due: the common case is one tap plus confirm (design.md §7.7).
   const [amount, setAmount] = useState(String(invoice.settlement.outstandingTzs));
   const [reason, setReason] = useState("");
-  const [key, setKey] = useState(idempotencyKey);
+  const [payKey, setPayKey] = useState(newKey);
+  const [creditKey, setCreditKey] = useState(newKey);
+  const [settleKey, setSettleKey] = useState(newKey);
+
+  // Which of the three commands is in flight, recorded where `onSettled` can actually read it.
+  const lastRan = useRef<"pay" | "credit" | "settle" | null>(null);
 
   const action = useGuardedAction<"pay" | "credit" | "settle", SettlementActionState>({
     failureKey: "settlementErrors.generic",
     onSettled: (outcome) => {
-      if (outcome.successKey) {
-        setMode("none");
-        setReason("");
-        setKey(crypto.randomUUID());
-      }
+      // A refusal keeps every key, so a retry re-addresses the same command. Only the key of the
+      // command the server confirmed is retired.
+      if (!outcome.successKey) return;
+      setMode("none");
+      setReason("");
+      if (lastRan.current === "pay") setPayKey(newKey());
+      else if (lastRan.current === "credit") setCreditKey(newKey());
+      else if (lastRan.current === "settle") setSettleKey(newKey());
     },
   });
   const { pending, running, result } = action;
@@ -612,7 +753,6 @@ function SettlementPanel({
         <div className="flex flex-col gap-3">
           <h3 className="text-sm font-semibold">{t("settlement.payments.recordHeading")}</h3>
 
-          {/* Preset buttons, not a dropdown (product.md §5.1, design.md §10.1). */}
           <div className="flex flex-wrap gap-2" role="group" aria-label={t("settlement.payments.method")}>
             {PAYMENT_METHODS.map((option) => (
               <Button
@@ -660,7 +800,8 @@ function SettlementPanel({
                 data.set("invoiceId", invoice.id);
                 data.set("method", method);
                 data.set("amount", amount);
-                data.set("idempotencyKey", key);
+                data.set("idempotencyKey", payKey);
+                lastRan.current = "pay";
                 action.run("pay", recordPaymentAction, data);
               }}
             >
@@ -723,7 +864,8 @@ function SettlementPanel({
                 data.set("invoiceId", invoice.id);
                 data.set("amount", amount);
                 data.set("reason", reason);
-                data.set("idempotencyKey", key);
+                data.set("idempotencyKey", creditKey);
+                lastRan.current = "credit";
                 action.run("credit", requestCreditAction, data);
               }}
             >
@@ -779,7 +921,8 @@ function SettlementPanel({
               onClick={() => {
                 const data = new FormData();
                 data.set("invoiceId", invoice.id);
-                data.set("idempotencyKey", key);
+                data.set("idempotencyKey", settleKey);
+                lastRan.current = "settle";
                 action.run("settle", approveSettlementAction, data);
               }}
             >
@@ -811,28 +954,24 @@ function SettlementPanel({
 /**
  * The atomic walk-in sale (product.md §12.4, design.md §7A.3).
  *
- * ONE action with ONE confirmation, never four sequential saves. The screen says what will happen
- * before it happens, and if stock has gone in the meantime the whole thing fails cleanly and says
- * so — no invoice, no payment, no commitment (AC-89).
+ * ONE action with ONE confirmation, never four sequential saves. The confirmation names what will
+ * happen before it happens, and if stock has gone in the meantime the whole thing fails cleanly
+ * and says so — no invoice, no payment, no commitment (AC-89).
  */
-function CashSaleCard({
-  order,
-  canTakeMoney,
-  idempotencyKey,
-}: {
-  order: OrderSummary;
-  canTakeMoney: boolean;
-  idempotencyKey: string;
-}) {
+function CashSaleCard({ order, canTakeMoney }: { order: CashSale; canTakeMoney: boolean }) {
   const t = useTranslations();
   const locale = useLocale();
   const [method, setMethod] = useState<PaymentMethod>("cash");
-  const [key, setKey] = useState(idempotencyKey);
+  const [confirming, setConfirming] = useState(false);
+  const [key, setKey] = useState(newKey);
 
   const action = useGuardedAction<"pay", SettlementActionState>({
     failureKey: "settlementErrors.generic",
     onSettled: (outcome) => {
-      if (outcome.successKey) setKey(crypto.randomUUID());
+      if (outcome.successKey) {
+        setConfirming(false);
+        setKey(newKey());
+      }
     },
   });
   const { pending, result } = action;
@@ -855,6 +994,71 @@ function CashSaleCard({
           </div>
         </div>
 
+        <FormSuccess>{result.successKey ? t(result.successKey) : null}</FormSuccess>
+
+        {canTakeMoney && !result.successKey ? (
+          <>
+            <div className="flex flex-wrap gap-2" role="group" aria-label={t("settlement.payments.method")}>
+              {PAYMENT_METHODS.map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  variant={option === method ? "primary" : "secondary"}
+                  size="small"
+                  aria-pressed={option === method}
+                  data-testid={`cash-method-${option}`}
+                  disabled={pending}
+                  onClick={() => setMethod(option)}
+                >
+                  {t(`settlement.methods.${option}`)}
+                </Button>
+              ))}
+            </div>
+
+            <div>
+              <Button
+                type="button"
+                data-testid={`complete-cash-sale-${order.id}`}
+                disabled={pending}
+                onClick={() => setConfirming(true)}
+              >
+                {t("settlement.payments.completeCashSale")}
+              </Button>
+            </div>
+
+            <Help>{t("settlement.payments.cashSaleConsequence")}</Help>
+          </>
+        ) : null}
+      </div>
+
+      <ConfirmSheet
+        open={confirming}
+        onOpenChange={(next) => {
+          setConfirming(next);
+          if (!next) action.clear();
+        }}
+        title={t("settlement.payments.cashSaleTitle")}
+        consequence={t("settlement.payments.cashSaleConfirmConsequence", {
+          amount: formatTzs(order.totalTzs, locale),
+          method: t(`settlement.methods.${method}`),
+        })}
+        confirmLabel={t("settlement.payments.confirmCashSale")}
+        confirmId={`confirm-cash-sale-${order.id}`}
+        cancelLabel={t("common.cancel")}
+        pending={pending}
+        pendingLabel={t("common.loading")}
+        onConfirm={() => {
+          const data = new FormData();
+          data.set("orderId", order.id);
+          data.set("method", method);
+          // §12.4: a walk-in sale accepts full tender and nothing else, so the amount is the bill.
+          data.set("amount", String(order.totalTzs));
+          data.set("idempotencyKey", key);
+          action.run("pay", takeCashPaymentAction, data);
+        }}
+      >
+        {/* Inside the dialog, because the dialog traps focus: a stock refusal rendered on the card
+            underneath is a refusal nobody reads. */}
         {result.error ? (
           <div className="flex flex-col gap-2">
             <FormError>
@@ -882,52 +1086,15 @@ function CashSaleCard({
           </div>
         ) : null}
 
-        <FormSuccess>{result.successKey ? t(result.successKey) : null}</FormSuccess>
-
-        {canTakeMoney && !result.successKey ? (
-          <>
-            <div className="flex flex-wrap gap-2" role="group" aria-label={t("settlement.payments.method")}>
-              {PAYMENT_METHODS.map((option) => (
-                <Button
-                  key={option}
-                  type="button"
-                  variant={option === method ? "primary" : "secondary"}
-                  size="small"
-                  aria-pressed={option === method}
-                  data-testid={`cash-method-${option}`}
-                  disabled={pending}
-                  onClick={() => setMethod(option)}
-                >
-                  {t(`settlement.methods.${option}`)}
-                </Button>
-              ))}
-            </div>
-
-            <div>
-              <Button
-                type="button"
-                data-testid={`cash-sale-${order.id}`}
-                pending={pending}
-                pendingLabel={t("common.loading")}
-                onClick={() => {
-                  const data = new FormData();
-                  data.set("orderId", order.id);
-                  data.set("method", method);
-                  // Fully paid or not at all: §12.4 permits the walk-in path only for a fully paid
-                  // sale (AC-16), so there is no amount field to get wrong.
-                  data.set("amount", String(order.totalTzs));
-                  data.set("idempotencyKey", key);
-                  action.run("pay", takeCashPaymentAction, data);
-                }}
-              >
-                {t("settlement.payments.completeCashSale")}
-              </Button>
-            </div>
-
-            <Help>{t("settlement.payments.cashSaleConsequence")}</Help>
-          </>
-        ) : null}
-      </div>
+        {/* A refusal that arrives as a FIELD error has nowhere else to go on this card: there is
+            no field on it. Rendering it here is what stops a schema refusal from looking like a
+            button that does nothing, which is exactly how a missing amount presented itself. */}
+        {result.fieldErrors
+          ? Object.values(result.fieldErrors).map((key) => (
+              <FieldError key={key}>{t(key)}</FieldError>
+            ))
+          : null}
+      </ConfirmSheet>
     </Card>
   );
 }
