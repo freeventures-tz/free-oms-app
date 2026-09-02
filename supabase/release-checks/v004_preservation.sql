@@ -9,6 +9,22 @@
 -- an ORDERED aggregate, because `string_agg` has no order of its own and an unordered digest would
 -- change between two runs of the same database.
 --
+-- AND CONTENT, NOT ONLY IDENTITY. A count plus a name is still a count: renaming one existing
+-- customer, repointing a reversal at a different payment, or attributing a settlement to somebody
+-- who did not approve it all leave every count exactly where it was. Each of those is a way real
+-- business facts can be lost across a migration WITHOUT a row appearing or disappearing, so every
+-- record this release must preserve is compared by its CONTENTS and by the rows it points at.
+-- `supabase/migration-chain/06`, `07` and `08` are the counterexamples that prove it: each makes
+-- one such change and the harness requires this query's answer to move.
+--
+-- WHAT A DIGEST MUST NEVER LEAVE OUT is the column somebody could quietly rewrite: a customer's
+-- name, a payment's `reverses_id`, an invoice's settlement approver. Adding a column here can only
+-- ever make the gate stricter, and the cost of one that is missing is a silent pass.
+--
+-- EVERY ORDERED AGGREGATE IS ORDERED BY A KEY THAT CANNOT TIE, down to the row's own id where a
+-- child table carries no unique pair. An order key is not digest content: within one run the ids are
+-- stable, and a tie left unbroken would let two runs of the same database disagree.
+--
 -- `coalesce(..., '-')` on every digest, deliberately. `md5(null)` is null, null compares equal to
 -- nothing including itself, and a gate reading one would pass every comparison it was ever given
 -- while proving nothing — the empty-table case is exactly where that happens.
@@ -24,6 +40,8 @@ select
   (select count(*) from public.stock_receipts)                             as receipts,
   (select count(*) from public.stock_transfers)                            as transfers,
   (select count(*) from public.stock_adjustments)                          as adjustments,
+  (select count(*) from public.stock_receipt_lines)                        as receipt_lines,
+  (select count(*) from public.stock_transfer_lines)                       as transfer_lines,
   (select count(*) from public.inventory_ledger)                           as ledger_rows,
   (select count(*) from public.customers)                                  as customers,
   (select count(*) from public.orders)                                     as orders,
@@ -37,6 +55,7 @@ select
   (select count(*) from public.dispatch_lines)                             as dispatch_lines,
   (select count(*) from public.document_sequences)                         as counters,
   (select count(*) from public.approval_requests)                          as approvals,
+  (select count(*) from public.approval_decisions)                         as decisions,
   (select count(*) from public.audit_events)                               as audit_events,
 
   -- Product identity, exactly as the Part C gate reads it.
@@ -51,10 +70,82 @@ select
                                   E'\n' order by pr.product_id, pr.entry_seq)), '-')
      from public.product_prices pr) as price_history,
 
-  -- Identities and the role each person holds.
-  (select coalesce(md5(string_agg(u.user_id::text || '|' || u.role::text,
+  -- Identities and the role each person holds, WITH who granted it: §3.1 gives one live role per
+  -- person and the grant is part of the record, not decoration on it.
+  (select coalesce(md5(string_agg(u.user_id::text || '|' || u.role::text || '|'
+                                  || coalesce(u.assigned_by::text, ''),
                                   E'\n' order by u.user_id)), '-')
      from public.user_roles u) as identities,
+
+  -- The people themselves. `identities` above says who holds which role; this says who they ARE,
+  -- including the first-login gate and the active flag every authorisation check reads.
+  (select coalesce(md5(string_agg(pf.id::text || '|' || pf.full_name || '|' || pf.phone_e164
+                                  || '|' || pf.locale || '|' || pf.is_active::text
+                                  || '|' || pf.must_change_password::text,
+                                  E'\n' order by pf.id)), '-')
+     from public.profiles pf) as people_detail,
+
+  -- Who goods came from (§9). Deactivated rather than deleted, so a rewritten name is the only way
+  -- one can change at all — and a receipt from a year ago names it permanently.
+  (select coalesce(md5(string_agg(s.id::text || '|' || s.name || '|' || s.is_active::text
+                                  || '|' || s.created_by::text,
+                                  E'\n' order by s.id)), '-')
+     from public.suppliers s) as suppliers_detail,
+
+  -- People who move goods but do not use the system (§3.2). Every dispatch names one permanently.
+  (select coalesce(md5(string_agg(k.id::text || '|' || k.storekeeper_code || '|' || k.full_name
+                                  || '|' || coalesce(k.phone, '') || '|' || k.is_active::text
+                                  || '|' || k.start_date::text || '|'
+                                  || coalesce(k.deactivated_at::text, '') || '|'
+                                  || coalesce(k.note, '') || '|' || k.created_by::text,
+                                  E'\n' order by k.id)), '-')
+     from public.storekeepers k) as storekeepers_detail,
+
+  -- WHO AN ORDER IS FOR. The reviewer's counterexample was exactly this column: one existing
+  -- customer renamed, every count identical, and the gate saw nothing.
+  (select coalesce(md5(string_agg(cu.id::text || '|' || cu.name || '|' || cu.is_active::text
+                                  || '|' || cu.is_cash_customer::text || '|'
+                                  || coalesce(cu.created_by::text, ''),
+                                  E'\n' order by cu.id)), '-')
+     from public.customers cu) as customers_detail,
+
+  -- A delivery and the lines on it, each keyed so two runs agree on the order.
+  (select coalesce(md5(string_agg(r.id::text || '|' || r.supplier_id::text || '|'
+                                  || r.location_code || '|'
+                                  || coalesce(r.delivery_note_ref, '') || '|'
+                                  || r.delivery_date::text || '|' || r.entered_by::text || '|'
+                                  || r.entered_role::text,
+                                  E'\n' order by r.id)), '-')
+     from public.stock_receipts r) as receipts_detail,
+
+  (select coalesce(md5(string_agg(rl.receipt_id::text || '|' || rl.product_id::text || '|'
+                                  || rl.expected_quantity::text || '|'
+                                  || rl.received_quantity::text || '|'
+                                  || rl.damaged_quantity::text || '|'
+                                  || coalesce(rl.damage_note, '') || '|'
+                                  || rl.accepted_quantity::text,
+                                  E'\n' order by rl.receipt_id, rl.product_id, rl.id)), '-')
+     from public.stock_receipt_lines rl) as receipt_lines_detail,
+
+  -- An internal move, and what it moved.
+  (select coalesce(md5(string_agg(tr.id::text || '|' || tr.from_location || '|' || tr.to_location
+                                  || '|' || coalesce(tr.note, '') || '|' || tr.entered_by::text
+                                  || '|' || tr.entered_role::text,
+                                  E'\n' order by tr.id)), '-')
+     from public.stock_transfers tr) as transfers_detail,
+
+  (select coalesce(md5(string_agg(tl.transfer_id::text || '|' || tl.product_id::text || '|'
+                                  || tl.quantity::text,
+                                  E'\n' order by tl.transfer_id, tl.product_id, tl.id)), '-')
+     from public.stock_transfer_lines tl) as transfer_lines_detail,
+
+  -- A correction somebody had to justify, with the person who made it (§10).
+  (select coalesce(md5(string_agg(adj.id::text || '|' || adj.product_id::text || '|'
+                                  || adj.location_code || '|' || adj.quantity_delta::text || '|'
+                                  || adj.reason || '|' || adj.entered_by::text || '|'
+                                  || adj.entered_role::text,
+                                  E'\n' order by adj.id)), '-')
+     from public.stock_adjustments adj) as adjustments_detail,
 
   -- Every stock movement ever written, with its cause and its authoriser (AC-82).
   (select coalesce(md5(string_agg(l.entry_seq::text || '|' || l.product_id::text || '|'
@@ -71,17 +162,69 @@ select
                                   E'\n' order by o.order_no)), '-')
      from public.orders o left join public.invoices i on i.order_id = o.id) as sales,
 
+  -- The order itself: who it is for, what it is worth being asked at, and who created it. The
+  -- `sales` digest above pairs an order number with its invoice; this is the record underneath it.
+  (select coalesce(md5(string_agg(o.id::text || '|' || o.order_no || '|' || o.customer_id::text
+                                  || '|' || o.status::text || '|' || o.is_cash_sale::text || '|'
+                                  || o.discount_percent::text || '|'
+                                  || coalesce(o.discount_reason, '') || '|' || o.created_by::text
+                                  || '|' || o.created_role::text || '|'
+                                  || coalesce(o.cancel_reason, ''),
+                                  E'\n' order by o.id)), '-')
+     from public.orders o) as orders_detail,
+
+  -- WHAT IS BEING SOLD, at the price approved when the order was created. A line quietly rewritten
+  -- changes what a customer owes without changing how many lines exist.
+  (select coalesce(md5(string_agg(ol.order_id::text || '|' || ol.product_id::text || '|'
+                                  || ol.quantity::text || '|' || ol.unit_price_tzs::text || '|'
+                                  || ol.line_total_tzs::text,
+                                  E'\n' order by ol.order_id, ol.product_id)), '-')
+     from public.order_lines ol) as order_lines_detail,
+
+  -- Every quotation version ever issued, superseded ones included: §12.1 keeps the old one rather
+  -- than overwriting it, so the history is the record.
+  (select coalesce(md5(string_agg(pf2.order_id::text || '|' || pf2.version::text || '|'
+                                  || pf2.proforma_no || '|' || pf2.subtotal_tzs::text || '|'
+                                  || pf2.discount_tzs::text || '|' || pf2.total_tzs::text || '|'
+                                  || pf2.valid_until::text || '|' || pf2.issued_by::text || '|'
+                                  || (pf2.superseded_at is not null)::text,
+                                  E'\n' order by pf2.order_id, pf2.version)), '-')
+     from public.proformas pf2) as proformas_detail,
+
+  -- THE FINANCIAL RECORD, with its settlement attribution. §12.6 step 7 makes the Cashier's
+  -- confirmation the thing that lets goods be handed over, so who confirmed it and when are part of
+  -- the invoice — and an invoice digest that omitted them would pass a migration that reassigned
+  -- every settlement in the business.
+  (select coalesce(md5(string_agg(inv.id::text || '|' || inv.invoice_no || '|'
+                                  || inv.order_id::text || '|' || inv.customer_id::text || '|'
+                                  || inv.subtotal_tzs::text || '|' || inv.discount_tzs::text || '|'
+                                  || inv.total_tzs::text || '|' || inv.business_date::text || '|'
+                                  || coalesce(inv.cancelled_at::text, '') || '|'
+                                  || coalesce(inv.cancel_reason, '') || '|'
+                                  || coalesce(inv.settlement_approved_by::text, '') || '|'
+                                  || coalesce(inv.settlement_approved_at::text, ''),
+                                  E'\n' order by inv.id)), '-')
+     from public.invoices inv) as invoices_detail,
+
   -- What a customer has claimed and what has been handed over (§8.1).
   (select coalesce(md5(string_agg(a.order_line_id::text || '|' || a.state::text || '|'
                                   || a.quantity::text || '|' || a.released_quantity::text,
                                   E'\n' order by a.order_line_id, a.state)), '-')
      from public.stock_allocations a) as allocations_detail,
 
-  -- Money received, and credit decided.
-  (select coalesce(md5(string_agg(pay.invoice_id::text || '|' || pay.method::text || '|'
-                                  || pay.amount_tzs::text,
-                                  E'\n' order by pay.invoice_id, pay.received_at,
-                                  pay.amount_tzs)), '-')
+  -- MONEY RECEIVED, AND THE ROW EACH REVERSAL UNDOES.
+  --
+  -- `reverses_id` is what makes a negative row a reversal of one specific payment rather than an
+  -- unexplained deduction, and §4.1/AC-21 put a Director's decision behind it. A digest without it
+  -- passes a migration that repointed every reversal at the wrong payment: the count is the same,
+  -- the amounts are the same, and the money now cancels somebody else's till. `entry_seq` orders
+  -- the aggregate outright, because two payments written by one command share a timestamp.
+  (select coalesce(md5(string_agg(pay.id::text || '|' || pay.invoice_id::text || '|'
+                                  || pay.method::text || '|' || pay.amount_tzs::text || '|'
+                                  || coalesce(pay.reverses_id::text, '') || '|'
+                                  || pay.received_by::text || '|' || pay.received_role::text
+                                  || '|' || pay.business_date::text,
+                                  E'\n' order by pay.entry_seq)), '-')
      from public.payments pay) as money,
   -- A credit authorisation and the approval that settled it: §12.5 keeps credit apart from the
   -- six tenders, and its outcome lives in the shared approval record.
@@ -99,6 +242,36 @@ select
                                   || coalesce(d.dispatch_note_no, '') || '|' || d.source_location,
                                   E'\n' order by d.id)), '-')
      from public.dispatches d) as dispatch,
+
+  -- WHAT WAS ON THE NOTE. A dispatch says goods left; its lines say which goods and how many, and
+  -- §14 makes the signed note the document somebody is asked about afterwards.
+  (select coalesce(md5(string_agg(dl.dispatch_id::text || '|' || dl.allocation_id::text || '|'
+                                  || dl.product_id::text || '|' || dl.quantity::text,
+                                  E'\n' order by dl.dispatch_id, dl.allocation_id, dl.id)), '-')
+     from public.dispatch_lines dl) as dispatch_lines_detail,
+
+  -- Who was asked, for how much, and who answered. Credit, discounts and payment reversals all
+  -- settle here, so this is where an approval that was never given would appear.
+  (select coalesce(md5(string_agg(ar.id::text || '|' || ar.entity_type::text || '|'
+                                  || ar.entity_id::text || '|' || ar.approval_type::text || '|'
+                                  || ar.request_seq::text || '|' || ar.requested_by::text || '|'
+                                  || ar.requested_role::text || '|'
+                                  || coalesce(ar.requested_amount::text, '') || '|'
+                                  || coalesce(ar.requested_percent::text, '') || '|'
+                                  || ar.required_role::text || '|' || ar.status::text || '|'
+                                  || coalesce(ar.approved_by::text, '') || '|'
+                                  || coalesce(ar.approved_role::text, ''),
+                                  E'\n' order by ar.id)), '-')
+     from public.approval_requests ar) as approvals_detail,
+
+  (select coalesce(md5(string_agg(ad.id::text || '|' || ad.request_id::text || '|'
+                                  || ad.outcome::text || '|' || ad.decided_by::text || '|'
+                                  || ad.decided_role::text || '|'
+                                  || coalesce(ad.reason_code, '') || '|'
+                                  || coalesce(ad.note, '') || '|'
+                                  || coalesce(ad.supersedes_decision_id::text, ''),
+                                  E'\n' order by ad.id)), '-')
+     from public.approval_decisions ad) as decisions_detail,
 
   -- The daily counters, which must not be reset or renumbered by a migration.
   (select coalesce(md5(string_agg(s.kind || '|' || s.business_date::text || '|'

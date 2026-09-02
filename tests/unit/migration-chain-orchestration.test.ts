@@ -12,6 +12,10 @@ import { runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
  *
  * Every failure here is injected through the command runner the script takes as a parameter. No
  * migration is damaged and no product code is broken to make a red state: the seam is the point.
+ *
+ * The counterexample step is here for the same reason. Whether the SQL really renames a customer
+ * needs a database; whether the harness FAILS when the gate's answer does not move is orchestration,
+ * and it is the branch that would otherwise be exercised only by a gate that was already broken.
  */
 
 type Call = { command: string; args: string[] };
@@ -23,7 +27,9 @@ type Call = { command: string; args: string[] };
  * proof, `"restore"` fails the full reset at the end, and both may be named at once.
  */
 function harness(
-  failOn: Array<"proof" | "restore" | "preservation" | "v005-preservation"> = [],
+  failOn: Array<
+    "proof" | "restore" | "preservation" | "v005-preservation" | "counterexample-unseen"
+  > = [],
 ) {
   const calls: Call[] = [];
   const out: string[] = [];
@@ -62,7 +68,18 @@ function harness(
         (failOn.includes("preservation") && reads === 2) ||
         (failOn.includes("v005-preservation") && reads === 6);
       const products = moved ? "20" : "21";
-      const digest = moved ? "0000000000000000000000000000dead" : empty;
+
+      // Reads 7 onward are the counterexamples, and a working gate answers each of them
+      // DIFFERENTLY — that is the whole claim they make. "counterexample-unseen" stands in for the
+      // gate this release exists to replace: a query that compares counts, sees a record rewritten
+      // in place, and answers exactly what it answered before.
+      const blind = failOn.includes("counterexample-unseen");
+      const digest = moved
+        ? "0000000000000000000000000000dead"
+        : reads > 6 && !blind
+          ? `000000000000000000000000000000${String(reads).padStart(2, "0")}`
+          : empty;
+
       return priced
         ? `${products}|1|${digest}|${empty}|[]|[]`
         : `${products}|0|${digest}|${empty}|[]|[]`;
@@ -112,7 +129,44 @@ describe("the migration-chain command's verdict", () => {
       calls.filter((call) => call.args[0]?.includes("05_assert_migration33_boundary")),
     ).toHaveLength(1);
 
+    // The gate was tested against itself: three changes a bad migration could really make, each
+    // one a rewrite no count can see, and the answer moved for every one of them.
+    expect(out).toContain("one existing customer renamed");
+    expect(out).toContain("a reversal repointed at another payment");
+    expect(out).toContain("a settlement attributed to somebody else");
+    expect(
+      calls.filter((call) => call.args[0]?.includes("counterexample")),
+      "the gate's counterexamples never ran",
+    ).toHaveLength(3);
+
+    // …and they ran AFTER the assertions, on a fixture that is about to be thrown away. Running
+    // them earlier would hand the released-command checks a database somebody had corrupted.
+    const lastAssertion = calls.findIndex((call) => call.args[0]?.includes("04_assert_v005"));
+    const firstCounterexample = calls.findIndex((call) =>
+      call.args[0]?.includes("counterexample"),
+    );
+    expect(lastAssertion).toBeGreaterThan(-1);
+    expect(firstCounterexample).toBeGreaterThan(lastAssertion);
+
     // And the database was put back, on the happy path too.
+    expect(fullResets(calls)).toHaveLength(1);
+  });
+
+  it("fails when the gate cannot see a change no count would show", () => {
+    const { code, out, errors, calls } = harness(["counterexample-unseen"]);
+
+    // The finding this release corrects, as a failing run: the preservation query answered the
+    // same thing after a record was rewritten in place. A harness that shrugged at that would be
+    // reporting PASS for a gate that has never been able to say no.
+    expect(code).toBe(1);
+    expect(out).not.toContain("migration-chain: PASS");
+    expect(errors).toContain("the preservation gate did not notice");
+    expect(errors).toContain("one existing customer renamed");
+    expect(errors).toContain("comparing identities without comparing contents");
+
+    // It stops at the first one rather than running the rest against a database it already
+    // mistrusts — and the restore still happens.
+    expect(calls.filter((call) => call.args[0]?.includes("counterexample"))).toHaveLength(1);
     expect(fullResets(calls)).toHaveLength(1);
   });
 

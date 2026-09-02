@@ -202,7 +202,20 @@ select 'unpaid'::text,
             jsonb_build_array(jsonb_build_object(
               'product_id', migration_chain.product('Tofali 6"'), 'quantity', 3)),
             'chain-order-3'),
-          'created', 'creating the third order') -> 'order' ->> 'id')::uuid;
+          'created', 'creating the third order') -> 'order' ->> 'id')::uuid
+union all
+-- PAID AND THEN REVERSED. §4.1 and AC-21 make a reversal a Director's decision written as a NEW
+-- negative row pointing at the one it undoes, and `payments.reverses_id` is the whole of that
+-- linkage. Without a real reversal in this fixture, the preservation query's reversal column is
+-- never populated and the gate is proved against a case that does not occur.
+select 'reversed'::text,
+       (migration_chain.expect(
+          api.staff_create_order(
+            (select id from migration_chain.customer),
+            jsonb_build_array(jsonb_build_object(
+              'product_id', migration_chain.product('Tofali 6"'), 'quantity', 4)),
+            'chain-order-4'),
+          'created', 'creating the fourth order') -> 'order' ->> 'id')::uuid;
 
 select migration_chain.expect(
   api.staff_confirm_order((select id from migration_chain.orders where label = 'settled'),
@@ -218,6 +231,11 @@ select migration_chain.expect(
   api.staff_confirm_order((select id from migration_chain.orders where label = 'unpaid'),
                           'chain-confirm-3'),
   'confirmed', 'confirming the third order');
+
+select migration_chain.expect(
+  api.staff_confirm_order((select id from migration_chain.orders where label = 'reversed'),
+                          'chain-confirm-4'),
+  'confirmed', 'confirming the fourth order');
 
 create table migration_chain.invoices as
 select o.label, i.id, i.total_tzs
@@ -244,6 +262,29 @@ select migration_chain.expect(
     (select total_tzs / 2 from migration_chain.invoices where label = 'credited'),
     'chain-payment-2'),
   'recorded', 'paying half of the second invoice');
+
+-- Paid in full, and asked back. The request reverses nothing by itself: §4.1 puts a Director
+-- between a Cashier and money leaving the till, and that decision is recorded below.
+select migration_chain.expect(
+  api.staff_record_payment(
+    (select id from migration_chain.invoices where label = 'reversed'),
+    'cash',
+    (select total_tzs from migration_chain.invoices where label = 'reversed'),
+    'chain-payment-3'),
+  'recorded', 'paying the fourth invoice in full');
+
+create table migration_chain.reversed_payment as
+select p.id
+  from public.payments p
+ where p.invoice_id = (select id from migration_chain.invoices where label = 'reversed')
+   and p.reverses_id is null;
+
+select migration_chain.expect(
+  api.staff_request_payment_reversal(
+    (select id from migration_chain.reversed_payment),
+    'the customer paid twice and the second one is being returned',
+    'chain-reversal-request'),
+  'requested', 'asking a Director to reverse a payment');
 
 create table migration_chain.credit as
 select (migration_chain.expect(
@@ -299,6 +340,19 @@ select migration_chain.expect(
   'released', 'confirming the signed release');
 
 -- ---------------------------------------------------------------------------
+-- The Director: money going back out, which is the only decision a Director makes with money
+--
+-- Written as a NEW negative payment carrying `reverses_id`; the original stays exactly as it was
+-- recorded, because what was counted at the till must still read the same afterwards (§4.1, AC-21).
+-- ---------------------------------------------------------------------------
+select migration_chain.acting_as('c0000000-0000-0000-0000-000000000001');
+
+select migration_chain.expect(
+  api.admin_approve_payment_reversal(
+    (select id from migration_chain.reversed_payment), 'chain-reversal-approve'),
+  'reversed', 'the Director approving the reversal');
+
+-- ---------------------------------------------------------------------------
 -- The released surface itself, photographed
 --
 -- Filenames prove which migrations ran; they do not prove that a command still behaves the way it
@@ -351,7 +405,7 @@ begin
   select count(*) into v_ledger      from public.inventory_ledger;
   select count(*) into v_counters    from public.document_sequences;
 
-  if v_orders < 3 or v_invoices < 3 or v_payments < 2 or v_allocations < 3
+  if v_orders < 4 or v_invoices < 4 or v_payments < 4 or v_allocations < 4
      or v_dispatches < 1 or v_ledger < 5 or v_counters < 1 then
     raise exception
       'the v0.0.4 fixture is too thin to prove anything: % orders, % invoices, % payments, '
@@ -362,6 +416,34 @@ begin
   if (select count(*) from public.credit_authorisations) < 1 then
     raise exception 'the v0.0.4 fixture recorded no credit, and credit is one of the things the '
                     'upgrade must preserve';
+  end if;
+
+  -- A REAL REVERSAL, LINKED. The preservation query compares `payments.reverses_id`, and a column
+  -- that is null in every row is a column no comparison has ever exercised.
+  if not exists (
+    select 1 from public.payments p
+     where p.reverses_id is not null and p.amount_tzs < 0
+       and exists (select 1 from public.payments o where o.id = p.reverses_id)
+  ) then
+    raise exception 'the v0.0.4 fixture has no linked payment reversal, so the reversal linkage '
+                    'this release must preserve is never compared';
+  end if;
+
+  -- …decided by a Director through the shared approval record, rather than written by hand.
+  if not exists (
+    select 1 from public.approval_requests r
+     where r.approval_type = 'payment_reversal' and r.status = 'approved'
+       and r.approved_role = 'director'
+  ) then
+    raise exception 'the payment reversal in the fixture was not approved by a Director, so it is '
+                    'not the record the released command produces';
+  end if;
+
+  -- SETTLEMENT ATTRIBUTION. §12.6 step 7 is what lets goods be handed over, and the invoice digest
+  -- compares who confirmed it — which proves nothing on a database where nobody has.
+  if not exists (select 1 from public.invoices i where i.settlement_approved_by is not null) then
+    raise exception 'no invoice in the fixture carries a settlement approver, so the attribution '
+                    'the upgrade must preserve is never compared';
   end if;
 end
 $$;

@@ -36,6 +36,15 @@
  * the same bytes the runbook pastes into the hosted SQL Editor. A harness with its own copy of the
  * query proves its own copy works.
  *
+ * AND THE GATE ITSELF IS TESTED, after step 6 and before the restore, which is what the
+ * counterexample files are for. "Before and after are identical" is only worth something if the
+ * answer can MOVE, and a gate built from counts alone cannot: the PR #28 review renamed one existing
+ * customer between two runs of the v0.0.4 query and got a character-for-character identical result.
+ * So once the upgrade has been proved, each counterexample makes one change a bad migration could
+ * really make — a record rewritten in place, a reversal repointed, a settlement reattributed — and
+ * the answer is REQUIRED to change. A counterexample that slips through fails the run, because a
+ * gate that cannot say no has never said yes either.
+ *
  * STEP 7 IS PART OF THE RESULT, not housekeeping after it. A run that proved the migration and then
  * failed to restore the database leaves a trap for the next suite, so it exits non-zero and prints
  * no PASS. If the proof and the restore both fail, both are reported and neither hides the other.
@@ -70,6 +79,17 @@ const ASSERT_PRICE_SURVIVED = join(SQL_DIR, "02b_assert_price_survived.sql");
 const BUILD_V004 = join(SQL_DIR, "03_build_v004_fixture.sql");
 const ASSERT_V005 = join(SQL_DIR, "04_assert_v005.sql");
 const ASSERT_MIGRATION_33 = join(SQL_DIR, "05_assert_migration33_boundary.sql");
+
+/**
+ * The gate's counterexamples: one same-count rewrite, and two broken links.
+ *
+ * Each one runs LAST, on a database that is reset immediately afterwards, and each asserts for
+ * itself that it changed nothing a count could see — so when the harness requires the answer to
+ * move, the only thing that could have moved it is the comparison of contents.
+ */
+const COUNTEREXAMPLE_CUSTOMER = join(SQL_DIR, "06_counterexample_customer_rename.sql");
+const COUNTEREXAMPLE_REVERSAL = join(SQL_DIR, "07_counterexample_reversal_linkage.sql");
+const COUNTEREXAMPLE_SETTLEMENT = join(SQL_DIR, "08_counterexample_settlement_linkage.sql");
 
 /** The one source of each preservation query. The runbook pastes these same files, unedited. */
 const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservation.sql");
@@ -123,6 +143,11 @@ const PHASES = [
         name: "customers, orders, invoices, money, credit and a signed dispatch",
         setup: [BUILD_V004],
         assertions: [ASSERT_V005],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+        ],
       },
     ],
   },
@@ -279,6 +304,31 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
 
         log("\n--- asserting what the upgrade added, and what it left alone ---");
         for (const file of fixture.assertions) psqlFile(file);
+
+        // THE GATE, TESTED AGAINST ITSELF. Last, because each of these deliberately damages the
+        // fixture, and the database is reset immediately after this loop.
+        //
+        // Compared against the reading IMMEDIATELY BEFORE it rather than against `after`, so each
+        // counterexample is judged on its own change and not on the one before it.
+        let standing = after;
+        for (const counterexample of fixture.counterexamples ?? []) {
+          log(`\n--- counterexample: ${counterexample.name} ---`);
+          psqlFile(counterexample.file);
+
+          const mutated = preservation(phase.query);
+
+          if (mutated === standing) {
+            throw new Error(
+              `the preservation gate did not notice ${counterexample.name}. The file asserts it ` +
+                "changed no count, so the gate is comparing identities without comparing " +
+                "contents — which is the finding this check exists to prevent.\n" +
+                `  answer: ${mutated}`,
+            );
+          }
+
+          log("    the gate saw it");
+          standing = mutated;
+        }
       }
     }
 
