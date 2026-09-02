@@ -840,3 +840,156 @@ test.describe("the feedback contract, under deliberate delay", () => {
     await page.unroute(/\/production/);
   });
 });
+
+// ---------------------------------------------------------------------------
+test.describe("a refusal a Manager can read, and a correction the database accepts", () => {
+  /**
+   * Records a batch moulded four days ago and approves it, so its lot is out of curing and the
+   * inspection controls on it are live. Returns the batch number, which is how every card below is
+   * addressed: the three device projects share one database, and "the first card" is not a lot.
+   */
+  async function readyLot(page: Page): Promise<string> {
+    await page.goto(PRODUCTION_HREF);
+    await page.locator("#openBatchForm").click();
+    await page.locator("#mouldedAt").fill(yardTime(4));
+    await sixInch(page).getByLabel(/^moulded$/i).fill("22");
+    await page.locator("#submitBatch").click();
+    await expect(page.getByText(/nothing has left the yard yet/i)).toBeVisible();
+
+    await page.goto(PRODUCTION_HREF);
+    const card = page.getByRole("article").filter({ hasText: /waiting for approval/i }).first();
+    const batchNo = (await card.locator(".fv-identifier").first().innerText()).trim();
+    await card.getByRole("button", { name: /^approve$/i }).click();
+    await expect(
+      page.getByRole("article", { name: batchNo, exact: true }).getByText(/^approved$/i),
+    ).toBeVisible();
+
+    return batchNo;
+  }
+
+  /**
+   * A refusal the schema produces, which is the one shape the board used to drop.
+   *
+   * `inspectLotAction` and `rejectBatchAction` answer a failed schema with FIELD ERRORS AND NOTHING
+   * ELSE. Both cards rendered `result.error` alone, so submitting an inspection with the accepted
+   * count blank finished in silence: the control stopped working and the screen never said why.
+   * Only a browser proves this end to end — the action, the wire, and what the card does with it.
+   */
+  test("names the field, announces it, and keeps everything already entered", async ({ page }) => {
+    await signInAs(page, "manager");
+    const batchNo = await readyLot(page);
+
+    await page.goto(PRODUCTION_HREF);
+    const lot = page.getByRole("article", { name: `${batchNo} ${BRICK_6}`, exact: true });
+
+    // Everything except the accepted count, which is what the refusal is about.
+    await lot.getByLabel(/^rejected$/i).fill("2");
+    await lot.getByRole("button", { name: /^cracked$/i }).click();
+    await lot.getByLabel(/^accepted$/i).fill("");
+    await lot.getByRole("button", { name: /record the inspection/i }).click();
+
+    // ANNOUNCED, in the yard's language rather than as a key, and reachable by focus.
+    const refusal = lot.locator('[data-testid^="inspect-problems-"]');
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toHaveAttribute("role", "alert");
+    await expect(refusal).toContainText(/enter a whole number/i);
+    await expect(refusal).toBeFocused();
+
+    // ASSOCIATED with the control it is about, so arriving at the field still carries the reason.
+    const accepted = lot.getByLabel(/^accepted$/i);
+    await expect(accepted).toHaveAttribute("aria-invalid", "true");
+    const describedBy = await accepted.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    await expect(page.locator(`#${describedBy}`)).toContainText(/enter a whole number/i);
+
+    // AND NOTHING IS THROWN AWAY (design.md §12.7): the count and the chosen reason are still here.
+    await expect(lot.getByLabel(/^rejected$/i)).toHaveValue("2");
+    await expect(lot.getByRole("button", { name: /^cracked$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // The lot is still in the queue, because nothing was recorded.
+    await page.goto(PRODUCTION_HREF);
+    await expect(
+      page.getByRole("article", { name: `${batchNo} ${BRICK_6}`, exact: true }),
+    ).toBeVisible();
+  });
+
+  /**
+   * The counterexample for the value whose control has gone.
+   *
+   * Both corrections here are ones the DATABASE used to refuse: an explanation for a batch that
+   * turned out to be ordinary (`yield_within_range`), and a reason for rejects that turned out to
+   * be none (`reject_reason_without_rejects`). The screen showed neither field at the moment the
+   * command was sent, so the refusal named something nobody could see. Accepting the batch and the
+   * inspection is the proof — a mocked action could not make this claim.
+   */
+  test("accepts a batch and an inspection after the figures are corrected", async ({ page }) => {
+    await signInAs(page, "manager");
+
+    await test.step("an explanation and a reject reason, both corrected away", async () => {
+      await page.goto(PRODUCTION_HREF);
+      await page.locator("#openBatchForm").click();
+      await page.locator("#mouldedAt").fill(yardTime(4));
+
+      // 18 is below §11.2's approved minimum, so the explanation is asked for and given.
+      await sixInch(page).getByLabel(/^moulded$/i).fill("18");
+      const note = page.locator("#yieldNote");
+      await expect(note).toBeVisible();
+      await note.fill("the mixer stopped");
+
+      // Two rejects at the mould, explained from the four presets.
+      await sixInch(page).getByLabel(/thrown away at the mould/i).fill("2");
+      await sixInch(page).getByRole("button", { name: /^cracked$/i }).click();
+
+      // Recounted: an ordinary batch with nothing thrown away. Both controls disappear.
+      await sixInch(page).getByLabel(/^moulded$/i).fill("22");
+      await sixInch(page).getByLabel(/thrown away at the mould/i).fill("0");
+      await expect(page.locator("#yieldNote")).toHaveCount(0);
+      await expect(sixInch(page).getByRole("button", { name: /^cracked$/i })).toHaveCount(0);
+
+      // ACCEPTED. Before this correction the database refused it twice over, about two fields the
+      // form was no longer showing.
+      await page.locator("#submitBatch").click();
+      await expect(page.getByText(/nothing has left the yard yet/i)).toBeVisible();
+    });
+
+    await test.step("and the inspection, corrected the same way", async () => {
+      await page.goto(PRODUCTION_HREF);
+      const card = page.getByRole("article").filter({ hasText: /waiting for approval/i }).first();
+      const batchNo = (await card.locator(".fv-identifier").first().innerText()).trim();
+      await card.getByRole("button", { name: /^approve$/i }).click();
+      await expect(
+        page.getByRole("article", { name: batchNo, exact: true }).getByText(/^approved$/i),
+      ).toBeVisible();
+
+      await page.goto(PRODUCTION_HREF);
+      const lot = page.getByRole("article", { name: `${batchNo} ${BRICK_6}`, exact: true });
+
+      await lot.getByLabel(/^accepted$/i).fill("18");
+      await lot.getByLabel(/^rejected$/i).fill("4");
+      await lot.getByRole("button", { name: /^cracked$/i }).click();
+
+      // Recounted: every brick is good.
+      await lot.getByLabel(/^accepted$/i).fill("22");
+      await lot.getByLabel(/^rejected$/i).fill("0");
+      await expect(lot.getByRole("button", { name: /^cracked$/i })).toHaveCount(0);
+
+      await lot.getByRole("button", { name: /record the inspection/i }).click();
+
+      // The SERVER-CONFIRMED record, kept on the batch: twenty-two accepted, none rejected, and no
+      // reason attached to a rejection that never happened.
+      await page.goto(PRODUCTION_HREF);
+      const outcome = page
+        .getByRole("article", { name: batchNo, exact: true })
+        .locator('[data-testid^="lot-inspection-"]')
+        .first();
+
+      await expect(outcome).toBeVisible();
+      await expect(outcome).toHaveAttribute("data-accepted", "22");
+      await expect(outcome).toHaveAttribute("data-rejected", "0");
+      await expect(outcome).not.toContainText(/cracked/i);
+    });
+  });
+});

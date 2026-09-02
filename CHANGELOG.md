@@ -67,6 +67,16 @@ account or launches an operation.
   on the card, never added to the sellable one and never left out.
 - **Previous and Next in a paged queue are back to a 44-pixel target on a tablet.** They had
   dropped to 40, below the touch floor the design sets.
+- **A refused rejection or inspection now says what was wrong.** Rejecting a batch with too short a
+  reason, or recording an inspection with the accepted count left blank, used to finish in silence:
+  the control stopped working, nothing was saved, and the screen never explained itself. The reason
+  is now read out, shown against the field it is about, and everything already entered stays where
+  it was.
+- **Correcting a figure no longer sends the answer to a question that has gone.** Entering rejects,
+  choosing Cracked and then recounting to zero used to submit the reason anyway, and the database
+  refused the whole batch or inspection over a control that was no longer on the screen. The same
+  happened to an explanation for output that turned out to be within its range. The choice is kept,
+  so putting the count back restores it; what is sent is what the screen shows.
 
 ### Improved
 

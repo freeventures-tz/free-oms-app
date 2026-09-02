@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   approveBatchAction,
@@ -106,6 +106,112 @@ function outputsFrom(yields: YieldRange[]): DraftOutput[] {
 function whole(value: string): number | null {
   const parsed = Number.parseInt(value.trim(), 10);
   return Number.isFinite(parsed) && String(parsed) === value.trim() ? parsed : null;
+}
+
+/**
+ * The reject count and the reason that belong together in ONE newly captured request (§11.5, AC-45).
+ *
+ * The four preset buttons appear only while there is something to explain, and the CHOICE outlives
+ * them. A Manager who enters two rejects, presses Cracked, then corrects the count to zero is
+ * looking at a form with no reason on it and holding a `cracked` in state; submitting that is
+ * refused with `reject_reason_without_rejects`, which is a refusal about something the screen is
+ * not showing. So what goes on the wire is decided HERE, from the count that is travelling with it.
+ *
+ * A count that is not a number yet is NOT a zero. The reason travels with it and the count is what
+ * gets refused, which is the message naming the field somebody actually has to fix.
+ *
+ * NOTHING IS CLEARED: the choice stays in component state, so correcting the count back to two
+ * sends the request that was always meant, with the button still pressed.
+ */
+function rejectsFor(rejected: string, reason: string): { quantity: string; reason: string } {
+  // Blank is none thrown away rather than a question left unanswered: the field starts at "0" and
+  // clearing it is the ordinary way somebody types over it.
+  const quantity = rejected.trim() === "" ? "0" : rejected;
+  return { quantity, reason: whole(quantity) === 0 ? "" : reason };
+}
+
+/**
+ * Moves focus to a refusal, once there is one on the screen to move it to.
+ *
+ * The effect runs after the commit that renders the announcement, because a region that does not
+ * exist yet cannot be focused. Every refusal is a fresh object off the wire, so a second identical
+ * refusal is a new dependency and still moves focus — which is the case where a person pressed the
+ * control again without changing anything.
+ */
+function useRefusalFocus(fieldErrors: Record<string, string> | undefined) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (fieldErrors) ref.current?.focus();
+  }, [fieldErrors]);
+
+  return ref;
+}
+
+/** Reading order: the fields the form shows first are named first, anything unnamed comes last. */
+function rankOf(order: string[], field: string): number {
+  const at = order.indexOf(field);
+  return at === -1 ? order.length : at;
+}
+
+/**
+ * Every reason a submission was refused, announced once and focused (design.md §12.7 rule 4).
+ *
+ * `rejectBatchAction` and `inspectLotAction` answer a failed validation with FIELD ERRORS AND
+ * NOTHING ELSE. A card rendering `result.error` alone therefore ended the interaction in silence:
+ * the control finished working, nothing changed, and the screen never said why. This is the half
+ * that TELLS somebody; `FieldProblem` below is the half that puts each sentence beside its control.
+ *
+ * `role="alert"` with `tabIndex={-1}` so it interrupts and can be reached: a screen reader hears
+ * that the command was refused and reads every reason once. The per-control copies carry no role,
+ * or the same sentence would interrupt a second time.
+ */
+function RefusedFields({
+  fieldErrors,
+  order,
+  testId,
+}: {
+  fieldErrors: Record<string, string> | undefined;
+  order: string[];
+  testId: string;
+}) {
+  const t = useTranslations();
+  const ref = useRefusalFocus(fieldErrors);
+
+  if (!fieldErrors) return null;
+
+  const problems = Object.entries(fieldErrors).sort(
+    ([a], [b]) => rankOf(order, a) - rankOf(order, b),
+  );
+
+  return (
+    <div
+      ref={ref}
+      role="alert"
+      tabIndex={-1}
+      data-testid={testId}
+      className="rounded-sm border border-danger/40 bg-danger/5 px-4 py-3 outline-none"
+    >
+      <ul className="flex flex-col gap-1 text-sm text-danger">
+        {problems.map(([field, message]) => (
+          <li key={field}>{t(message)}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** One field's own reason, pointed at by `aria-describedby`. Announced by the alert, not by itself. */
+function FieldProblem({ id, message }: { id: string; message: string | undefined }) {
+  const t = useTranslations();
+
+  if (!message) return null;
+
+  return (
+    <Help id={id} className="font-medium text-danger">
+      {t(message)}
+    </Help>
+  );
 }
 
 /**
@@ -369,7 +475,11 @@ function NewBatchForm({
           const data = new FormData();
           data.set("locationCode", location);
           data.set("mouldedAt", mouldedAt);
-          data.set("yieldNote", yieldNote);
+          // §11.2, AC-41: the explanation belongs to output that fell outside its range, and the
+          // field disappears when a correction brings it back in. The typed words stay in state —
+          // correcting the count again restores them — but a request for a normal batch carries
+          // none, because the database refuses one with `yield_within_range` and would be right to.
+          data.set("yieldNote", outsideRange ? yieldNote : "");
           data.set("idempotencyKey", key);
           data.set(
             "inputs",
@@ -390,12 +500,15 @@ function NewBatchForm({
               // made only one of them makes one lot, and sending a zero would create a second.
               outputs
                 .filter((line) => line.moulded.trim() !== "")
-                .map((line) => ({
-                  productId: line.productId,
-                  quantityMoulded: line.moulded,
-                  rejectedQuantity: line.rejected.trim() === "" ? "0" : line.rejected,
-                  rejectReason: line.reason,
-                })),
+                .map((line) => {
+                  const rejects = rejectsFor(line.rejected, line.reason);
+                  return {
+                    productId: line.productId,
+                    quantityMoulded: line.moulded,
+                    rejectedQuantity: rejects.quantity,
+                    rejectReason: rejects.reason,
+                  };
+                }),
             ),
           );
 
@@ -878,13 +991,27 @@ function BatchDecision({ batchId }: { batchId: string }) {
 
   const action = useGuardedAction<"approve" | "reject", ProductionActionState>({
     onSettled: (outcome) => {
+      // NOTHING TYPED IS CLEARED ON A REFUSAL and the panel stays open: the reason is still in
+      // state, and the retry sends the same request with the same key.
       if (outcome.successKey) setKey(crypto.randomUUID());
     },
   });
   const { pending, result } = action;
 
+  // A blank or one-character reason never reaches `rejectProductionBatch`: the schema refuses it and
+  // the action answers with field errors alone. Rendering `result.error` was therefore rendering
+  // nothing at all, on the one refusal a Manager can actually cause here.
+  const reasonError = result.fieldErrors?.reason;
+  const reasonErrorId = `reason-error-${batchId}`;
+
   return (
     <div className="flex flex-col items-stretch gap-2 md:items-end">
+      <RefusedFields
+        fieldErrors={result.fieldErrors}
+        order={["reason", "batchId", "idempotencyKey"]}
+        testId={`reject-problems-${batchId}`}
+      />
+
       {result.error ? (
         <div className="flex flex-col gap-2">
           <FormError>
@@ -919,8 +1046,11 @@ function BatchDecision({ batchId }: { batchId: string }) {
               id={`reason-${batchId}`}
               value={reason}
               disabled={pending}
+              aria-invalid={reasonError ? true : undefined}
+              aria-describedby={reasonError ? reasonErrorId : undefined}
               onChange={(event) => setReason(event.target.value)}
             />
+            <FieldProblem id={reasonErrorId} message={reasonError} />
           </Field>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -1015,10 +1145,20 @@ function CuringLotCard({
 
   const action = useGuardedAction<"inspect", ProductionActionState>({
     onSettled: (outcome) => {
+      // Nothing entered is cleared on a refusal. Accepted, rejected and the chosen reason are all
+      // still here, and the retry sends the same request with the same key.
       if (outcome.successKey) setKey(crypto.randomUUID());
     },
   });
   const { pending, result } = action;
+
+  // A blank accepted count, or one that is not a whole number, is refused by the schema and comes
+  // back as field errors with no `error` beside them. Every one of them names a control on this
+  // card, so every one of them is shown against it.
+  const problems = result.fieldErrors;
+  const acceptedErrorId = `accepted-error-${lot.lotId}`;
+  const rejectedErrorId = `lot-rejected-error-${lot.lotId}`;
+  const reasonErrorId = `lot-reason-error-${lot.lotId}`;
 
   const readyAtMs = Date.parse(lot.readyAt);
   // What the database said, then what the deadline says once this page has a clock. Only ever
@@ -1096,8 +1236,11 @@ function CuringLotCard({
                   inputMode="numeric"
                   value={accepted}
                   disabled={pending || !ready}
+                  aria-invalid={problems?.acceptedQuantity ? true : undefined}
+                  aria-describedby={problems?.acceptedQuantity ? acceptedErrorId : undefined}
                   onChange={(event) => setAccepted(event.target.value)}
                 />
+                <FieldProblem id={acceptedErrorId} message={problems?.acceptedQuantity} />
               </Field>
 
               <Field>
@@ -1109,8 +1252,11 @@ function CuringLotCard({
                   inputMode="numeric"
                   value={rejected}
                   disabled={pending || !ready}
+                  aria-invalid={problems?.rejectedQuantity ? true : undefined}
+                  aria-describedby={problems?.rejectedQuantity ? rejectedErrorId : undefined}
                   onChange={(event) => setRejected(event.target.value)}
                 />
+                <FieldProblem id={rejectedErrorId} message={problems?.rejectedQuantity} />
               </Field>
             </div>
 
@@ -1134,6 +1280,7 @@ function CuringLotCard({
                   className="flex flex-wrap gap-2"
                   role="group"
                   aria-label={t("production.enter.rejectReason")}
+                  aria-describedby={problems?.rejectReason ? reasonErrorId : undefined}
                 >
                   {BRICK_REJECT_REASONS.map((option) => (
                     <Button
@@ -1151,8 +1298,21 @@ function CuringLotCard({
                     </Button>
                   ))}
                 </div>
+                <FieldProblem id={reasonErrorId} message={problems?.rejectReason} />
               </Field>
             ) : null}
+
+            <RefusedFields
+              fieldErrors={problems}
+              order={[
+                "acceptedQuantity",
+                "rejectedQuantity",
+                "rejectReason",
+                "lotId",
+                "idempotencyKey",
+              ]}
+              testId={`inspect-problems-${lot.lotId}`}
+            />
 
             {result.error ? (
               <div className="flex flex-col gap-2">
@@ -1197,11 +1357,17 @@ function CuringLotCard({
                 // decides: this only saves the round trip.
                 disabled={!ready}
                 onClick={() => {
+                  // The reason goes only where there is a reject count to explain. Correcting the
+                  // count to zero hides the buttons, and this is what stops the choice behind them
+                  // being submitted anyway — which the database refuses, about a control that is
+                  // no longer on the screen.
+                  const rejects = rejectsFor(rejected, reason);
+
                   const data = new FormData();
                   data.set("lotId", lot.lotId);
                   data.set("acceptedQuantity", accepted);
-                  data.set("rejectedQuantity", rejected.trim() === "" ? "0" : rejected);
-                  data.set("rejectReason", reason);
+                  data.set("rejectedQuantity", rejects.quantity);
+                  data.set("rejectReason", rejects.reason);
                   data.set("idempotencyKey", key);
                   action.run("inspect", inspectLotAction, data);
                 }}
