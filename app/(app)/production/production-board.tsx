@@ -35,7 +35,7 @@ import type {
 } from "@/lib/production/production";
 import type { Page } from "@/lib/settlement/settlement";
 import { businessDateTimeLocal, formatBusinessStamp } from "@/lib/time/business-date";
-import { BRICK_REJECT_REASONS } from "@/lib/validation/production";
+import { BRICK_REJECT_REASONS, parseQuantity } from "@/lib/validation/production";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
 /**
@@ -103,10 +103,15 @@ function outputsFrom(yields: YieldRange[]): DraftOutput[] {
   }));
 }
 
-function whole(value: string): number | null {
-  const parsed = Number.parseInt(value.trim(), 10);
-  return Number.isFinite(parsed) && String(parsed) === value.trim() ? parsed : null;
-}
+/**
+ * How the screen reads a figure somebody is typing -- THE SAME FUNCTION THE SCHEMA CAPTURES WITH.
+ *
+ * Everything derived below is derived from this: the variance column, the out-of-range chip and the
+ * explanation field it opens, the accounted-for total, and whether the reject reason is asked for.
+ * A second reading here would let the screen describe one request while another one is sent, which
+ * is what `Number.parseInt` with a round-trip guard did to every figure carrying a leading zero.
+ */
+const whole = parseQuantity;
 
 /**
  * The reject count and the reason that belong together in ONE newly captured request (§11.5, AC-45).

@@ -77,6 +77,13 @@ account or launches an operation.
   refused the whole batch or inspection over a control that was no longer on the screen. The same
   happened to an explanation for output that turned out to be within its range. The choice is kept,
   so putting the count back restores it; what is sent is what the screen shows.
+- **A figure typed with a leading zero is the number it looks like.** `018` moulded is eighteen, and
+  `02` thrown away is two. The screen used to treat all of those as nothing typed yet: no difference
+  shown, no explanation asked for when the count was outside its range, and no reject reason offered
+  when one was about to be compulsory -- while the figure itself was recorded exactly as a Manager
+  meant it. A numeric keypad produces leading zeros by accident, and the screen and the record now
+  read them the same way. Anything that is not a whole count is still shown as nothing and still
+  refused.
 
 ### Improved
 

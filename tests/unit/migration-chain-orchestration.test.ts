@@ -28,7 +28,12 @@ type Call = { command: string; args: string[] };
  */
 function harness(
   failOn: Array<
-    "proof" | "restore" | "preservation" | "v005-preservation" | "counterexample-unseen"
+    | "proof"
+    | "restore"
+    | "preservation"
+    | "v005-preservation"
+    | "counterexample-unseen"
+    | "masked-rename"
   > = [],
 ) {
   const calls: Call[] = [];
@@ -57,6 +62,9 @@ function harness(
     // catalogue looks like.
     preservation: () => {
       reads += 1;
+      // Recorded IN ORDER with the psql calls, so a test can assert that the baseline for a
+      // counterexample was read after its permitted writes and before its damage.
+      calls.push({ command: "preservation", args: [] });
       const priced = calls.some((call) => call.args[0]?.includes("01b_write_price"));
       const empty = "d751713988987e9331980363e24189ce";
       // The second read of a fixture is the "after" one. Changing it here stands in for a migration
@@ -69,15 +77,33 @@ function harness(
         (failOn.includes("v005-preservation") && reads === 6);
       const products = moved ? "20" : "21";
 
-      // Reads 7 onward are the counterexamples, and a working gate answers each of them
-      // DIFFERENTLY — that is the whole claim they make. "counterexample-unseen" stands in for the
-      // gate this release exists to replace: a query that compares counts, sees a record rewritten
-      // in place, and answers exactly what it answered before.
+      // From read 7 the answer follows WHICH FILES HAVE RUN rather than how many times it has
+      // been read. The harness reads a fresh baseline immediately before every counterexample, so a
+      // read-counting stub would move the digest between those two reads by itself and every
+      // counterexample would look "seen" no matter what the gate did.
+      const applied = (fragment: string) =>
+        calls.filter((call) => call.args[0]?.includes(fragment)).length;
+
+      // "counterexample-unseen" stands in for the gate this release exists to replace: a query that
+      // compares counts, sees a record rewritten in place, and answers exactly what it answered
+      // before. "masked-rename" is narrower and nastier -- a gate that sees the first three and is
+      // blind to the fourth, whose damage arrives alongside a permitted write that DOES move the
+      // answer. A harness carrying its baseline from before that write passes it.
       const blind = failOn.includes("counterexample-unseen");
+      const masked = failOn.includes("masked-rename");
+
+      const seen = blind
+        ? 0
+        : masked
+          ? applied("counterexample") - applied("10_counterexample")
+          : applied("counterexample");
+
+      const movements = seen + applied("09_compatibility");
+
       const digest = moved
         ? "0000000000000000000000000000dead"
-        : reads > 6 && !blind
-          ? `000000000000000000000000000000${String(reads).padStart(2, "0")}`
+        : reads > 6
+          ? `000000000000000000000000000000${String(movements).padStart(2, "0")}`
           : empty;
 
       return priced
@@ -137,7 +163,7 @@ describe("the migration-chain command's verdict", () => {
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(3);
+    ).toHaveLength(4);
 
     // …and they ran AFTER the assertions, on a fixture that is about to be thrown away. Running
     // them earlier would hand the released-command checks a database somebody had corrupted.
@@ -167,6 +193,63 @@ describe("the migration-chain command's verdict", () => {
     // It stops at the first one rather than running the rest against a database it already
     // mistrusts — and the restore still happens.
     expect(calls.filter((call) => call.args[0]?.includes("counterexample"))).toHaveLength(1);
+    expect(fullResets(calls)).toHaveLength(1);
+  });
+
+  it("reads the gate's answer immediately before each counterexample, not once beforehand", () => {
+    const { code, calls } = harness();
+    expect(code).toBe(0);
+
+    // The order the harness actually ran things in, reduced to the two kinds of step that matter.
+    // Paths are kept whole, because the separator differs by platform and the fragment is enough.
+    const sequence = calls
+      .filter(
+        (call) => call.command === "preservation" || call.args[0]?.includes("migration-chain"),
+      )
+      .map((call) => (call.command === "preservation" ? "read" : call.args[0]!));
+
+    const at = (fragment: string) => sequence.findIndex((step) => step.includes(fragment));
+
+    const damage = at("10_counterexample_masked_rename");
+    const permitted = at("09_compatibility_writes");
+
+    // The permitted writes, THEN the baseline, THEN the damage. A baseline read before the
+    // permitted writes would be moved by them, and the harness would credit the gate with seeing
+    // damage it had not seen.
+    expect(permitted).toBeGreaterThan(-1);
+    expect(damage).toBe(permitted + 2);
+    expect(sequence[permitted + 1]).toBe("read");
+    expect(sequence[damage + 1]).toBe("read");
+
+    // And the same for a counterexample with no permitted writes: a fresh reading sits immediately
+    // before it rather than a value carried down from the phase's own "after".
+    const first = at("06_counterexample_customer_rename");
+    expect(sequence[first - 1]).toBe("read");
+    expect(sequence[first + 1]).toBe("read");
+  });
+
+  it("fails when a permitted write would otherwise cover for an invisible rename", () => {
+    // THE REGRESSION. This gate sees counterexamples 1 to 3 perfectly well and is blind to the
+    // fourth -- whose rename arrives alongside a write the migration is entitled to make. The
+    // permitted write moves the answer on its own, so a harness that carried its baseline from
+    // before it would see the answer move, report "the gate saw it", and pass a gate that cannot
+    // see a customer being renamed.
+    const { code, out, errors, calls } = harness(["masked-rename"]);
+
+    expect(code).toBe(1);
+    expect(out).not.toContain("migration-chain: PASS");
+    expect(errors).toContain("the preservation gate did not notice");
+    expect(errors).toContain("renamed behind a migration's own permitted writes");
+
+    // It got as far as the fourth, which is the point: the first three were genuinely seen and only
+    // the masked one failed. A run that stopped earlier would be testing something else.
+    expect(
+      calls.filter((call) => call.args[0]?.includes("counterexample")),
+    ).toHaveLength(4);
+    expect(calls.some((call) => call.args[0]?.includes("09_compatibility_writes"))).toBe(true);
+
+    // The database is still put back, because a half-damaged fixture left behind is a trap for
+    // whatever runs next.
     expect(fullResets(calls)).toHaveLength(1);
   });
 

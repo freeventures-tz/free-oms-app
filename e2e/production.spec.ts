@@ -748,26 +748,107 @@ test.describe("the feedback contract, under deliberate delay", () => {
   }, testInfo) => {
     await signInAs(page, "manager");
 
-    // The first request through is the prefetch of the static loading boundary; everything after it
-    // is the page's own data. This is the warm case, where the route commits at once and the
-    // skeleton is what stands in until the three queue reads land.
-    let seen = 0;
-    await page.route(/\/production/, async (route) => {
-      seen += 1;
-      if (seen > 1) await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
+    // THE REQUEST IS HELD, NOT DELAYED, and that is the whole difference.
+    //
+    // This test used to count requests and add a fixed delay to every one after the first, on the
+    // reasoning that request one is Next's prefetch of the static loading boundary and request two
+    // is the page's own data. The count is not stable across viewports. `openNavigation` returns
+    // the always-visible `aside` on tablet and desktop, but on mobile it opens the drawer first, so
+    // the link only enters the viewport -- and is only prefetched -- part-way through the test,
+    // after this handler is installed. The delay then landed on a different request than intended,
+    // the route committed with no skeleton at all, and the test failed on a real screen that was
+    // behaving perfectly.
+    //
+    // So the intended request is IDENTIFIED rather than counted, in two parts.
+    //
+    // THE PREFETCH MUST HAPPEN, AND THE TEST MUST KNOW IT DID. A router can only show a loading
+    // boundary it already holds: Next's partial prefetch is what delivers `loading.tsx`, and
+    // without it a click leaves the OLD page on screen until the data arrives, with no skeleton at
+    // all. Prefetches carry `Next-Router-Prefetch` and are let through, and the reload below empties
+    // the client router cache so every prefetch for this page happens under the handler, where the
+    // test can WAIT for it rather than assume it.
+    //
+    // THE NAVIGATION IS THEN HELD, NOT DELAYED. The first request that is not a prefetch is the one
+    // this test is about; it is parked, unanswered, until the assertions have finished with it. The
+    // skeleton is therefore on screen for exactly as long as the assertions take, on every
+    // viewport, instead of for a fixed number of milliseconds.
+    let releaseNavigation: (() => void) | undefined;
+
+    const released = new Promise<void>((resolve) => {
+      releaseNavigation = resolve;
+    });
+
+    let prefetched = false;
+    let holding = false;
+
+    await page.route(/\/production/, async (route, request) => {
+      if ("next-router-prefetch" in request.headers()) {
+        await route.continue();
+        prefetched = true;
+        return;
+      }
+
+      // Anything after the hold is released, including the board's own later reads.
+      if (holding) {
+        await route.continue();
+        return;
+      }
+
+      holding = true;
+      await released;
       await route.continue();
     });
 
+    await page.reload();
+
     const navigation = await openNavigation(page, testInfo);
-    await navigation.getByRole("link", { name: /brick production/i }).click({ noWaitAfter: true });
+    const link = navigation.getByRole("link", { name: /brick production/i });
+    await expect(link).toBeVisible();
+
+    // On a phone the link lives in the drawer and is only prefetched once the drawer opens, which
+    // is why this waits here rather than earlier. This is the step whose timing the old counting
+    // gate got wrong.
+    await expect
+      .poll(() => prefetched, {
+        message: "the loading boundary for /production was never prefetched",
+        timeout: 15_000,
+      })
+      .toBe(true);
+
+    // AND PREFETCHING HAS TO HAVE FINISHED, not merely started. Next issues more than one prefetch
+    // for this link, and clicking after the first one leaves the router still filling its cache:
+    // the navigation then commits with no boundary to show and the skeleton never appears. This is
+    // the one place the test waits on the network rather than on a fact, and it is a settle
+    // condition rather than a guess -- everything asserted below is held open, not timed.
+    await page.waitForLoadState("networkidle");
+
+    await link.click({ noWaitAfter: true });
+
+    // The navigation is now parked in the handler above, so the route CANNOT commit and the
+    // assertions below cannot lose a race they are not running. Waiting on the flag rather than on
+    // a promise gives this a failure somebody can read if the navigation never arrives at all.
+    await expect
+      .poll(() => holding, {
+        message: "the navigation to /production never reached the route handler",
+        timeout: 15_000,
+      })
+      .toBe(true);
 
     const skeleton = page.getByRole("status");
-    await expect(skeleton).toBeVisible({ timeout: 5000 });
+    await expect(skeleton).toBeVisible();
     // Announced in words, not drawn only in grey — §12.7 rule 6.
     await expect(skeleton).toContainText(/working/i);
     // Shaped like the board it stands in for — a header, then queue cards — rather than a centred
     // spinner (§12.7 rule 3). A skeleton of the wrong shape is a second layout shift.
-    expect(await skeleton.locator("[data-slot='skeleton']").count()).toBeGreaterThan(5);
+    //
+    // Polled rather than read once: the request is held open, so the count settles and STAYS, and
+    // a single read taken mid-paint is the one remaining way this could report a partial boundary.
+    // The assertion itself is unchanged.
+    await expect
+      .poll(async () => skeleton.locator("[data-slot='skeleton']").count())
+      .toBeGreaterThan(5);
+
+    releaseNavigation!();
 
     await expect(page.getByRole("heading", { name: /brick production/i })).toBeVisible({
       timeout: 20_000,

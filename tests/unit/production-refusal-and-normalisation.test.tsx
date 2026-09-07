@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import en from "@/messages/en.json";
+import { parseQuantity } from "@/lib/validation/production";
 import type {
   CuringLot,
   ProductionBatch,
@@ -399,5 +400,127 @@ describe("a retry after an uncertain transport failure", () => {
       rejectedQuantity: "2",
       rejectReason: "cracked",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A figure with a leading zero, read the same way by the screen and by the wire
+// ---------------------------------------------------------------------------
+
+/**
+ * `00`, `02` and `018` are what a numeric keypad produces by accident, and the schema has always
+ * captured them as 0, 2 and 18. The board read them with `Number.parseInt` behind a round-trip
+ * guard, which called all three "not a number yet" -- so the screen fell silent about a figure it
+ * was about to send anyway.
+ *
+ * Each test below fails on the old reading, and each failure is a Manager being refused for
+ * something the screen never showed them.
+ */
+describe("a quantity written with a leading zero", () => {
+  it("asks for the explanation an out-of-range figure needs, and sends the figure", async () => {
+    const user = userEvent.setup();
+    enterBatchAction.mockResolvedValue({ successKey: "production.batch.entered" });
+
+    renderBoard();
+
+    await user.click(screen.getByRole("button", { name: /record a batch/i }));
+    // 18 is below the approved 20, so §11.2 requires an explanation. Written `018`, the old screen
+    // saw nothing at all: no out-of-range warning, no explanation field, and 18 on the wire -- the
+    // database then refused the batch for a missing explanation nobody had been asked for.
+    await retype(user, screen.getByLabelText(/^moulded$/i), "018");
+
+    expect(screen.getByText(/outside the expected range/i)).toBeInTheDocument();
+    const note = screen.getByLabelText(/what happened/i);
+    await user.type(note, "the mix was short");
+
+    await user.click(screen.getByRole("button", { name: /save the batch/i }));
+    await waitFor(() => expect(enterBatchAction).toHaveBeenCalledTimes(1));
+
+    const data = enterBatchAction.mock.calls[0]![1] as FormData;
+    expect(data.get("yieldNote")).toBe("the mix was short");
+
+    // The wire carries what was typed, and the schema reads it as the number the screen showed.
+    const line = submittedOutputs()[0]!;
+    expect(line.quantityMoulded).toBe("018");
+    expect(parseQuantity(line.quantityMoulded)).toBe(18);
+  });
+
+  it("offers the reject reason that a non-zero count makes compulsory", async () => {
+    const user = userEvent.setup();
+    enterBatchAction.mockResolvedValue({ successKey: "production.batch.entered" });
+
+    renderBoard();
+
+    await user.click(screen.getByRole("button", { name: /record a batch/i }));
+    await retype(user, screen.getByLabelText(/^moulded$/i), "22");
+    // Two thrown away, written `02`. The old screen read that as zero, hid the four reason buttons,
+    // and sent a count of 2 with no reason -- refused with `reject_reason_required`, naming a
+    // control the Manager had never been shown.
+    await retype(user, screen.getByLabelText(/thrown away at the mould/i), "02");
+
+    const cracked = screen.getByTestId(`moulding-reject-${BRICK}-cracked`);
+    expect(cracked).toBeInTheDocument();
+    await user.click(cracked);
+
+    await user.click(screen.getByRole("button", { name: /save the batch/i }));
+    await waitFor(() => expect(enterBatchAction).toHaveBeenCalledTimes(1));
+
+    const line = submittedOutputs()[0]!;
+    expect(line.rejectedQuantity).toBe("02");
+    expect(parseQuantity(line.rejectedQuantity)).toBe(2);
+    expect(line.rejectReason).toBe("cracked");
+  });
+
+  it("sends no reason for a count of `00`, because `00` is none", async () => {
+    const user = userEvent.setup();
+    inspectLotAction.mockResolvedValue({ successKey: "production.inspection.recorded" });
+
+    renderBoard({ curing: [readyLot()] });
+
+    await retype(user, screen.getByLabelText(/^accepted$/i), "18");
+    await retype(user, screen.getByLabelText(/^rejected$/i), "2");
+    await user.click(screen.getByTestId(`lot-reject-${LOT}-cracked`));
+
+    // Corrected to none, written `00`. The old screen hid the buttons AND kept the choice, so a
+    // reason went with a count of zero and the database refused the whole inspection.
+    await retype(user, screen.getByLabelText(/^accepted$/i), "20");
+    await retype(user, screen.getByLabelText(/^rejected$/i), "00");
+
+    expect(screen.queryByTestId(`lot-reject-${LOT}-cracked`)).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId(`inspect-${LOT}`));
+    await waitFor(() => expect(inspectLotAction).toHaveBeenCalledTimes(1));
+
+    const data = inspectLotAction.mock.calls[0]![1] as FormData;
+    expect(data.get("rejectedQuantity")).toBe("00");
+    expect(parseQuantity(String(data.get("rejectedQuantity")))).toBe(0);
+    expect(data.get("rejectReason")).toBe("");
+  });
+
+  it("counts a leading-zero figure into the accounted-for total the lot is checked against", async () => {
+    const user = userEvent.setup();
+    inspectLotAction.mockResolvedValue({ successKey: "production.inspection.recorded" });
+
+    renderBoard({ curing: [readyLot()] });
+
+    // 20 cured. `018` accepted and 0 rejected accounts for 18, and the screen must say so BEFORE
+    // the database does -- the old reading made the total unknowable and showed nothing.
+    await retype(user, screen.getByLabelText(/^accepted$/i), "018");
+    await retype(user, screen.getByLabelText(/^rejected$/i), "0");
+
+    expect(screen.getByText(/20 cured and you have accounted for 18/i)).toBeInTheDocument();
+  });
+
+  it("still shows nothing for a figure that is not a count at all", async () => {
+    const user = userEvent.setup();
+
+    renderBoard({ curing: [readyLot()] });
+
+    // The alignment must not turn "unreadable" into "zero": there is no total to state, so the
+    // screen states none, and the schema refuses the entry.
+    await retype(user, screen.getByLabelText(/^accepted$/i), "1.5");
+    await retype(user, screen.getByLabelText(/^rejected$/i), "0");
+
+    expect(screen.queryByText(/the two must match/i)).not.toBeInTheDocument();
   });
 });

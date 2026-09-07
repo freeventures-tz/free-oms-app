@@ -91,6 +91,18 @@ const COUNTEREXAMPLE_CUSTOMER = join(SQL_DIR, "06_counterexample_customer_rename
 const COUNTEREXAMPLE_REVERSAL = join(SQL_DIR, "07_counterexample_reversal_linkage.sql");
 const COUNTEREXAMPLE_SETTLEMENT = join(SQL_DIR, "08_counterexample_settlement_linkage.sql");
 
+/**
+ * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
+ *
+ * A migration is allowed to write. It backfills a column, records that it ran, advances a counter,
+ * and every one of those moves the preservation answer legitimately. If the gate's baseline were
+ * read BEFORE them, any answer that moved afterwards would look like the gate working -- including
+ * one that moved only because of the permitted write, while a customer was quietly renamed
+ * alongside it.
+ */
+const COMPATIBILITY_WRITES = join(SQL_DIR, "09_compatibility_writes.sql");
+const COUNTEREXAMPLE_MASKED = join(SQL_DIR, "10_counterexample_masked_rename.sql");
+
 /** The one source of each preservation query. The runbook pastes these same files, unedited. */
 const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservation.sql");
 const V004_PRESERVATION = join("supabase", "release-checks", "v004_preservation.sql");
@@ -147,6 +159,11 @@ const PHASES = [
           { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
           { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
           { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "a customer renamed behind a migration's own permitted writes",
+            compatibilityWrites: COMPATIBILITY_WRITES,
+            file: COUNTEREXAMPLE_MASKED,
+          },
         ],
       },
     ],
@@ -308,11 +325,26 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
         // THE GATE, TESTED AGAINST ITSELF. Last, because each of these deliberately damages the
         // fixture, and the database is reset immediately after this loop.
         //
-        // Compared against the reading IMMEDIATELY BEFORE it rather than against `after`, so each
-        // counterexample is judged on its own change and not on the one before it.
-        let standing = after;
+        // EVERY COUNTEREXAMPLE IS JUDGED AGAINST A READING TAKEN IMMEDIATELY BEFORE IT, never
+        // against one carried from an earlier step. A carried baseline can be moved by something
+        // other than the damage: the counterexample before it, or a legitimate write made in
+        // between. The harness would then report "the gate saw it" while the change it was actually
+        // testing went unnoticed. Read one statement before the damage, and the only thing that can
+        // move the answer is the damage.
+        //
+        // `compatibilityWrites` is the case that makes this concrete: the sort of ordinary,
+        // permitted write a migration really does make. It runs FIRST and the baseline is read
+        // AFTER it, so its legitimate effect is already in the baseline and cannot stand in for
+        // having seen the invisible change that follows it.
         for (const counterexample of fixture.counterexamples ?? []) {
           log(`\n--- counterexample: ${counterexample.name} ---`);
+          if (counterexample.compatibilityWrites) {
+            log("    first, the permitted writes this counterexample hides behind");
+            psqlFile(counterexample.compatibilityWrites);
+          }
+
+          const standing = preservation(phase.query);
+
           psqlFile(counterexample.file);
 
           const mutated = preservation(phase.query);
@@ -327,7 +359,6 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
           }
 
           log("    the gate saw it");
-          standing = mutated;
         }
       }
     }

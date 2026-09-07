@@ -6,6 +6,7 @@ import {
   enterBatchSchema,
   inspectLotSchema,
   mouldedAtField,
+  parseQuantity,
 } from "@/lib/validation/production";
 
 const CEMENT = "11111111-1111-4111-8111-111111111111";
@@ -96,6 +97,66 @@ describe("the shape of a batch", () => {
     );
     expect(parsed.inputs[0]).not.toHaveProperty("varianceQuantity");
     expect(parsed.inputs[0]).not.toHaveProperty("standardQuantity");
+  });
+});
+
+/**
+ * ONE READING OF A TYPED FIGURE, shared with the screen.
+ *
+ * The board derives a variance, an out-of-range warning, an accounted-for total and whether a
+ * reject reason is even offered, all from characters somebody is still typing. If it reads them
+ * differently from the schema that captures them, the screen describes a request that is not the
+ * one being sent -- which is exactly what a leading zero used to do.
+ */
+describe("how a typed quantity is read", () => {
+  it("reads a leading zero as the number somebody meant", () => {
+    // A numeric keypad produces these by accident and nobody means anything else by them. The
+    // board's old `Number.parseInt` round-trip guard called all three "not a number yet" while the
+    // schema captured 0, 2 and 18.
+    expect(parseQuantity("00")).toBe(0);
+    expect(parseQuantity("02")).toBe(2);
+    expect(parseQuantity("018")).toBe(18);
+  });
+
+  it("reads a count written with separators the way it was written", () => {
+    expect(parseQuantity("1,000")).toBe(1000);
+    expect(parseQuantity(" 42 ")).toBe(42);
+  });
+
+  it("READS NOTHING AT ALL from input that is not a whole count", () => {
+    // Unchanged, and the point of the alignment: a screen that cannot read a figure must show
+    // nothing rather than a guess, and the schema must still refuse it.
+    for (const value of ["", "   ", "abc", "1.5", "-1", "+1", "1e3", "12abc", "0x10", "٤٢"]) {
+      expect(parseQuantity(value), value).toBeNull();
+    }
+  });
+
+  it("is the reading the schema captures with", () => {
+    const parsed = enterBatchSchema.parse(
+      batch({ inputs: [{ productId: SAND, actualQuantity: "018" }] }),
+    );
+    expect(parsed.inputs[0]!.actualQuantity).toBe(18);
+    expect(parsed.inputs[0]!.actualQuantity).toBe(parseQuantity("018"));
+  });
+
+  it("still refuses what it always refused, with the message that names the field", () => {
+    for (const value of ["", "abc", "1.5", "-1"]) {
+      const result = enterBatchSchema.safeParse(
+        batch({ inputs: [{ productId: SAND, actualQuantity: value }] }),
+      );
+      expect(result.success, value).toBe(false);
+      expect(result.error?.issues[0]?.message).toBe("productionErrors.quantity.invalid");
+    }
+  });
+
+  it("still calls an impossible figure too large rather than unreadable", () => {
+    // `99999999999999999999` reads as a number and is refused for its SIZE, which is a different
+    // message from "that is not a count". Sharing the reading must not blur the two.
+    const result = enterBatchSchema.safeParse(
+      batch({ inputs: [{ productId: SAND, actualQuantity: "99999999999999999999" }] }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toBe("productionErrors.quantity.tooLarge");
   });
 });
 

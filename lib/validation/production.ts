@@ -25,6 +25,40 @@ export const MAX_INPUT_QUANTITY = 10_000;
 export const MAX_MOULDED_QUANTITY = 100_000;
 
 /**
+ * THE ONE READING OF A TYPED QUANTITY. Exported because the screen must read it the same way.
+ *
+ * The form computes a variance, an out-of-range warning, an "everything must be accounted for"
+ * total, and whether a reject reason is even asked for -- all from characters somebody is still
+ * typing. If the screen reads those characters differently from the schema that captures them, the
+ * screen is describing a request that is not the one being sent.
+ *
+ * `Number.parseInt` with a round-trip guard, which is what the board used to do, is a DIFFERENT
+ * reading: `00`, `02` and `018` are all rejected by it as "not a number yet" and all accepted here
+ * as 0, 2 and 18. A Manager typing `018` bricks moulded therefore saw no variance, was never asked
+ * for the explanation an out-of-range figure needs, and had 18 captured anyway; one typing `00`
+ * rejects had the reason buttons disappear while the reason was still sent, and was refused with
+ * `reject_reason_without_rejects` -- a refusal about something the screen was not showing.
+ *
+ * Leading zeros are a whole number written with leading zeros. A numeric keypad produces them by
+ * accident and nobody means anything else by them.
+ *
+ * Returns `null` for anything that is not a whole count -- empty, signed, fractional, exponential,
+ * or any non-digit -- so a screen that cannot read a figure shows nothing rather than a guess, and
+ * the schema refuses it. BOUNDS ARE NOT APPLIED HERE: what a figure MEANS is shared, what is
+ * ALLOWED belongs to the schema and, finally, to the database.
+ */
+export function parseQuantity(value: string): number | null {
+  // Spaces and thousands separators are how people write four-figure counts, not part of the number.
+  const trimmed = value.trim().replace(/[\s ,]/g, "");
+
+  if (trimmed.length === 0 || !/^\d+$/.test(trimmed)) return null;
+
+  const parsed = Number(trimmed);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
  * A counting-unit quantity as typed.
  *
  * Whole numbers only. §11.1 consumes bags and buckets, and AC-120 is explicit that what one of them
@@ -33,14 +67,12 @@ export const MAX_MOULDED_QUANTITY = 100_000;
  */
 function quantityField(options: { min: number; max: number }) {
   return z.string().transform((value, ctx) => {
-    const trimmed = value.trim().replace(/[\s ,]/g, "");
+    const parsed = parseQuantity(value);
 
-    if (trimmed.length === 0 || !/^\d+$/.test(trimmed)) {
+    if (parsed === null) {
       ctx.addIssue({ code: "custom", message: "productionErrors.quantity.invalid" });
       return z.NEVER;
     }
-
-    const parsed = Number(trimmed);
 
     if (!Number.isSafeInteger(parsed) || parsed > options.max) {
       ctx.addIssue({ code: "custom", message: "productionErrors.quantity.tooLarge" });
