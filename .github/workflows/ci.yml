@@ -44,20 +44,33 @@ jobs:
         run: supabase start
       - name: Migrations apply from a clean database
         run: supabase db reset
-      - name: Migration chain preserves a real database, twice over
-        # Independent of each migration's own snapshot checks, and two separate proofs.
+      - name: Migration chain preserves a real database, three times over
+        # Independent of each migration's own snapshot checks, and three separate proofs.
+        #
+        # FIRST, and before any database work: the 34 released migrations are re-hashed against
+        # the manifest in supabase/release-checks. A released migration is history the hosted
+        # database has already applied, so editing one is refused here rather than discovered
+        # later; a correction is always a NEW forward migration.
         #
         # PART C resets to migration 21 twice: once with no prices, which is the database
         # production actually is, and once with a real price row written through the real command.
         #
         # V0.0.5 resets to migration 32 — the last released one — and builds customers, orders,
         # invoices, money, credit and a signed dispatch through the released commands before
-        # applying 33 and 34 on top.
+        # applying 33 and 34 on top. It applies THOSE TWO ONLY, with anything later held back,
+        # because its own assertion is that nothing from a later release came with it.
+        #
+        # V0.0.6 resets to migration 34 — the v0.0.5 boundary now in production — builds the same
+        # ground PLUS an approved brick batch and an inspected curing lot, and applies 35 and 36
+        # on top. That phase is where the sixteen re-issued commands, the api surface a deployed
+        # browser still calls, and the absence of any imprest, report or Cron object are checked.
         #
         # Each time it runs the release gate's own preservation query before and after applying
-        # the ordinary way, and requires the two answers to be identical. It then resets to
-        # migration 33 alone and checks the state a hosted apply passes through. Restores the full
-        # database after, and fails the job if it cannot.
+        # the ordinary way, and requires the two answers to be identical. Each phase then damages
+        # its own fixture in ways no count can see and requires the gate to NOTICE — a gate that
+        # cannot say no has never said yes. It then resets to migration 33 alone and checks the
+        # state a hosted apply passes through. Restores the full database after, and fails the
+        # job if it cannot.
         run: npm run test:migration-chain
       - name: pgTAP
         run: supabase test db

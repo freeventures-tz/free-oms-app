@@ -306,7 +306,11 @@ describe("internal transfers", () => {
     });
 
     expect(data?.ok).toBe(false);
-    expect(data.reason).toBe("insufficient_stock");
+    // The LOCATION rule, named as itself since issue #7. A transfer takes nothing out of the
+    // business, so it can never consume a customer's promise — the place is the only question it
+    // has to answer, and the refusal says which question it failed.
+    expect(data.reason).toBe("insufficient_stock_at_location");
+    expect(data.location).toBe("yard");
     // The numbers are what make the refusal actionable rather than merely negative.
     expect(Number(data.available)).toBe(8);
     expect(Number(data.requested)).toBe(500);

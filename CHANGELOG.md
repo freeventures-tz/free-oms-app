@@ -2,6 +2,48 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.0.6] — UNRELEASED
+
+**Stock that has been sold stays sold.** Making bricks and writing stock off both used to look at
+one thing: how much was standing in that place. Goods a customer had already paid for are standing
+there too, so a batch could grind up cement that was sold, and the delivery that followed found an
+empty yard. From this release every command that takes stock out of the business asks the same
+question the sales screens have always asked — how much is there that nobody has been promised.
+
+**Not yet released, and not yet in production.** The production, sales and stock workflows remain
+closed to day-to-day operation until this release has passed production verification. Nothing here
+activates an account or launches an operation.
+
+### Fixed
+
+- **A brick batch cannot consume material a customer has been promised.** A hundred bags in the
+  yard with eighty of them sold is twenty bags a batch may use, and a batch asking for fifty is
+  refused — with all four figures on the screen, in English and Swahili: what can be used, what is
+  promised to customers, what is physically there, and what was asked for. A refusal that said
+  only "not enough" while the Manager was looking at a full yard read as the system being wrong.
+- **A downward stock correction is refused on the same rule.** Writing off goods somebody has paid
+  for is the same loss to that customer as grinding them up. An upward correction takes nothing
+  out of the business and is refused by neither rule.
+- **The place is still checked, separately, and says so.** "The business does not own enough that
+  is not already promised" and "this place does not hold it" are different problems needing
+  opposite actions — buy more, or move what you have — so they are now two refusals with two
+  sentences instead of one message covering both.
+- **Moving stock between our own places is unaffected.** A transfer from the store to the yard
+  changes where goods are, not whether the business still owns them, so promised goods may still
+  be moved. Only the source location has to hold them.
+- **A reservation and a batch approval can no longer both take the last of the stock.** They were
+  queueing on two different keys for one quantity, so each could read the same hundred bags and
+  proceed. They now serialise against one another.
+- **Availability cannot go below zero even if a command forgets to ask.** A deferred check at the
+  end of every transaction refuses it outright — a backstop for a command written next year, not a
+  replacement for the queueing above.
+
+### Changed
+
+- **A refused stock command is now recorded.** Who tried, in which role, what they asked for, what
+  the answer was and when. A refused attempt to consume eighty bags somebody had already paid for
+  previously left no trace at all. All sixteen inventory and production commands record one.
+
 ## [0.0.5] — 2026-09-02
 
 **Making bricks.** This release adds the mixer batch, the materials it actually consumed, the

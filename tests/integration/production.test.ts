@@ -107,8 +107,10 @@ async function stockUp(productId: string, quantity: number, location = LOCATION)
     p_idempotency_key: randomUUID(),
   });
 
-  // `already_recorded` is the §3 rule holding, not a failure of this fixture.
-  if (!data?.ok) expect(String(data?.reason)).toBe("already_recorded");
+  // `opening_stock_exists` is the §3 rule holding — once per product and location — not a failure
+  // of this fixture. It fires whenever another file in the run reached this product first, so the
+  // BALANCE is what the tests below measure, never this call's outcome.
+  if (!data?.ok) expect(String(data?.reason)).toBe("opening_stock_exists");
 }
 
 async function balance(
@@ -165,7 +167,17 @@ async function approve(who: Fixture, batchId: string, key = randomUUID()) {
     p_batch_id: batchId,
     p_idempotency_key: key,
   });
-  return data as { ok: boolean; reason: string; available?: number; requested?: number };
+  // `physical`, `promised` and `location` arrived with issue #7: a stock refusal now says which of
+  // the two rules refused, and carries the figures that explain it.
+  return data as {
+    ok: boolean;
+    reason: string;
+    available?: number;
+    requested?: number;
+    physical?: number;
+    promised?: number;
+    location?: string;
+  };
 }
 
 async function lotOf(batchId: string, productId: string): Promise<string> {
@@ -770,7 +782,17 @@ describe("two commands arriving together", () => {
 
     // Both wanted more than half of what is there, so exactly one of them can have it.
     expect(results.filter((result) => result.reason === "approved")).toHaveLength(1);
-    expect(results.filter((result) => result.reason === "insufficient_stock")).toHaveLength(1);
+
+    // BY THE LOCATION RULE, since issue #7. The business owns plenty of sand — most of it is at the
+    // other location this file works in — so the §8.1 question passes and it is the PLACE that
+    // cannot supply the second batch. That is the refusal this test has always been about, now
+    // saying so in its name.
+    const refused = results.filter(
+      (result) => result.reason === "insufficient_stock_at_location",
+    );
+    expect(refused).toHaveLength(1);
+    expect(refused[0].location).toBe(OTHER_LOCATION);
+
     expect(await balance(sandId, "available", OTHER_LOCATION)).toBeGreaterThanOrEqual(0);
   });
 
@@ -855,7 +877,24 @@ describe("two commands arriving together", () => {
 
     const refused = await approve(manager, entered.batch!.id);
     expect(refused.reason).toBe("insufficient_stock");
-    expect(refused.available).toBe(sandBefore);
+
+    // THE §8.1 FIGURE, not the location's. Nine thousand is more sand than the business owns
+    // anywhere, so the business-wide rule is the one that fires — and since issue #7 the refusal
+    // quotes what the BUSINESS can still use, together with what is physically held and what is
+    // already promised, because a Manager standing in a full yard needs all three to make sense
+    // of a no.
+    const { data: availability } = await director.read
+      .from("product_availability")
+      .select("physical_quantity, reserved_quantity, committed_quantity, available_quantity")
+      .eq("product_id", sandId)
+      .single();
+    const sand = availability as Record<string, number>;
+
+    expect(refused.available).toBe(Number(sand.available_quantity));
+    expect(refused.physical).toBe(Number(sand.physical_quantity));
+    expect(refused.promised).toBe(
+      Number(sand.reserved_quantity) + Number(sand.committed_quantity),
+    );
     expect(refused.requested).toBe(9000);
 
     // Atomic: the cement it could have taken is untouched, and nothing entered curing.

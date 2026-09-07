@@ -74,6 +74,7 @@ const KNOWN_ERROR_KEYS = new Set([
   "no_adjustment",
   "same_location",
   "insufficient_stock",
+  "insufficient_stock_at_location",
   // Decisions
   "no_approval_request",
   "already_settled",
@@ -82,6 +83,36 @@ const KNOWN_ERROR_KEYS = new Set([
 
 function errorKey(reason: string): string {
   return KNOWN_ERROR_KEYS.has(reason) ? `inventoryErrors.${reason}` : "inventoryErrors.generic";
+}
+
+/**
+ * Refusals whose numbers get a sentence of their own, and the key that writes it.
+ *
+ * Two refusals, two sentences, because they are two different problems: "the business does not own
+ * enough that is not already promised" and "this place does not hold it". A screen that rendered
+ * one message for both would tell a Manager to buy cement when the cement is in the store.
+ *
+ * Returned as a key rather than assembled in the component, so the component never has to know
+ * which refusals carry numbers — and a refusal with no detail key renders as a plain sentence
+ * rather than as a message with `{available}` showing through it.
+ */
+const DETAILED_REFUSALS = new Set(["insufficient_stock", "insufficient_stock_at_location"]);
+
+function detailKey(reason: string): string | undefined {
+  return DETAILED_REFUSALS.has(reason) ? `inventoryErrors.${reason}_detail` : undefined;
+}
+
+/** Whatever the refusal carried, as message placeholders. Absent keys stay absent. */
+function valuesFrom(
+  context: Record<string, unknown> | undefined,
+): Record<string, string | number> | undefined {
+  if (!context) return undefined;
+
+  const values: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(context)) {
+    values[key] = typeof value === "number" ? value : String(value);
+  }
+  return Object.keys(values).length > 0 ? values : undefined;
 }
 
 export type InventoryActionState = {
@@ -93,6 +124,8 @@ export type InventoryActionState = {
    * with them it says "there are 12 and you asked for 30", which is a sentence somebody can act on.
    */
   errorValues?: Record<string, string | number>;
+  /** The message key for those numbers, chosen by which rule refused. See `detailKey`. */
+  errorDetail?: string;
   /**
    * The business date AT THE MOMENT THE COMMAND SUCCEEDED, for a form that clears itself.
    *
@@ -349,15 +382,11 @@ export async function approveTransferAction(
   });
 
   if (!result.ok) {
-    // The one refusal that needs numbers to be useful. §7.15: the limit is shown, not merely hit.
+    // The refusals that need numbers to be useful. §7.15: the limit is shown, not merely hit.
     return {
       error: errorKey(result.reason),
-      errorValues: result.context
-        ? {
-            available: Number(result.context.available),
-            requested: Number(result.context.requested),
-          }
-        : undefined,
+      errorDetail: detailKey(result.reason),
+      errorValues: valuesFrom(result.context),
     };
   }
 
@@ -439,12 +468,8 @@ export async function approveAdjustmentAction(
   if (!result.ok) {
     return {
       error: errorKey(result.reason),
-      errorValues: result.context
-        ? {
-            available: Number(result.context.available),
-            requested: Number(result.context.requested),
-          }
-        : undefined,
+      errorDetail: detailKey(result.reason),
+      errorValues: valuesFrom(result.context),
     };
   }
 

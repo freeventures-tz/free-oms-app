@@ -147,9 +147,9 @@ export function DecisionControls({
               which is a worse answer than a plain sentence. */}
           <FormError>
             {t(result.error)}
-            {result.errorValues ? (
+            {result.errorDetail && result.errorValues ? (
               <span className="fv-numeric mt-1 block font-normal">
-                {t("inventoryErrors.insufficient_stock_detail", result.errorValues)}
+                {t(result.errorDetail, result.errorValues)}
               </span>
             ) : null}
           </FormError>

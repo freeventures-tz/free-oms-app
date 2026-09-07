@@ -58,6 +58,7 @@ const KNOWN_ERROR_KEYS = new Set([
   "already_settled",
   "reason_required",
   "insufficient_stock",
+  "insufficient_stock_at_location",
   // Inspection
   "no_lot",
   "batch_not_approved",
@@ -70,6 +71,21 @@ function errorKey(reason: string): string {
   return KNOWN_ERROR_KEYS.has(reason) ? `productionErrors.${reason}` : "productionErrors.generic";
 }
 
+/**
+ * Refusals whose numbers get a sentence of their own, and the key that writes it.
+ *
+ * A batch can be refused for two different reasons that look identical from the outside. The yard
+ * holds a hundred bags and the batch wants fifty, and it is still refused, because eighty of them
+ * are sold. That is `insufficient_stock`, and its sentence has to mention the promise or it reads
+ * as a bug. `insufficient_stock_at_location` is the other one: the business has the cement, this
+ * place does not.
+ */
+const DETAILED_REFUSALS = new Set(["insufficient_stock", "insufficient_stock_at_location"]);
+
+function detailKey(reason: string): string | undefined {
+  return DETAILED_REFUSALS.has(reason) ? `productionErrors.${reason}_detail` : undefined;
+}
+
 export type ProductionActionState = {
   error?: string;
   fieldErrors?: Record<string, string>;
@@ -80,6 +96,8 @@ export type ProductionActionState = {
    * them it says when.
    */
   errorValues?: Record<string, string | number>;
+  /** The message key for those numbers, chosen by which rule refused. See `detailKey`. */
+  errorDetail?: string;
 };
 
 /**
@@ -153,7 +171,11 @@ export async function enterBatchAction(
 
   const result = await enterProductionBatch(parsed.data);
   if (!result.ok) {
-    return { error: errorKey(result.reason), errorValues: valuesFrom(result.context) };
+    return {
+      error: errorKey(result.reason),
+      errorDetail: detailKey(result.reason),
+      errorValues: valuesFrom(result.context),
+    };
   }
 
   revalidateProductionOnly();
@@ -178,7 +200,11 @@ export async function approveBatchAction(
 
   const result = await approveProductionBatch(parsed.data);
   if (!result.ok) {
-    return { error: errorKey(result.reason), errorValues: valuesFrom(result.context) };
+    return {
+      error: errorKey(result.reason),
+      errorDetail: detailKey(result.reason),
+      errorValues: valuesFrom(result.context),
+    };
   }
 
   revalidateProductionAndStock();
@@ -201,7 +227,11 @@ export async function rejectBatchAction(
 
   const result = await rejectProductionBatch(parsed.data);
   if (!result.ok) {
-    return { error: errorKey(result.reason), errorValues: valuesFrom(result.context) };
+    return {
+      error: errorKey(result.reason),
+      errorDetail: detailKey(result.reason),
+      errorValues: valuesFrom(result.context),
+    };
   }
 
   revalidateProductionOnly();
@@ -229,7 +259,11 @@ export async function inspectLotAction(
 
   const result = await inspectCuringLot(parsed.data);
   if (!result.ok) {
-    return { error: errorKey(result.reason), errorValues: valuesFrom(result.context) };
+    return {
+      error: errorKey(result.reason),
+      errorDetail: detailKey(result.reason),
+      errorValues: valuesFrom(result.context),
+    };
   }
 
   revalidateProductionAndStock();

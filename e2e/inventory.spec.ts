@@ -453,11 +453,14 @@ test.describe.serial("moving stock between locations", () => {
     // Scoped to the detail line rather than searched for loosely in the card: the requested
     // quantity also appears on the transfer's own line, and matching either would let this pass
     // while the figures the refusal carries were missing.
-    await expect(card.getByText(/not enough stock/i)).toBeVisible();
-    await expect(card.getByText(/in stock,.*asked for/i)).toContainText(
-      new RegExp(`${atYard}\\s+in stock`),
+    // Since issue #7 the refusal names the rule that fired. A transfer takes nothing out of the
+    // business — it moves goods we still own — so it can never consume a customer's promise, and
+    // the LOCATION is the only question it has to answer.
+    await expect(card.getByText(/not enough stock at that place/i)).toBeVisible();
+    await expect(card.getByText(/there,.*asked for/i)).toContainText(
+      new RegExp(`${atYard}\\s+there`),
     );
-    await expect(card.getByText(/in stock,.*asked for/i)).toContainText(
+    await expect(card.getByText(/there,.*asked for/i)).toContainText(
       new RegExp(`${atYard + 500}\\s+asked for`),
     );
 

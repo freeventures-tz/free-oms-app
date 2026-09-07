@@ -71,3 +71,7 @@ next-env.d.ts
 
 # Integration-test Director fixture, including its password. Generated per run.
 /tests/.director.json
+
+# Where the migration-chain harness parks later migrations while it measures one release.
+# Created and removed inside the run; tracked here so a killed run cannot leave a surprise.
+/supabase/.migration-chain-held/

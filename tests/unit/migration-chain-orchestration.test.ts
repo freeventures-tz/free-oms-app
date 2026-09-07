@@ -155,15 +155,19 @@ describe("the migration-chain command's verdict", () => {
       calls.filter((call) => call.args[0]?.includes("05_assert_migration33_boundary")),
     ).toHaveLength(1);
 
-    // The gate was tested against itself: three changes a bad migration could really make, each
-    // one a rewrite no count can see, and the answer moved for every one of them.
+    // The gate was tested against itself: changes a bad migration could really make, each one a
+    // rewrite no count can see, and the answer moved for every one of them.
     expect(out).toContain("one existing customer renamed");
     expect(out).toContain("a reversal repointed at another payment");
     expect(out).toContain("a settlement attributed to somebody else");
+    expect(out).toContain("what a batch consumed and yielded, rewritten in place");
+    // EIGHT, not four: the v0.0.6 phase re-runs the three released ones against a populated
+    // v0.0.5 database and adds production to them. An exact count, so a phase that silently
+    // stopped running its counterexamples is a failure rather than a quieter pass.
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(4);
+    ).toHaveLength(8);
 
     // …and they ran AFTER the assertions, on a fixture that is about to be thrown away. Running
     // them earlier would hand the released-command checks a database somebody had corrupted.
@@ -243,6 +247,8 @@ describe("the migration-chain command's verdict", () => {
 
     // It got as far as the fourth, which is the point: the first three were genuinely seen and only
     // the masked one failed. A run that stopped earlier would be testing something else.
+    // Four, not eight: the failure is in the FIRST phase's fourth counterexample, so the run
+    // stops there and the v0.0.6 phase never starts.
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
     ).toHaveLength(4);
