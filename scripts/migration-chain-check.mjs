@@ -36,6 +36,15 @@
  * the same bytes the runbook pastes into the hosted SQL Editor. A harness with its own copy of the
  * query proves its own copy works.
  *
+ * AND THE GATE ITSELF IS TESTED, after step 6 and before the restore, which is what the
+ * counterexample files are for. "Before and after are identical" is only worth something if the
+ * answer can MOVE, and a gate built from counts alone cannot: the PR #28 review renamed one existing
+ * customer between two runs of the v0.0.4 query and got a character-for-character identical result.
+ * So once the upgrade has been proved, each counterexample makes one change a bad migration could
+ * really make — a record rewritten in place, a reversal repointed, a settlement reattributed — and
+ * the answer is REQUIRED to change. A counterexample that slips through fails the run, because a
+ * gate that cannot say no has never said yes either.
+ *
  * STEP 7 IS PART OF THE RESULT, not housekeeping after it. A run that proved the migration and then
  * failed to restore the database leaves a trap for the next suite, so it exits non-zero and prints
  * no PASS. If the proof and the restore both fail, both are reported and neither hides the other.
@@ -53,6 +62,12 @@ import { fileURLToPath } from "node:url";
 /** The last migration BEFORE Part C. Everything up to and including this is Part B's database. */
 const PART_B_VERSION = "20260814000300";
 
+/** The last RELEASED migration: v0.0.4, and exactly the shape production is in before v0.0.5. */
+const V004_VERSION = "20260822001000";
+
+/** Migration 33 alone — the state a hosted apply passes through, and can sit in for a while. */
+const MIGRATION_33_VERSION = "20260822001100";
+
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -61,28 +76,97 @@ const CAPTURE_BEFORE = join(SQL_DIR, "01_capture_before.sql");
 const WRITE_PRICE = join(SQL_DIR, "01b_write_price.sql");
 const ASSERT_AFTER = join(SQL_DIR, "02_assert_after.sql");
 const ASSERT_PRICE_SURVIVED = join(SQL_DIR, "02b_assert_price_survived.sql");
-
-/** The one source of the preservation query. The runbook pastes this same file, unedited. */
-const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservation.sql");
+const BUILD_V004 = join(SQL_DIR, "03_build_v004_fixture.sql");
+const ASSERT_V005 = join(SQL_DIR, "04_assert_v005.sql");
+const ASSERT_MIGRATION_33 = join(SQL_DIR, "05_assert_migration33_boundary.sql");
 
 /**
- * The two databases the release gate has to work against.
+ * The gate's counterexamples: one same-count rewrite, and two broken links.
  *
- * `prices` is the number the query must report for that fixture, so a fixture that quietly acquired
- * a price row fails here rather than passing a comparison it was never meant to make.
+ * Each one runs LAST, on a database that is reset immediately afterwards, and each asserts for
+ * itself that it changed nothing a count could see — so when the harness requires the answer to
+ * move, the only thing that could have moved it is the comparison of contents.
  */
-const FIXTURES = [
+const COUNTEREXAMPLE_CUSTOMER = join(SQL_DIR, "06_counterexample_customer_rename.sql");
+const COUNTEREXAMPLE_REVERSAL = join(SQL_DIR, "07_counterexample_reversal_linkage.sql");
+const COUNTEREXAMPLE_SETTLEMENT = join(SQL_DIR, "08_counterexample_settlement_linkage.sql");
+
+/**
+ * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
+ *
+ * A migration is allowed to write. It backfills a column, records that it ran, advances a counter,
+ * and every one of those moves the preservation answer legitimately. If the gate's baseline were
+ * read BEFORE them, any answer that moved afterwards would look like the gate working -- including
+ * one that moved only because of the permitted write, while a customer was quietly renamed
+ * alongside it.
+ */
+const COMPATIBILITY_WRITES = join(SQL_DIR, "09_compatibility_writes.sql");
+const COUNTEREXAMPLE_MASKED = join(SQL_DIR, "10_counterexample_masked_rename.sql");
+
+/** The one source of each preservation query. The runbook pastes these same files, unedited. */
+const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservation.sql");
+const V004_PRESERVATION = join("supabase", "release-checks", "v004_preservation.sql");
+
+/**
+ * The two phases of the proof, each with its own starting migration and its own preservation query.
+ *
+ * PART C answers a question about the catalogue and runs against two databases, because the gate
+ * has to work against the one production is actually in — which holds no prices — as well as a full
+ * one. Nothing about it changes here.
+ *
+ * V0.0.5 answers a different question, and it is the one this release adds: production today holds
+ * customers, orders, invoices, reservations, money, credit and dispatches, and no check in this
+ * repository had ever watched those cross a migration. Its fixture is built by the released
+ * commands under real sessions, so what is compared is what the product produces.
+ *
+ * `prices` is the number the Part C query must report for that fixture, so a fixture that quietly
+ * acquired a price row fails here rather than passing a comparison it was never meant to make.
+ */
+const PHASES = [
   {
-    name: "no prices at all — the shape production is in today",
-    setup: [CAPTURE_BEFORE],
-    assertions: [ASSERT_AFTER],
-    prices: 0,
+    subject: "migration 22",
+    what: "the catalogue",
+    version: PART_B_VERSION,
+    describes: "Part B, before Part C",
+    query: PRESERVATION_QUERY,
+    fixtures: [
+      {
+        name: "no prices at all — the shape production is in today",
+        setup: [CAPTURE_BEFORE],
+        assertions: [ASSERT_AFTER],
+        prices: 0,
+      },
+      {
+        name: "one real price row, written through the real command",
+        setup: [CAPTURE_BEFORE, WRITE_PRICE],
+        assertions: [ASSERT_AFTER, ASSERT_PRICE_SURVIVED],
+        prices: 1,
+      },
+    ],
   },
   {
-    name: "one real price row, written through the real command",
-    setup: [CAPTURE_BEFORE, WRITE_PRICE],
-    assertions: [ASSERT_AFTER, ASSERT_PRICE_SURVIVED],
-    prices: 1,
+    subject: "migrations 33 and 34",
+    what: "the v0.0.4 database",
+    version: V004_VERSION,
+    describes: "v0.0.4, before brick production",
+    query: V004_PRESERVATION,
+    fixtures: [
+      {
+        name: "customers, orders, invoices, money, credit and a signed dispatch",
+        setup: [BUILD_V004],
+        assertions: [ASSERT_V005],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "a customer renamed behind a migration's own permitted writes",
+            compatibilityWrites: COMPATIBILITY_WRITES,
+            file: COUNTEREXAMPLE_MASKED,
+          },
+        ],
+      },
+    ],
   },
 ];
 
@@ -170,69 +254,122 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
   let proofFailure = null;
 
   try {
-    for (const fixture of FIXTURES) {
-      log(`\n=== fixture: ${fixture.name} ===`);
+    for (const phase of PHASES) {
+      for (const fixture of phase.fixtures) {
+        log(`\n=== ${phase.subject} · fixture: ${fixture.name} ===`);
 
-      log(`--- resetting to migration ${PART_B_VERSION} (Part B, before Part C) ---`);
-      supabase(["db", "reset", "--version", PART_B_VERSION]);
+        log(`--- resetting to migration ${phase.version} (${phase.describes}) ---`);
+        supabase(["db", "reset", "--version", phase.version]);
 
-      log("\n--- building the fixture on the Part B database ---");
-      for (const file of fixture.setup) psqlFile(file);
+        log("\n--- building the fixture on that database ---");
+        for (const file of fixture.setup) psqlFile(file);
 
-      log("\n--- running the release gate's preservation query, before ---");
-      const before = preservation(PRESERVATION_QUERY);
-      const beforeFields = describePreservation(before);
-      log(
-        `    ${beforeFields.products} products, ${beforeFields.prices} prices, ` +
-          `identity ${beforeFields.productDigest}, prices ${beforeFields.priceDigest}`,
-      );
-
-      if (beforeFields.prices !== String(fixture.prices)) {
-        throw new Error(
-          `the "${fixture.name}" fixture should hold ${fixture.prices} price row(s), and the ` +
-            `preservation query reports ${beforeFields.prices}`,
+        log("\n--- running the release gate's preservation query, before ---");
+        const before = preservation(phase.query);
+        const beforeFields = describePreservation(before);
+        log(
+          `    ${beforeFields.products} products, ${beforeFields.prices} prices, ` +
+            `identity ${beforeFields.productDigest}, prices ${beforeFields.priceDigest}`,
         );
-      }
 
-      // A null digest compares equal to nothing, including the value it is meant to match, so a
-      // gate reading one would pass every comparison it was ever given. Asserted in the ZERO-price
-      // fixture especially: that is where an aggregate over no rows goes null.
-      for (const [what, digest] of [
-        ["product identity", beforeFields.productDigest],
-        ["price reference", beforeFields.priceDigest],
-      ]) {
-        if (!/^[0-9a-f]{32}$/.test(digest)) {
+        if (fixture.prices !== undefined && beforeFields.prices !== String(fixture.prices)) {
           throw new Error(
-            `the ${what} digest is "${digest}" and not a 32-character md5, so the release gate ` +
-              `cannot compare it`,
+            `the "${fixture.name}" fixture should hold ${fixture.prices} price row(s), and the ` +
+              `preservation query reports ${beforeFields.prices}`,
           );
         }
+
+        // A null digest compares equal to nothing, including the value it is meant to match, so a
+        // gate reading one would pass every comparison it was ever given — and in `-t -A` output a
+        // null is an EMPTY FIELD, which is why every field is checked rather than two named ones.
+        // The zero-price fixture is where an aggregate over no rows goes null.
+        const fields = before.split("|");
+        const emptyAt = fields.findIndex((field) => field.trim() === "");
+        if (emptyAt >= 0) {
+          throw new Error(
+            `field ${emptyAt + 1} of the preservation query is empty, which is what a null digest ` +
+              `looks like — and a null compares equal to nothing, including itself`,
+          );
+        }
+        if (!fields.some((field) => /^[0-9a-f]{32}$/.test(field))) {
+          throw new Error(
+            "the preservation query returned no md5 digest at all, so the release gate has " +
+              "nothing but counts to compare",
+          );
+        }
+
+        log("\n--- applying everything after it, the ordinary way ---");
+        supabase(["migration", "up", "--local"]);
+
+        log("\n--- running the same preservation query, after ---");
+        const after = preservation(phase.query);
+
+        if (after !== before) {
+          const afterFields = describePreservation(after);
+          throw new Error(
+            `${phase.subject} did not preserve ${phase.what}.\n` +
+              `  before: ${beforeFields.products} products / ${beforeFields.prices} prices / ` +
+              `${beforeFields.productDigest} / ${beforeFields.priceDigest}\n` +
+              `  after:  ${afterFields.products} products / ${afterFields.prices} prices / ` +
+              `${afterFields.productDigest} / ${afterFields.priceDigest}\n` +
+              `  before rows: ${before}\n` +
+              `  after rows:  ${after}`,
+          );
+        }
+
+        log("    identical, character for character");
+
+        log("\n--- asserting what the upgrade added, and what it left alone ---");
+        for (const file of fixture.assertions) psqlFile(file);
+
+        // THE GATE, TESTED AGAINST ITSELF. Last, because each of these deliberately damages the
+        // fixture, and the database is reset immediately after this loop.
+        //
+        // EVERY COUNTEREXAMPLE IS JUDGED AGAINST A READING TAKEN IMMEDIATELY BEFORE IT, never
+        // against one carried from an earlier step. A carried baseline can be moved by something
+        // other than the damage: the counterexample before it, or a legitimate write made in
+        // between. The harness would then report "the gate saw it" while the change it was actually
+        // testing went unnoticed. Read one statement before the damage, and the only thing that can
+        // move the answer is the damage.
+        //
+        // `compatibilityWrites` is the case that makes this concrete: the sort of ordinary,
+        // permitted write a migration really does make. It runs FIRST and the baseline is read
+        // AFTER it, so its legitimate effect is already in the baseline and cannot stand in for
+        // having seen the invisible change that follows it.
+        for (const counterexample of fixture.counterexamples ?? []) {
+          log(`\n--- counterexample: ${counterexample.name} ---`);
+          if (counterexample.compatibilityWrites) {
+            log("    first, the permitted writes this counterexample hides behind");
+            psqlFile(counterexample.compatibilityWrites);
+          }
+
+          const standing = preservation(phase.query);
+
+          psqlFile(counterexample.file);
+
+          const mutated = preservation(phase.query);
+
+          if (mutated === standing) {
+            throw new Error(
+              `the preservation gate did not notice ${counterexample.name}. The file asserts it ` +
+                "changed no count, so the gate is comparing identities without comparing " +
+                "contents — which is the finding this check exists to prevent.\n" +
+                `  answer: ${mutated}`,
+            );
+          }
+
+          log("    the gate saw it");
+        }
       }
-
-      log("\n--- applying everything after Part B the ordinary way ---");
-      supabase(["migration", "up", "--local"]);
-
-      log("\n--- running the same preservation query, after ---");
-      const after = preservation(PRESERVATION_QUERY);
-
-      if (after !== before) {
-        const afterFields = describePreservation(after);
-        throw new Error(
-          "migration 22 did not preserve the catalogue.\n" +
-            `  before: ${beforeFields.products} products / ${beforeFields.prices} prices / ` +
-            `${beforeFields.productDigest} / ${beforeFields.priceDigest}\n` +
-            `  after:  ${afterFields.products} products / ${afterFields.prices} prices / ` +
-            `${afterFields.productDigest} / ${afterFields.priceDigest}\n` +
-            `  before rows: ${before}\n` +
-            `  after rows:  ${after}`,
-        );
-      }
-
-      log("    identical, character for character");
-
-      log("\n--- asserting the approved mapping, the unit counts and the stranded count ---");
-      for (const file of fixture.assertions) psqlFile(file);
     }
+
+    // THE STATE BETWEEN THE TWO NEW MIGRATIONS, which no other tier can look at: pgTAP runs after
+    // every migration has applied, and the phases above measure the two ends of the upgrade rather
+    // than the middle of it. A hosted apply sits here for as long as it takes, so this is where a
+    // public table without row-level security would actually be exposed.
+    log(`\n=== the boundary · migration ${MIGRATION_33_VERSION} alone ===`);
+    supabase(["db", "reset", "--version", MIGRATION_33_VERSION]);
+    psqlFile(ASSERT_MIGRATION_33);
   } catch (failure) {
     proofFailure = failure;
   }

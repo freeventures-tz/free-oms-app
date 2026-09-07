@@ -41,6 +41,12 @@ export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   // Storekeeper records: Director registers, Manager reads (product.md §3.2, design.md §4.2).
   { prefix: "/settings/storekeepers", roles: ["manager", "director"] },
 
+  // Production: the Manager runs it and a Director reads it (design.md §4.2). §4.1 gives batch
+  // entry, approval and inspection to the Manager and names no alternate, so a Director reaches
+  // the screen for oversight and is offered no control on it. A Cashier and a Sales Representative
+  // do not work a mixer and cannot reach the route at all.
+  { prefix: "/production", roles: ["manager", "director"] },
+
   // Suppliers: Director registers, Manager reads (product.md §9 requires the record; who creates
   // one is a derived decision recorded in the Stage 10D plan).
   { prefix: "/settings/suppliers", roles: ["manager", "director"] },
