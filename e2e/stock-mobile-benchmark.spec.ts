@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type ElementHandle, type Locator, type Page } from "@playwright/test";
 
 import { derivedAuthIdentifier } from "@/lib/auth/phone-identity";
 import { expectLandsOn, fixtures, signIn } from "./fixtures";
@@ -17,71 +17,75 @@ import { expectLandsOn, fixtures, signIn } from "./fixtures";
  * command inside the database, over local HTTP, on an unthrottled machine. It is the right
  * measurement of what this ticket ADDED — one more availability query and one more advisory lock
  * per line — and it is not a mobile measurement. Nor can a mobile figure be ARITHMETIC laid on top
- * of it: adding an assumed round trip to a local timing assumes the answer. A phone's number comes
- * from throttling a real browser and timing the real Server Action, which is what this file does.
+ * of it: adding an assumed round trip to a local timing assumes the answer.
  *
  * ── WHAT IS MEASURED, AND WHY EACH END OF THE INTERVAL IS WHAT IT IS ──────────────────────────
  *
- * A REAL TAP STARTS THE CLOCK. Playwright's `click()` dispatches trusted input through the
- * browser, and the clock starts at the `pointerdown` that input produces — not at a scripted
- * `node.click()`, which skips the input pipeline this measurement is supposed to include.
+ * A REAL TOUCH STARTS THE CLOCK, and the run asserts it was one. `locator.tap()` drives the CDP
+ * touch pipeline, and the instrument records `pointerType` and whether a `touchstart` was seen, so
+ * a measurement silently taken with a mouse — which is what `click()` gives even on a project
+ * configured `hasTouch` — fails instead of quietly describing the wrong input.
  *
- * A VISIBLE CHANGE STOPS IT. `aria-busy` is an attribute; a person in a yard cannot see an
- * attribute. The signal taken here is the rendered spinner inside a busy control — the same render
- * that hides the label — because that is the pixel change §12.7 rule 1 is about. Colour is not
- * used for it either way (§11.5).
+ * A VISIBLE CHANGE ON THE CONTROL THAT WAS TOUCHED STOPS IT. Not "some button on the page went
+ * busy": the element handle that was tapped is held, and the signal is a rendered spinner INSIDE
+ * that element while that element carries `aria-busy`. A document-wide query would have accepted a
+ * neighbouring control's feedback as this one's.
  *
- * SUCCESS IS A POSITIVE RECORD, not the absence of a control. A control disappearing proves
- * nothing: an error boundary removes controls too, and so does a refusal. What is timed instead is
- * a settled decision APPEARING — for a batch, the decision record carrying that batch's own id; for
- * a correction, one more "approved by" chip than before the tap. Neither can be produced by a
- * failure, so this cannot pass on an error and cannot pass on a refusal either.
+ * SUCCESS IS THE APPROVAL OF THE SAME ENTITY. For a batch, the decision record carrying that
+ * batch's own id. For a correction, the card carrying that correction's own reason string — seeded
+ * unique per sample — showing its "approved by" chip. A count of decisions on the page proves that
+ * SOMETHING settled, which is not the same claim and was wrong here twice: once because the decided
+ * queue pages at twenty-five and the count could not rise, and once because a count says nothing
+ * about which record moved.
  *
  * ── WHICH SAMPLES ARE JUDGED ──────────────────────────────────────────────────────────────────
  *
  * ALL OF THEM. The first interaction after a page load is reported separately because it behaves
  * differently and hiding that would be dishonest, but it is inside the acceptance gate exactly like
- * every other tap. §12.7 rule 1 says every click or tap, and states no exception for a page that
- * has just loaded; a benchmark is not the place to invent one. The 100 ms budget below is the
- * design document's number, unchanged.
+ * every other tap. §12.7 rule 1 says every click or tap and states no exception for a page that has
+ * just loaded. The 100 ms and 2,500 ms budgets below are the ones the specification sets.
  *
- * THE PROFILES are Chrome DevTools' own presets, named here so a reader can reproduce them rather
- * than trust a number. Both are measured because the workspace documents no single approved
- * profile: design.md §2.1 and §11.9 say "mid- or low-range Android phones" on a varying network and
- * fix no figures, so the honest thing is to report the pair and let the slower one carry the
- * verdict.
+ * ── EVIDENCE CARRIED WITH EACH SAMPLE ─────────────────────────────────────────────────────────
  *
- * IT RUNS AGAINST THE BASE TOO. `FV_BENCHMARK_LABEL` names the tree under test so the same file,
- * copied into a checkout of `525418e`, produces directly comparable output. Without that
- * comparison, any number here is a reading with nothing to read it against.
+ * Every sample records `document.readyState` at the moment of the touch, how long after navigation
+ * start the touch landed, and where the navigation's own `domContentLoadedEventEnd` and
+ * `loadEventEnd` fell. Those are facts, not a theory: they are what makes it possible to say
+ * whether a slow first tap landed while the page was still loading rather than to assert it.
  *
- * ── WHAT IT CURRENTLY REPORTS, 8 September 2026 ───────────────────────────────────────────────
+ * THE PROFILES are Chrome DevTools' own presets, named so a reader can reproduce them. Both are
+ * measured because the workspace documents no single approved profile: design.md §2.1 and §11.9 say
+ * "mid- or low-range Android phones" on a varying network and fix no figures.
  *
- * THIS BENCHMARK FAILS ITS ACKNOWLEDGEMENT GATE, ON THIS TREE AND ON `525418e` ALIKE. That is the
- * finding, not a broken test, and the gate is left failing rather than relaxed: the budget belongs
- * to design.md §12.7 and a benchmark may not rewrite it to suit what it measured.
+ * IT RUNS AGAINST THE BASE TOO. `FV_BENCHMARK_LABEL` names the tree, so the same file copied into a
+ * checkout of `525418e` produces directly comparable output. Without that comparison any number
+ * here is a reading with nothing to read it against.
  *
- * The FIRST tap after a page load costs roughly 85–160 ms to acknowledge visibly. Every tap after
- * it, on the page already in use, costs 34–79 ms — comfortably inside the budget. Both trees show
- * the same shape, and `525418e` exceeded 100 ms in three of the six series measured on it, so
- * whatever this is, issue #7 did not introduce it. Run-to-run spread on one machine (89–161 ms
- * worst) is wider than the gap between the two trees, so these figures can neither establish nor
- * exclude a small regression on top of it; what they do establish is that the cost is already
- * there on the base.
+ * ── WHAT THE CORRECTED INSTRUMENT FOUND, 8 September 2026 ─────────────────────────────────────
  *
- * WHY THE FIRST TAP IS DIFFERENT, as far as this measures rather than assumes: `buttonVariants` in
- * `components/ui/button.tsx` carries `hover:` and `transition-colors` and no `active:` state at
- * all, so every acknowledgement this application gives is rendered by React — `data-pending`,
- * `aria-busy`, the hidden label and the spinner arrive together or not at all. A tap on a route
- * that has just arrived therefore waits for the page to become interactive, and a tap on a page
- * already in use does not. That is consistent with the two groups above and with the component as
- * written; it is not a claim this file has isolated by instrumenting hydration directly.
+ * BOTH GATES ARE MET, and two earlier findings from this file are WITHDRAWN.
  *
- * THE SMALLEST FIX, recorded for an Owner decision and deliberately NOT made here: give
- * `buttonVariants` an `active:` variant, so a press paints from the first frame the CSS is applied
- * — before hydration, with no JavaScript, exactly as design.md §7.1 says the authentication screens
- * already do. It is one line in one shared component, changes no layout and no behaviour, and it
- * belongs to whoever owns that control rather than to a stock-invariant release.
+ * Four runs, candidate and base alternating back to back: candidate passed twice, base passed once
+ * and failed one series once. Every failure and near-miss decomposes the same way — the application
+ * is not the slow part. `click → spinner`, which is the whole of the application's share of the
+ * acknowledgement, measured p50 10–30 ms and never exceeded 48 ms on either tree in any run. The
+ * one failing series was 180 ms total, of which 147 ms was `pointerdown → click`: the input
+ * pipeline, before a React handler can run at all.
+ *
+ * WITHDRAWN 1 — "the first tap waits for the page to become interactive". Disproved by this file's
+ * own evidence: `readyState` was `complete` and the touch landed after `loadEventEnd` in 100% of
+ * samples, first taps included, three to six seconds after navigation. The earlier version asserted
+ * hydration as the cause without measuring it, and the measurement does not support it.
+ *
+ * WITHDRAWN 2 — the proposed `active:` variant on the shared `Button`. It was proposed to fix a
+ * defect the earlier instrument appeared to show and this one does not: with a real touch, a
+ * visible signal on the control that was actually touched, and success read from the entity that
+ * was actually approved, there is no evidenced application defect for it to fix. It is not carried
+ * forward, and nothing in the shared control is changed on the strength of a measurement that has
+ * since been corrected.
+ *
+ * WHAT REMAINS TRUE is that this machine's spread is wide — the same tree produced a 42 ms and a
+ * 153 ms worst on consecutive days under the older instrument — so single runs prove little and
+ * matched pairs run back to back are the only comparison worth reading.
  */
 
 const ENABLED = process.env.FV_BENCHMARK === "1";
@@ -92,8 +96,8 @@ const LABEL = process.env.FV_BENCHMARK_LABEL ?? "candidate";
 /**
  * Samples per command per profile.
  *
- * FIRST taps each get their own page load — that is the only way to take more than one of them —
- * and the rest are taken consecutively on a page already in use. Both groups are judged.
+ * FIRST taps each get their own page load — the only way to take more than one of them — and the
+ * rest are taken consecutively on a page already in use. Both groups are judged.
  */
 const FIRST_SAMPLES = 5;
 const SUBSEQUENT_SAMPLES = 20;
@@ -104,12 +108,6 @@ const TAP_TO_VISIBLE_BUDGET_MS = 100;
 /** The p95 the directive sets for a server-confirmed stock command. */
 const COMPLETION_P95_BUDGET_MS = 2_500;
 
-/**
- * Chrome DevTools' throttling presets, in the units the CDP takes (bytes per second).
- *
- * `cpu` is the DevTools multiplier: 4× is its standard stand-in for a mid-tier Android against a
- * development machine, which is the device design.md §2.1 names.
- */
 const PROFILES = [
   {
     name: "Slow 4G",
@@ -140,8 +138,34 @@ const PER_COMMAND = FIRST_SAMPLES + SUBSEQUENT_SAMPLES;
 /** Every batch and every correction takes one bag, for both commands and both profiles, plus slack. */
 const CEMENT_NEEDED = PER_COMMAND * PROFILES.length * 2 + 40;
 
-/** Which board a sample is taken on, and what a settled success looks like there. */
 type Board = "batch" | "adjustment";
+
+/**
+ * One measured touch, with the page-state facts that were true when it happened.
+ *
+ * `ack` is decomposed on purpose. A touch does not become a React `onClick` until the browser has
+ * seen `touchend` and synthesised a click, and that part of the interval belongs to the input
+ * pipeline rather than to the application. Reporting only the total would leave a reader unable to
+ * tell a slow control from a slow browser — and the two have opposite fixes.
+ */
+type Sample = {
+  /** `pointerdown` → the spinner rendered on the touched control. The whole of what a person waits. */
+  ack: number;
+  /** `pointerdown` → the synthesised `click`. The browser's touch handling, not ours. */
+  inputDelay: number;
+  /** `click` → the spinner. The application's own share of the acknowledgement. */
+  appResponse: number;
+  done: number;
+  pointerType: string;
+  sawTouchStart: boolean;
+  trusted: boolean;
+  readyState: string;
+  sinceNavigation: number;
+  loadEventEnd: number;
+  /** Main-thread time spent in long tasks since navigation, and how recently one ended. */
+  longTaskMs: number;
+  msSinceLastLongTask: number;
+};
 
 function percentile(values: number[], fraction: number): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -152,24 +176,57 @@ function percentile(values: number[], fraction: number): number {
 
 type Summary = { n: number; p50: number; p95: number; worst: number };
 
-function summarise(samples: number[]): Summary {
-  return {
+function report(label: string, samples: number[]): Summary {
+  const s: Summary = {
     n: samples.length,
     p50: Math.round(percentile(samples, 0.5)),
     p95: Math.round(percentile(samples, 0.95)),
     worst: Math.round(Math.max(...samples)),
   };
-}
-
-function report(label: string, samples: number[]): Summary {
-  const s = summarise(samples);
-  console.log(
-    `${label.padEnd(58)} n=${s.n}  p50=${s.p50}ms  p95=${s.p95}ms  worst=${s.worst}ms`,
-  );
+  console.log(`${label.padEnd(60)} n=${s.n}  p50=${s.p50}ms  p95=${s.p95}ms  worst=${s.worst}ms`);
   // Every sample, in the order taken. A percentile hides WHERE a slow one fell, and a reviewer
   // cannot re-derive a distribution from three numbers.
-  console.log(`${" ".repeat(58)} raw: ${samples.map((v) => Math.round(v)).join(", ")}`);
+  console.log(`${" ".repeat(60)} raw: ${samples.map((v) => Math.round(v)).join(", ")}`);
   return s;
+}
+
+/** The page-state facts behind a group of samples, printed so the timings can be reasoned about. */
+function reportPageState(label: string, samples: Sample[]): void {
+  const loading = samples.filter((s) => s.readyState !== "complete").length;
+  const beforeLoadEnd = samples.filter(
+    (s) => s.loadEventEnd === 0 || s.sinceNavigation < s.loadEventEnd,
+  ).length;
+  console.log(
+    `${label.padEnd(60)} touched at readyState≠complete: ${loading}/${samples.length} · ` +
+      `before loadEventEnd: ${beforeLoadEnd}/${samples.length} · ` +
+      `ms since navigation: ${samples.map((s) => Math.round(s.sinceNavigation)).join(", ")}`,
+  );
+  console.log(
+    `${" ".repeat(60)} long-task ms since navigation: ` +
+      `${samples.map((s) => Math.round(s.longTaskMs)).join(", ")} · ` +
+      `ms since the last long task ended: ` +
+      `${samples.map((s) => Math.round(s.msSinceLastLongTask)).join(", ")}`,
+  );
+}
+
+/**
+ * Where the acknowledgement actually went: the browser's share, then ours.
+ *
+ * A React `onClick` cannot run until the browser has synthesised a click from the touch. Splitting
+ * the interval there is the difference between "the control is slow" and "the control is not
+ * reached until late", which are not the same defect and do not have the same fix.
+ */
+function reportDecomposition(label: string, samples: Sample[]): void {
+  const input = samples.map((s) => s.inputDelay);
+  const app = samples.map((s) => s.appResponse);
+  console.log(
+    `${label.padEnd(60)} pointerdown→click p50=${Math.round(percentile(input, 0.5))}ms ` +
+      `worst=${Math.round(Math.max(...input))}ms · ` +
+      `click→spinner p50=${Math.round(percentile(app, 0.5))}ms ` +
+      `worst=${Math.round(Math.max(...app))}ms`,
+  );
+  console.log(`${" ".repeat(60)} raw pointerdown→click: ${input.map((v) => Math.round(v)).join(", ")}`);
+  console.log(`${" ".repeat(60)} raw click→spinner:     ${app.map((v) => Math.round(v)).join(", ")}`);
 }
 
 async function signInAs(page: Page, who: "director" | "manager") {
@@ -204,9 +261,7 @@ async function sessionFor(who: "director" | "manager"): Promise<{
   });
 
   const body = await response.json();
-  if (response.status !== 200) {
-    throw new Error(`${who} could not sign in: ${JSON.stringify(body)}`);
-  }
+  if (response.status !== 200) throw new Error(`${who} could not sign in: ${JSON.stringify(body)}`);
 
   const client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -223,124 +278,186 @@ async function productId(read: SupabaseClient, name: string): Promise<string> {
 }
 
 /**
- * Arms the in-page instrument, then reads back both intervals for ONE real tap.
+ * Arms the in-page instrument, taps for real, and reads back one sample.
  *
- * All three timestamps are taken by `performance.now()` inside the page, on one clock, so nothing
- * the test harness costs — a CDP round trip, Playwright's own polling — is charged to the
- * application. The listeners go on `document` rather than on the button so that React replacing the
- * element mid-render cannot lose the measurement.
+ * Every timestamp is `performance.now()` inside the page, on one clock, so nothing the harness
+ * costs — a CDP round trip, Playwright's own polling — is charged to the application. The element
+ * that was touched is passed in as a handle and held, because "did THIS control acknowledge" is the
+ * question and a document-wide query answers a different one.
  */
 async function measureTap(
   page: Page,
   approve: Locator,
   board: Board,
   entityId: string,
-): Promise<{ ack: number; done: number }> {
-  await page.evaluate(({ kind, id }: { kind: Board; id: string }) => {
-    const w = window as unknown as Record<string, unknown>;
+  /** For a correction, the unique reason text that identifies its card. Unused for a batch. */
+  marker: string,
+): Promise<Sample> {
+  const node = (await approve.elementHandle()) as ElementHandle<HTMLElement>;
+  expect(node, "the control to be tapped must exist").not.toBeNull();
 
-    // TEAR THE PREVIOUS SAMPLE'S INSTRUMENT DOWN FIRST.
-    //
-    // Without this every sample left its observer and its listener attached, so by the twenty-fifth
-    // tap the page was running twenty-five document-wide MutationObservers on every render — under
-    // 4× CPU throttling that is a measurable cost, charged to the application by the instrument
-    // measuring it, and on the faster profile it was enough to stall the run outright.
-    const previous = w.__fvTeardown as (() => void) | undefined;
-    if (previous) previous();
+  await page.evaluate(
+    ({ target, kind, id, reason }) => {
+      const w = window as unknown as Record<string, unknown>;
 
-    /**
-     * A BATCH IS WATCHED BY ITS OWN DECISION RECORD, not by a count of them.
-     *
-     * The decided queue is a page of twenty-five (QUEUE_PAGE_SIZE). Once it is full, approving one
-     * more pushes the oldest off the page and the COUNT never changes — which is not "no decision
-     * arrived", but a count-based instrument cannot tell the two apart, and it stalled a whole
-     * profile before this was written the right way round. `batch-decision-<id>` is the record for
-     * the batch that was actually approved, so it appears exactly once and cannot be crowded out:
-     * the decided queue is ordered newest first and this is the newest.
-     */
-    const countSettled = () => {
-      if (kind === "batch") {
-        return document.querySelector(`[data-testid="batch-decision-${id}"]`) ? 1 : 0;
+      // Tear the previous sample's instrument down first. Leaving them attached ran one more
+      // document-wide MutationObserver per sample, a cost the instrument would then charge to the
+      // application it is measuring.
+      const previous = w.__fvTeardown as (() => void) | undefined;
+      if (previous) previous();
+
+      const settled = () => {
+        if (kind === "batch") {
+          return Boolean(document.querySelector(`[data-testid="batch-decision-${id}"]`));
+        }
+        // THIS correction, identified by its own reason text, showing its own approval chip.
+        for (const card of Array.from(document.querySelectorAll('[role="article"]'))) {
+          const text = card.textContent ?? "";
+          if (text.includes(reason) && /approved by/i.test(text)) return true;
+        }
+        return false;
+      };
+
+      // Long tasks are collected from navigation onwards, so a touch can be described against a
+      // main thread that was actually busy rather than one assumed to be.
+      const longTasks: { start: number; end: number }[] = [];
+      try {
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            longTasks.push({ start: entry.startTime, end: entry.startTime + entry.duration });
+          }
+        }).observe({ type: "longtask", buffered: true });
+      } catch {
+        // Long-task timing is Chromium-only; its absence must not stop the measurement.
       }
-      // The success chips a settled correction renders. A count is safe here and only here:
-      // `loadAdjustments` returns up to two hundred rows in one list with no paging, and this run
-      // creates fifty, so the number can only go up.
-      let n = 0;
-      for (const el of Array.from(document.querySelectorAll('[role="article"] span'))) {
-        if (/^\s*approved by/i.test(el.textContent ?? "")) n += 1;
-      }
-      return n;
-    };
 
-    const state = { down: null as number | null, visible: null as number | null, settled: null as number | null };
-    w.__fvBench = state;
-    const baseline = countSettled();
+      const state = {
+        down: null as number | null,
+        click: null as number | null,
+        visible: null as number | null,
+        done: null as number | null,
+        pointerType: "",
+        sawTouchStart: false,
+        trusted: false,
+        readyState: "",
+        sinceNavigation: 0,
+        loadEventEnd: 0,
+        longTaskMs: 0,
+        msSinceLastLongTask: -1,
+      };
+      w.__fvBench = state;
 
-    const onPointerDown = () => {
-      if (state.down === null) state.down = performance.now();
-    };
-    document.addEventListener("pointerdown", onPointerDown, { capture: true });
+      const onPointerDown = (event: PointerEvent) => {
+        if (state.down !== null) return;
+        state.down = performance.now();
+        state.pointerType = event.pointerType;
+        state.trusted = event.isTrusted;
+        state.readyState = document.readyState;
+        const nav = performance.getEntriesByType("navigation")[0] as
+          | PerformanceNavigationTiming
+          | undefined;
+        state.sinceNavigation = nav ? performance.now() - nav.startTime : -1;
+        state.loadEventEnd = nav ? nav.loadEventEnd : -1;
+        state.longTaskMs = longTasks.reduce((total, t) => total + (t.end - t.start), 0);
+        const last = longTasks.length > 0 ? longTasks[longTasks.length - 1].end : null;
+        state.msSinceLastLongTask = last === null ? -1 : state.down - last;
+      };
 
-    const check = () => {
-      // VISIBLE: a rendered spinner inside a control that is working. The same render hides the
-      // label, so this is the moment the button visibly changes rather than the moment an
-      // attribute did.
-      if (state.visible === null && document.querySelector('button[aria-busy="true"] .animate-spin')) {
-        state.visible = performance.now();
-      }
-      // SERVER-CONFIRMED: one more settled decision on the board than there was before the tap.
-      if (state.settled === null && countSettled() > baseline) {
-        state.settled = performance.now();
-      }
-    };
+      // The synthesised click. A React onClick cannot run before this, so the interval before it
+      // is the browser's and the interval after it is ours.
+      const onClick = () => {
+        if (state.click === null) state.click = performance.now();
+      };
+      const onTouchStart = () => {
+        state.sawTouchStart = true;
+      };
 
-    const observer = new MutationObserver(check);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true,
-    });
+      document.addEventListener("pointerdown", onPointerDown, { capture: true });
+      document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+      document.addEventListener("click", onClick, { capture: true });
 
-    w.__fvTeardown = () => {
-      observer.disconnect();
-      document.removeEventListener("pointerdown", onPointerDown, { capture: true });
-    };
+      const check = () => {
+        // VISIBLE, ON THE CONTROL THAT WAS TOUCHED: it says it is working AND it is rendering the
+        // spinner that replaces its label. Both, on this element, or it does not count.
+        if (
+          state.visible === null &&
+          target.getAttribute("aria-busy") === "true" &&
+          target.querySelector(".animate-spin")
+        ) {
+          state.visible = performance.now();
+        }
+        if (state.done === null && settled()) state.done = performance.now();
+      };
 
-    check();
-  }, { kind: board, id: entityId });
+      const observer = new MutationObserver(check);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
 
-  // A REAL tap: trusted input through the browser, not a scripted click.
-  await approve.click();
+      w.__fvTeardown = () => {
+        observer.disconnect();
+        document.removeEventListener("pointerdown", onPointerDown, { capture: true });
+        document.removeEventListener("touchstart", onTouchStart, { capture: true });
+        document.removeEventListener("click", onClick, { capture: true });
+      };
+
+      check();
+    },
+    { target: node, kind: board, id: entityId, reason: marker },
+  );
+
+  // A REAL TOUCH. `tap()` drives the CDP touch pipeline; `click()` would send mouse events even on
+  // a project configured with `hasTouch`, and would measure an input a phone never produces.
+  await approve.tap();
 
   let handle;
   try {
     handle = await page.waitForFunction(
       () => {
-        const s = (window as unknown as Record<string, { down: number | null; visible: number | null; settled: number | null }>)
-          .__fvBench;
-        if (!s || s.down === null || s.visible === null || s.settled === null) return null;
-        return { ack: s.visible - s.down, done: s.settled - s.down };
+        const s = (window as unknown as Record<string, Record<string, unknown>>).__fvBench;
+        if (!s || s.down === null || s.visible === null || s.done === null) return null;
+        return {
+          ack: (s.visible as number) - (s.down as number),
+          inputDelay: s.click === null ? -1 : (s.click as number) - (s.down as number),
+          appResponse:
+            s.click === null
+              ? -1
+              : (s.visible as number) - (s.click as number),
+          done: (s.done as number) - (s.down as number),
+          longTaskMs: s.longTaskMs,
+          msSinceLastLongTask: s.msSinceLastLongTask,
+          pointerType: s.pointerType,
+          sawTouchStart: s.sawTouchStart,
+          trusted: s.trusted,
+          readyState: s.readyState,
+          sinceNavigation: s.sinceNavigation,
+          loadEventEnd: s.loadEventEnd,
+        };
       },
       undefined,
       { timeout: 120_000, polling: "raf" },
     );
   } catch {
-    // WHICH of the three never arrived is the whole diagnosis, and a bare timeout throws it away:
-    // no `down` means the tap never landed, no `visible` means the control never acknowledged, and
-    // no `settled` means the command did not commit a decision.
+    // WHICH of the three never arrived is the whole diagnosis, and a bare timeout throws it away.
     const state = await page.evaluate(
       () => (window as unknown as Record<string, unknown>).__fvBench ?? null,
     );
-    throw new Error(
-      `the tap was never completely observed. down/visible/settled = ${JSON.stringify(state)}`,
-    );
+    throw new Error(`the tap was never completely observed: ${JSON.stringify(state)}`);
   }
 
-  const measured = (await handle.jsonValue()) as { ack: number; done: number };
-  expect(measured.ack, "a visible acknowledgement was never observed").toBeGreaterThanOrEqual(0);
-  expect(measured.done, "no settled decision arrived").toBeGreaterThan(0);
-  return measured;
+  const sample = (await handle.jsonValue()) as Sample;
+  await node.dispose();
+
+  // THE INPUT IS ASSERTED, NOT ASSUMED. A benchmark that quietly measured a mouse would describe an
+  // interaction no phone performs.
+  expect(sample.pointerType, "the measured input must be a touch").toBe("touch");
+  expect(sample.sawTouchStart, "a touchstart must have been dispatched").toBe(true);
+  expect(sample.trusted, "the input must be a trusted browser event").toBe(true);
+
+  return sample;
 }
 
 // `test.describe.skipIf` is not in this Playwright version, so the choice is made here.
@@ -353,8 +470,8 @@ describeBenchmark("stock commands on a phone over 4G", () => {
   let recipe: string[] = [];
 
   test.beforeAll(async ({ browser }, testInfo) => {
-    // One tier, because this measures a network and a CPU rather than a layout, and the mobile
-    // project is the device design.md §2.1 describes. Run it with `--project=mobile`.
+    // One tier, because this measures a network, a CPU and a touchscreen rather than a layout, and
+    // the mobile project is the only one configured `hasTouch`. Run it with `--project=mobile`.
     if (testInfo.project.name !== "mobile") return;
 
     test.setTimeout(600_000);
@@ -371,7 +488,6 @@ describeBenchmark("stock commands on a phone over 4G", () => {
     }
 
     manager = await sessionFor("manager");
-
     cementId = await productId(manager.read, CEMENT);
     brickId = await productId(manager.read, BRICK_6);
 
@@ -380,7 +496,6 @@ describeBenchmark("stock commands on a phone over 4G", () => {
       .select("product_id");
     recipe = (recipeRows as { product_id: string }[]).map((row) => row.product_id);
 
-    // The yard, stocked through supplier receiving exactly as the business does it.
     const { data: supplier } = await manager.read
       .from("suppliers")
       .select("id")
@@ -422,6 +537,8 @@ describeBenchmark("stock commands on a phone over 4G", () => {
       test.skip(testInfo.project.name !== "mobile", "the mobile profile only");
       test.setTimeout(1_800_000);
 
+      const runId = randomUUID().slice(0, 8).toUpperCase();
+
       // ---------------------------------------------------------------------
       // Drafts, seeded unthrottled: seeding is not the measurement
       // ---------------------------------------------------------------------
@@ -443,17 +560,23 @@ describeBenchmark("stock commands on a phone over 4G", () => {
         batchIds.push((data.batch as { id: string }).id);
       }
 
+      // EACH CORRECTION CARRIES ITS OWN REASON, and that is what makes its approval identifiable:
+      // the adjustment card is keyed by product, so several corrections share one product and only
+      // the reason distinguishes their cards on screen.
       const adjustmentIds: string[] = [];
+      const adjustmentReasons: string[] = [];
       for (let i = 0; i < PER_COMMAND; i++) {
+        const reason = `bench ${runId} ${profile.name.replace(/\s+/g, "")} ${String(i).padStart(2, "0")}`;
         const { data } = await manager.api.rpc("staff_enter_stock_adjustment", {
           p_product_id: cementId,
           p_location_code: "yard",
           p_quantity_delta: -1,
-          p_reason: "mobile benchmark",
+          p_reason: reason,
           p_idempotency_key: randomUUID(),
         });
         expect(data?.ok, JSON.stringify(data)).toBe(true);
         adjustmentIds.push((data.adjustment as { id: string }).id);
+        adjustmentReasons.push(reason);
       }
 
       const cdp = await page.context().newCDPSession(page);
@@ -479,32 +602,26 @@ describeBenchmark("stock commands on a phone over 4G", () => {
         await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
       }
 
-      type Series = { first: { ack: number; done: number }[]; rest: { ack: number; done: number }[] };
+      type Series = { first: Sample[]; rest: Sample[] };
       const measured: Record<string, Series> = {
         "batch approval": { first: [], rest: [] },
         "negative correction": { first: [], rest: [] },
       };
 
-      /**
-       * One command, measured on a freshly loaded page and then on the page already in use.
-       *
-       * The sign-in and the navigation are done UNTHROTTLED and the throttling is applied
-       * immediately before the tap, so what is being timed is the interaction rather than how long
-       * the route took to arrive. The page for a first-tap sample is loaded WITH throttling on,
-       * because that is the state a first tap actually happens in.
-       */
       async function run(
         command: string,
         board: Board,
         route: string,
         who: "director" | "manager",
         ids: string[],
+        markers: string[],
         control: (id: string) => Locator,
       ) {
         await unthrottle();
         await signInAs(page, who);
 
-        // FIRST TAPS: one per page load, each on a route that has just arrived.
+        // FIRST TAPS: one per page load, each on a route that has just arrived, loaded throttled
+        // because that is the state a first tap actually happens in.
         for (let i = 0; i < FIRST_SAMPLES; i++) {
           await unthrottle();
           await page.goto(route);
@@ -513,21 +630,27 @@ describeBenchmark("stock commands on a phone over 4G", () => {
 
           const approve = control(ids[i]);
           await expect(approve).toBeVisible({ timeout: 120_000 });
-          measured[command].first.push(await measureTap(page, approve, board, ids[i]));
+          measured[command].first.push(await measureTap(page, approve, board, ids[i], markers[i]));
         }
 
         // SUBSEQUENT TAPS: the page stays put, as it does for somebody working through a queue.
         for (let i = FIRST_SAMPLES; i < ids.length; i++) {
           const approve = control(ids[i]);
           await expect(approve).toBeVisible({ timeout: 120_000 });
-          measured[command].rest.push(await measureTap(page, approve, board, ids[i]));
+          measured[command].rest.push(await measureTap(page, approve, board, ids[i], markers[i]));
         }
 
         await unthrottle();
       }
 
-      await run("batch approval", "batch", "/production", "manager", batchIds, (id) =>
-        page.getByTestId(`approve-batch-${id}`),
+      await run(
+        "batch approval",
+        "batch",
+        "/production",
+        "manager",
+        batchIds,
+        batchIds,
+        (id) => page.getByTestId(`approve-batch-${id}`),
       );
 
       await run(
@@ -536,6 +659,7 @@ describeBenchmark("stock commands on a phone over 4G", () => {
         "/inventory/adjustments",
         "director",
         adjustmentIds,
+        adjustmentReasons,
         (id) => page.getByTestId(`approve-${id}`),
       );
 
@@ -548,42 +672,42 @@ describeBenchmark("stock commands on a phone over 4G", () => {
         `\n[${LABEL}] ${profile.name}: ` +
           `${(profile.downloadThroughput * 8) / 1024 / 1024} Mbit/s down, ` +
           `${(profile.uploadThroughput * 8) / 1024} kbit/s up, ${profile.latency} ms RTT, ` +
-          `CPU ${profile.cpu}x · ${FIRST_SAMPLES} first taps + ${SUBSEQUENT_SAMPLES} subsequent ` +
-          `per command · dataset: ${CEMENT_NEEDED} bags received, ${PER_COMMAND} drafts per command`,
+          `CPU ${profile.cpu}x, touch input · ${FIRST_SAMPLES} first taps + ` +
+          `${SUBSEQUENT_SAMPLES} subsequent per command · dataset: ${CEMENT_NEEDED} bags received, ` +
+          `${PER_COMMAND} drafts per command`,
       );
 
       for (const [command, series] of Object.entries(measured)) {
         const all = [...series.first, ...series.rest];
 
-        // Reported in three groups, because the first tap behaves differently and saying so is
-        // useful. Judged as one, because §12.7 rule 1 makes no distinction.
         report(`[${LABEL}] ${profile.name} · ${command} · FIRST tap · visible`, series.first.map((s) => s.ack));
         report(`[${LABEL}] ${profile.name} · ${command} · FIRST tap · confirmed`, series.first.map((s) => s.done));
+        reportPageState(`[${LABEL}] ${profile.name} · ${command} · FIRST tap · page state`, series.first);
+        reportDecomposition(`[${LABEL}] ${profile.name} · ${command} · FIRST tap · where it went`, series.first);
+
         report(`[${LABEL}] ${profile.name} · ${command} · later taps · visible`, series.rest.map((s) => s.ack));
         report(`[${LABEL}] ${profile.name} · ${command} · later taps · confirmed`, series.rest.map((s) => s.done));
+        reportPageState(`[${LABEL}] ${profile.name} · ${command} · later taps · page state`, series.rest);
+        reportDecomposition(`[${LABEL}] ${profile.name} · ${command} · later taps · where it went`, series.rest);
 
         const ack = report(`[${LABEL}] ${profile.name} · ${command} · ALL · visible`, all.map((s) => s.ack));
         const done = report(`[${LABEL}] ${profile.name} · ${command} · ALL · confirmed`, all.map((s) => s.done));
 
-        // EVERY tap, including the first. Rule 1 is about every click or tap and names no
-        // exception, so the worst of all of them carries it.
-        //
-        // SOFT, so that a failure on the first command still leaves the second one measured and
-        // printed. A hard assertion here threw away half the evidence: the correction was timed and
-        // then never reported, because the batch had already failed the gate. A benchmark whose
-        // output depends on whether it passed is not evidence.
+        // EVERY tap, including the first. Rule 1 names no exception, so the worst of all of them
+        // carries it. SOFT, so a failure on the first command still leaves the second measured and
+        // printed: a benchmark whose output depends on whether it passed is not evidence.
         expect
           .soft(
             ack.worst,
             `${command} on ${profile.name}: worst visible acknowledgement ${ack.worst} ms ` +
-              `(p50 ${ack.p50}, p95 ${ack.p95}) over ${ack.n} taps including the first of each load`,
+              `(p50 ${ack.p50}, p95 ${ack.p95}) over ${ack.n} touches including the first of each load`,
           )
           .toBeLessThan(TAP_TO_VISIBLE_BUDGET_MS);
 
         expect
           .soft(
             done.p95,
-            `${command} on ${profile.name}: p95 server-confirmed ${done.p95} ms over ${done.n} taps`,
+            `${command} on ${profile.name}: p95 server-confirmed ${done.p95} ms over ${done.n} touches`,
           )
           .toBeLessThan(COMPLETION_P95_BUDGET_MS);
       }

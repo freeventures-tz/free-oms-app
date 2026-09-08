@@ -344,14 +344,22 @@ async function draftAdjustmentOf(productId: string, delta: number): Promise<stri
   return (data.adjustment as { id: string }).id;
 }
 
-/** `ensureAvailable`, for a product other than the cement. */
-async function ensureAvailableOf(productId: string, minimum: number): Promise<void> {
+/**
+ * Availability moved to an EXACT figure, up or down, through the ordinary correction path.
+ *
+ * A race can only require a determinate outcome if it starts from a determinate position.
+ * `ensureAvailable` tops up to a floor, which leaves whatever the previous test happened to
+ * finish with — enough for "nothing went negative", not enough to say how many commands had to
+ * succeed.
+ */
+async function setAvailableTo(productId: string, target: number): Promise<void> {
   const current = await availabilityOf(productId);
-  if (current.available >= minimum) return;
+  if (current.available === target) return;
 
-  const id = await draftAdjustmentOf(productId, minimum - current.available);
+  const id = await draftAdjustmentOf(productId, target - current.available);
   const { data } = await approveAdjustment(id);
   expect(data?.ok, JSON.stringify(data)).toBe(true);
+  expect((await availabilityOf(productId)).available).toBe(target);
 }
 
 /**
@@ -889,13 +897,25 @@ describe("the sales commands that were left alone", () => {
     // is taken in ascending product id, so a batch consuming both and a batch consuming both in
     // the other order still queue rather than deadlock — and a deadlock here would surface as a
     // transport error rather than a refusal, which is what the assertion below separates.
-    await ensureAvailable(80);
-    await ensureAvailableOf(sandId, 80);
+    //
+    // BOTH PRODUCTS ARE SET TO EXACTLY TWICE THE SHARE, because that is what turns "nothing went
+    // negative" into a claim about progress. With 2q of each and four commands wanting q —
+    // two batches taking q of BOTH, a walk-in taking q of the cement, a write-off taking q of the
+    // sand — the arithmetic is determinate:
+    //
+    //   · no more than 2q of either product can be taken, so at most two of the four claims on
+    //     each product can win;
+    //   · whichever order the locks are granted in, the yard ends at exactly zero available for
+    //     both products — every unit that could be claimed is claimed;
+    //   · and therefore AT LEAST TWO commands must succeed. Two batches alone drain both products;
+    //     any other winning combination needs three. One success cannot drain 2q of both, and zero
+    //     successes is not a safe outcome — it is a serialisation failure wearing the same face.
+    const share = 30;
+    await setAvailableTo(cementId, 2 * share);
+    await setAvailableTo(sandId, 2 * share);
 
     const cement = await availability();
     const sand = await availabilityOf(sandId);
-
-    const share = 30;
 
     // Two batches, each consuming BOTH products; a walk-in taking cement; a write-off taking sand.
     const batchOne = await draftBatchOf([
@@ -951,6 +971,27 @@ describe("the sales commands that were left alone", () => {
     // Neither product may pass through zero, whoever won.
     expect(cementAfter.available).toBeGreaterThanOrEqual(0);
     expect(sandAfter.available).toBeGreaterThanOrEqual(0);
+
+    // ---------------------------------------------------------------------
+    // SUCCESSFUL PROGRESS, required rather than hoped for
+    //
+    // Everything above would be satisfied by four refusals: no transport failure, no negative
+    // figure, exact finals of "nothing moved". That is not the system working, it is the system
+    // refusing everybody, and the two are told apart here.
+    // ---------------------------------------------------------------------
+    const succeeded = results.filter((result) => result.data?.ok === true).length;
+    expect(
+      succeeded,
+      `at least two of the four had to get through; ${succeeded} did: ` +
+        JSON.stringify(results.map((r) => r.data?.reason ?? r.error)),
+    ).toBeGreaterThanOrEqual(2);
+
+    // And every unit that could be claimed WAS claimed: 2q of each product, gone, with no room
+    // left over. A run that refused a command it could have served would land above zero here.
+    expect(cementAfter.available, "the cement is fully claimed").toBe(0);
+    expect(sandAfter.available, "and so is the sand").toBe(0);
+    expect(cementConsumed + (wonSale ? share : 0), "2q of cement claimed").toBe(2 * share);
+    expect(sandConsumed, "2q of sand claimed").toBe(2 * share);
   });
 });
 
