@@ -488,9 +488,23 @@ async function confirmRelease(dispatchId: string) {
  * documented lock order. Without this, "nobody succeeded" would satisfy a test that only counted
  * successes — which is precisely the hole the review found in the two races below.
  */
-function expectNoTransportFailure(results: { error: unknown }[]): void {
+function expectNoTransportFailure(results: { error: unknown; data?: unknown }[]): void {
   for (const result of results) {
     expect(result.error, `a command failed in transport: ${JSON.stringify(result.error)}`).toBeNull();
+
+    // AND IT ANSWERED IN THE SHAPE IT PROMISES. A null body, an array, or a missing `ok` is not a
+    // refusal and must not be counted as one: PostgREST answers a raised exception with no body at
+    // all, and a proxy can produce one with no error beside it. Without this, "not ok" would
+    // quietly include "did not answer".
+    const body = result.data;
+    expect(
+      body !== null && typeof body === "object" && !Array.isArray(body),
+      `a command answered with ${body === null ? "null" : typeof body}: ${JSON.stringify(body)}`,
+    ).toBe(true);
+    expect(
+      typeof (body as Record<string, unknown>).ok,
+      `a command answered without a boolean ok: ${JSON.stringify(body)}`,
+    ).toBe("boolean");
   }
 }
 
@@ -893,10 +907,17 @@ describe("the sales commands that were left alone", () => {
   });
 
   it("keeps two products straight when four commands take them at once", async () => {
-    // OVERLAPPING PRODUCTS, which is the case one product can never exercise. `lock_product_stock`
-    // is taken in ascending product id, so a batch consuming both and a batch consuming both in
-    // the other order still queue rather than deadlock — and a deadlock here would surface as a
-    // transport error rather than a refusal, which is what the assertion below separates.
+    // OVERLAPPING PRODUCTS, which is the case one product can never exercise: four commands, two
+    // products, one moment.
+    //
+    // THE INPUT ORDER IS NOT THE LOCK ORDER, and an earlier version of this comment claimed the two
+    // batches were sent in opposite orders when both arrays are built the same way. They are, and it
+    // would make no difference if they were not: `api.staff_approve_production_batch` reads its
+    // inputs `order by product_id`, so the caller cannot choose the order the locks are taken in.
+    // That is exactly the property being relied on — the ordering is the command's, not the
+    // caller's — and it is why four commands crossing two products queue rather than deadlock. A
+    // deadlock would surface as a transport error rather than a refusal, which is what
+    // `expectNoTransportFailure` separates below.
     //
     // BOTH PRODUCTS ARE SET TO EXACTLY TWICE THE SHARE, because that is what turns "nothing went
     // negative" into a claim about progress. With 2q of each and four commands wanting q —

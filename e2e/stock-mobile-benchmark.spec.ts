@@ -26,17 +26,25 @@ import { expectLandsOn, fixtures, signIn } from "./fixtures";
  * a measurement silently taken with a mouse — which is what `click()` gives even on a project
  * configured `hasTouch` — fails instead of quietly describing the wrong input.
  *
- * A VISIBLE CHANGE ON THE CONTROL THAT WAS TOUCHED STOPS IT. Not "some button on the page went
- * busy": the element handle that was tapped is held, and the signal is a rendered spinner INSIDE
- * that element while that element carries `aria-busy`. A document-wide query would have accepted a
- * neighbouring control's feedback as this one's.
+ * A VISIBLE CHANGE ON THE CONTROL THAT WAS TOUCHED STOPS IT, and the touch is confirmed to have
+ * landed there: the `pointerdown` is ignored unless its target is that element or inside it. The
+ * element handle that was tapped is held, and the signal is a spinner rendered INSIDE it while it
+ * carries `aria-busy`.
  *
- * SUCCESS IS THE APPROVAL OF THE SAME ENTITY. For a batch, the decision record carrying that
- * batch's own id. For a correction, the card carrying that correction's own reason string — seeded
- * unique per sample — showing its "approved by" chip. A count of decisions on the page proves that
- * SOMETHING settled, which is not the same claim and was wrong here twice: once because the decided
- * queue pages at twenty-five and the count could not rise, and once because a count says nothing
- * about which record moved.
+ * AND A NODE IN THE TREE IS NOT YET A PIXEL. The spinner is required to have a non-zero box and a
+ * computed style that can be seen, and the clock stops on the ANIMATION FRAME that carries that
+ * render to the screen rather than on the DOM mutation. Both figures are reported. The residual
+ * uncertainty is one frame: a rAF callback runs immediately before the paint it belongs to, and
+ * nothing inside the page can observe the paint completing, so this is a close lower bound rather
+ * than the paint itself.
+ *
+ * SUCCESS IS THE APPROVAL OF THE SAME ENTITY — approval, not merely a decision. For a batch, the
+ * decision record carrying that batch's own id AND the card around it reading Approved, because
+ * `batch-decision-<id>` renders for a rejection too. For a correction, the card carrying that
+ * correction's own uniquely seeded reason showing its own "approved by" chip. A count of settled
+ * records proves that SOMETHING settled, which is a different claim and was wrong here twice: once
+ * because the decided queue pages at twenty-five so the count could not rise, and once because a
+ * count says nothing about which record moved.
  *
  * ── WHICH SAMPLES ARE JUDGED ──────────────────────────────────────────────────────────────────
  *
@@ -62,30 +70,49 @@ import { expectLandsOn, fixtures, signIn } from "./fixtures";
  *
  * ── WHAT THE CORRECTED INSTRUMENT FOUND, 8 September 2026 ─────────────────────────────────────
  *
- * BOTH GATES ARE MET, and two earlier findings from this file are WITHDRAWN.
+ * BOTH GATES ARE MET, ON BOTH TREES, and two earlier findings from this file are WITHDRAWN.
  *
- * Four runs, candidate and base alternating back to back: candidate passed twice, base passed once
- * and failed one series once. Every failure and near-miss decomposes the same way — the application
- * is not the slow part. `click → spinner`, which is the whole of the application's share of the
- * acknowledgement, measured p50 10–30 ms and never exceeded 48 ms on either tree in any run. The
- * one failing series was 180 ms total, of which 147 ms was `pointerdown → click`: the input
- * pipeline, before a React handler can run at all.
+ * Candidate and base run back to back with this exact file, 25 samples per command per profile,
+ * all of them judged:
  *
- * WITHDRAWN 1 — "the first tap waits for the page to become interactive". Disproved by this file's
- * own evidence: `readyState` was `complete` and the touch landed after `loadEventEnd` in 100% of
- * samples, first taps included, three to six seconds after navigation. The earlier version asserted
- * hydration as the cause without measuring it, and the measurement does not support it.
+ *                                   candidate            base
+ *   Slow 4G · batch      worst ack    51 ms               77 ms
+ *                        p95 done    931 ms            1 098 ms
+ *   Slow 4G · correction worst ack    58 ms               67 ms
+ *                        p95 done    832 ms              973 ms
+ *   Fast 4G · batch      worst ack    60 ms               56 ms
+ *                        p95 done    798 ms              755 ms
+ *   Fast 4G · correction worst ack    45 ms               42 ms
+ *                        p95 done    371 ms              406 ms
+ *
+ * Where it goes: `pointerdown → click` 5–39 ms, the browser's touch handling; `click → spinner`
+ * 14–43 ms, the application's own share. The frame that carries the render costs 0–12 ms beyond
+ * the DOM change. Nothing in either tree approaches 100 ms, and nothing approaches 2,500 ms.
+ *
+ * WITHDRAWN 1 — "the first tap waits for the page to become interactive". Disproved by this
+ * file's own evidence: `readyState` was `complete` and the touch landed after `loadEventEnd` in
+ * 100% of samples, first taps included, one to six seconds after navigation. It was asserted
+ * without being measured.
  *
  * WITHDRAWN 2 — the proposed `active:` variant on the shared `Button`. It was proposed to fix a
- * defect the earlier instrument appeared to show and this one does not: with a real touch, a
- * visible signal on the control that was actually touched, and success read from the entity that
- * was actually approved, there is no evidenced application defect for it to fix. It is not carried
- * forward, and nothing in the shared control is changed on the strength of a measurement that has
- * since been corrected.
+ * defect the older instrument appeared to show and this one does not. No shared control is
+ * changed and no application correction is proposed, because the measurements no longer evidence
+ * one.
  *
- * WHAT REMAINS TRUE is that this machine's spread is wide — the same tree produced a 42 ms and a
- * 153 ms worst on consecutive days under the older instrument — so single runs prove little and
- * matched pairs run back to back are the only comparison worth reading.
+ * THE EARLIER NUMBERS WERE THE INSTRUMENT, NOT THE APPLICATION. Three faults produced them, and
+ * each is worth naming because each looked reasonable:
+ *
+ *   · a mouse click stood in for a touch, so the input pipeline under test was never exercised;
+ *   · the busy-and-spinning check was document-wide, so any control could satisfy it;
+ *   · success was a COUNT of settled records rather than the approval of the entity tapped.
+ *
+ * A fourth lived in this file for one round and never matched anything: a word-boundary regex
+ * looking for "Approved" in a card whose `textContent` runs its elements together as
+ * "…0001ApprovedYard…". It now finds the status chip element and compares its trimmed text, which
+ * is what the card actually says rather than what a substring search hopes it says.
+ *
+ * WHAT REMAINS TRUE is that this machine's spread is wide, so single runs prove little and only
+ * matched pairs run back to back are worth reading. That is how the table above was taken.
  */
 
 const ENABLED = process.env.FV_BENCHMARK === "1";
@@ -149,8 +176,13 @@ type Board = "batch" | "adjustment";
  * tell a slow control from a slow browser — and the two have opposite fixes.
  */
 type Sample = {
-  /** `pointerdown` → the spinner rendered on the touched control. The whole of what a person waits. */
+  /**
+   * `pointerdown` → the animation frame that carries the spinner to the screen. The gate is judged
+   * on this rather than on the DOM mutation, because a node in the tree is not yet a pixel.
+   */
   ack: number;
+  /** The same interval measured to the DOM change instead, so the frame's cost is visible. */
+  ackDomChange: number;
   /** `pointerdown` → the synthesised `click`. The browser's touch handling, not ours. */
   inputDelay: number;
   /** `click` → the spinner. The application's own share of the acknowledgement. */
@@ -227,6 +259,11 @@ function reportDecomposition(label: string, samples: Sample[]): void {
   );
   console.log(`${" ".repeat(60)} raw pointerdown→click: ${input.map((v) => Math.round(v)).join(", ")}`);
   console.log(`${" ".repeat(60)} raw click→spinner:     ${app.map((v) => Math.round(v)).join(", ")}`);
+  const dom = samples.map((s) => s.ackDomChange);
+  console.log(
+    `${" ".repeat(60)} same interval to the DOM change instead of the frame: ` +
+      `p50=${Math.round(percentile(dom, 0.5))}ms worst=${Math.round(Math.max(...dom))}ms`,
+  );
 }
 
 async function signInAs(page: Page, who: "director" | "manager") {
@@ -308,7 +345,20 @@ async function measureTap(
 
       const settled = () => {
         if (kind === "batch") {
-          return Boolean(document.querySelector(`[data-testid="batch-decision-${id}"]`));
+          // A DECISION IS NOT AN APPROVAL. `batch-decision-<id>` renders for any decided batch,
+          // a rejection included, so it is paired with the card's own status: the record must be
+          // this batch's AND the card carrying it must say Approved.
+          const record = document.querySelector(`[data-testid="batch-decision-${id}"]`);
+          if (!record) return false;
+          const card = record.closest('[role="article"]');
+          if (!card) return false;
+          // THE STATUS CHIP ITSELF, not a substring of the card. A card's `textContent` runs its
+          // elements together — "FV-BAT-20260908-0001ApprovedYard · 8 Sept…" — so "Approved" has a
+          // letter on one side and a word boundary never matches it, while a bare substring test
+          // would also accept the word arriving from somewhere else entirely.
+          return Array.from(card.querySelectorAll("span")).some(
+            (el) => (el.textContent ?? "").trim() === "Approved",
+          );
         }
         // THIS correction, identified by its own reason text, showing its own approval chip.
         for (const card of Array.from(document.querySelectorAll('[role="article"]'))) {
@@ -334,6 +384,7 @@ async function measureTap(
       const state = {
         down: null as number | null,
         click: null as number | null,
+        domChange: null as number | null,
         visible: null as number | null,
         done: null as number | null,
         pointerType: "",
@@ -349,6 +400,10 @@ async function measureTap(
 
       const onPointerDown = (event: PointerEvent) => {
         if (state.down !== null) return;
+        // WHICH CONTROL RECEIVED IT. A document-level listener would otherwise timestamp a touch
+        // that landed somewhere else entirely and call it this control's acknowledgement.
+        const hit = event.target as Node | null;
+        if (!hit || !(target === hit || target.contains(hit))) return;
         state.down = performance.now();
         state.pointerType = event.pointerType;
         state.trusted = event.isTrusted;
@@ -377,14 +432,34 @@ async function measureTap(
       document.addEventListener("click", onClick, { capture: true });
 
       const check = () => {
-        // VISIBLE, ON THE CONTROL THAT WAS TOUCHED: it says it is working AND it is rendering the
-        // spinner that replaces its label. Both, on this element, or it does not count.
-        if (
-          state.visible === null &&
-          target.getAttribute("aria-busy") === "true" &&
-          target.querySelector(".animate-spin")
-        ) {
-          state.visible = performance.now();
+        // VISIBLE, ON THE CONTROL THAT WAS TOUCHED: it says it is working AND it is rendering a
+        // spinner that actually occupies space. `querySelector` alone proves DOM insertion, which
+        // is not the same as something a person can see, so the element's own box and computed
+        // style are checked too.
+        if (state.visible === null && target.getAttribute("aria-busy") === "true") {
+          const spinner = target.querySelector(".animate-spin");
+          if (spinner) {
+            const box = spinner.getBoundingClientRect();
+            const style = getComputedStyle(spinner);
+            const painted =
+              box.width > 0 &&
+              box.height > 0 &&
+              style.visibility !== "hidden" &&
+              style.display !== "none" &&
+              Number(style.opacity) !== 0;
+
+            if (painted) {
+              state.domChange = performance.now();
+              // AND THE FRAME THAT CARRIES IT TO THE SCREEN. A rAF callback runs immediately
+              // before the paint that shows this render, so it is the closest a page can get to
+              // timestamping its own paint. The gate is judged on this, the later of the two.
+              // The residual uncertainty is one frame — the paint completes shortly after the
+              // callback, and nothing inside the page can observe that moment directly.
+              requestAnimationFrame(() => {
+                if (state.visible === null) state.visible = performance.now();
+              });
+            }
+          }
         }
         if (state.done === null && settled()) state.done = performance.now();
       };
@@ -397,11 +472,22 @@ async function measureTap(
         characterData: true,
       });
 
+      // THE POLL DRIVES THE CHECK AS WELL AS THE OBSERVER.
+      //
+      // A MutationObserver alone was not enough: one sample recorded its touch, its click and its
+      // spinner, then sat for two minutes while the page plainly showed the approval it was
+      // waiting for. Whatever swallowed that callback, an instrument that can miss the event it
+      // exists to time is not one to reason from, so the animation-frame poll below re-evaluates
+      // the same predicate. The cost is that a settled timestamp can be up to one frame late;
+      // the benefit is that it cannot be missed altogether.
+      w.__fvCheck = check;
+
       w.__fvTeardown = () => {
         observer.disconnect();
         document.removeEventListener("pointerdown", onPointerDown, { capture: true });
         document.removeEventListener("touchstart", onTouchStart, { capture: true });
         document.removeEventListener("click", onClick, { capture: true });
+        w.__fvCheck = undefined;
       };
 
       check();
@@ -417,10 +503,14 @@ async function measureTap(
   try {
     handle = await page.waitForFunction(
       () => {
-        const s = (window as unknown as Record<string, Record<string, unknown>>).__fvBench;
+        const w = window as unknown as Record<string, unknown>;
+        const poll = w.__fvCheck as (() => void) | undefined;
+        if (poll) poll();
+        const s = w.__fvBench as Record<string, unknown> | undefined;
         if (!s || s.down === null || s.visible === null || s.done === null) return null;
         return {
           ack: (s.visible as number) - (s.down as number),
+          ackDomChange: s.domChange === null ? -1 : (s.domChange as number) - (s.down as number),
           inputDelay: s.click === null ? -1 : (s.click as number) - (s.down as number),
           appResponse:
             s.click === null
@@ -445,7 +535,30 @@ async function measureTap(
     const state = await page.evaluate(
       () => (window as unknown as Record<string, unknown>).__fvBench ?? null,
     );
-    throw new Error(`the tap was never completely observed: ${JSON.stringify(state)}`);
+
+    // AND WHAT THE SETTLED PREDICATE ACTUALLY SEES. "It never settled" is not a diagnosis; whether
+    // the record is absent, or present in a card that does not say Approved, are different faults
+    // with different fixes, and one of them is a fault in this instrument rather than in the app.
+    const seen = await page.evaluate(
+      ({ id, reason }) => {
+        const record = document.querySelector(`[data-testid="batch-decision-${id}"]`);
+        const card = record?.closest('[role="article"]') ?? null;
+        return {
+          recordFound: Boolean(record),
+          cardLabel: card?.getAttribute("aria-label") ?? null,
+          cardText: (card?.textContent ?? "").replace(/\s+/g, " ").slice(0, 240),
+          articlesWithReason: Array.from(document.querySelectorAll('[role="article"]'))
+            .filter((el) => (el.textContent ?? "").includes(reason))
+            .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").slice(0, 160)),
+        };
+      },
+      { id: entityId, reason: marker },
+    );
+
+    throw new Error(
+      `the tap was never completely observed: ${JSON.stringify(state)}` +
+        ` · settled() sees: ${JSON.stringify(seen)}`,
+    );
   }
 
   const sample = (await handle.jsonValue()) as Sample;
@@ -544,9 +657,12 @@ describeBenchmark("stock commands on a phone over 4G", () => {
       // ---------------------------------------------------------------------
       const batchIds: string[] = [];
       for (let i = 0; i < PER_COMMAND; i++) {
-        const { data } = await manager.api.rpc("staff_enter_production_batch", {
+        const { data, error } = await manager.api.rpc("staff_enter_production_batch", {
           p_location_code: "yard",
-          p_moulded_at: new Date().toISOString(),
+          // FIVE MINUTES AGO, not `now`. The command refuses a moulding time in the future, and
+          // the database container's clock and this process's need not agree to the millisecond —
+          // one seeding loop was refused `moulded_at_invalid` for exactly that reason.
+          p_moulded_at: new Date(Date.now() - 5 * 60_000).toISOString(),
           // Every recipe input answered for (AC-39); confirming zero is one of the answers.
           p_inputs: recipe.map((id) => ({
             product_id: id,
@@ -556,7 +672,7 @@ describeBenchmark("stock commands on a phone over 4G", () => {
           p_yield_note: null,
           p_idempotency_key: randomUUID(),
         });
-        expect(data?.ok, JSON.stringify(data)).toBe(true);
+        expect(data?.ok, JSON.stringify({ data, error })).toBe(true);
         batchIds.push((data.batch as { id: string }).id);
       }
 
