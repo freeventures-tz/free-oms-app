@@ -40,7 +40,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(66);
+select plan(81);
 
 create schema if not exists tests;
 
@@ -427,6 +427,115 @@ select is(
   (api.staff_approve_settlement((select id from public.invoices limit 1), 'inv-settle-1')
    ->> 'reason'),
   'approved', 'the Cashier settles the invoice');
+
+-- ---------------------------------------------------------------------------
+-- COMMITTED stock is protected exactly as RESERVED stock was
+--
+-- §8.1 lists reserved and committed as two states of one promise, and both are subtracted. Every
+-- refusal above happened while the claim was RESERVED — an order confirmed and not yet paid. Once
+-- the customer has paid and the Cashier has settled, the claim becomes COMMITTED, the goods are
+-- still standing in the store, and they are MORE spoken for than before, not less: §8 says paid
+-- items remain physically present until signature and cannot be sold again.
+--
+-- So the same two commands are asked again here, against the same bags in the same place, and must
+-- be refused for the same reason. A rule that protected a reservation and released its grip the
+-- moment money changed hands would fail at the only point that actually matters.
+-- ---------------------------------------------------------------------------
+select is(
+  (select reserved_quantity from public.product_availability where product_id = tests.cement()),
+  0::bigint,
+  'settlement moved the claim out of reserved');
+
+select is(
+  (select committed_quantity from public.product_availability where product_id = tests.cement()),
+  80::bigint,
+  'and into committed, where §8.1 subtracts it just the same');
+
+select is(
+  (select available_quantity from public.product_availability where product_id = tests.cement()),
+  15::bigint,
+  'so fifteen of the ninety-five bags are still the only ones anybody may take');
+
+select tests.acting_as('a1000000-0000-0000-0000-000000000002'::uuid);   -- Manager
+
+-- Twenty: more than the fifteen available, far less than the ninety-five physically at the store.
+-- The location can supply it and the business cannot, which is the whole distinction.
+select is(
+  (api.staff_enter_production_batch(
+     'store', now(), tests.batch_inputs(20),
+     jsonb_build_array(
+       jsonb_build_object('product_id', tests.product('Tofali 6"'), 'quantity_moulded', 22)),
+     null, 'inv-batch-committed') ->> 'reason'),
+  'entered', 'a batch for twenty bags is entered while eighty are paid for');
+
+select is(
+  (api.staff_approve_production_batch(
+     (select batch_id from public.production_batch_inputs where actual_quantity = 20),
+     'inv-batch-committed-approve') ->> 'reason'),
+  'insufficient_stock',
+  'and refused: COMMITTED stock is somebody else''s, not merely reserved');
+
+select is(
+  (api.staff_approve_production_batch(
+     (select batch_id from public.production_batch_inputs where actual_quantity = 20),
+     'inv-batch-committed-approve-b') -> 'promised')::text,
+  '80',
+  'the refusal names the eighty that were paid for');
+
+select is(
+  (api.staff_approve_production_batch(
+     (select batch_id from public.production_batch_inputs where actual_quantity = 20),
+     'inv-batch-committed-approve-c') -> 'available')::text,
+  '15',
+  'beside the fifteen that are genuinely free');
+
+select is(
+  (select after_state ->> 'reason' from tests.last_refusal('api.staff_approve_production_batch')),
+  'insufficient_stock',
+  'and the committed-stock refusal is audited like any other');
+
+select is(
+  (api.staff_enter_stock_adjustment(tests.cement(), 'store', -20, 'damp damage', 'inv-adj-committed')
+   ->> 'reason'),
+  'entered', 'a correction writing off twenty is entered against the same bags');
+
+select tests.acting_as('a1000000-0000-0000-0000-000000000001'::uuid);   -- Director
+
+select is(
+  (api.admin_approve_stock_adjustment(
+     (select id from public.stock_adjustments where quantity_delta = -20),
+     'inv-adj-committed-approve') ->> 'reason'),
+  'insufficient_stock',
+  'and a Director approving it is refused too: writing off paid goods is the same loss');
+
+select is(
+  (api.admin_approve_stock_adjustment(
+     (select id from public.stock_adjustments where quantity_delta = -20),
+     'inv-adj-committed-approve-b') -> 'promised')::text,
+  '80',
+  'with the same promised figure behind it');
+
+select is(
+  (select after_state ->> 'reason' from tests.last_refusal('api.admin_approve_stock_adjustment')),
+  'insufficient_stock',
+  'audited under the correction operation');
+
+-- Neither refusal moved anything. This is the assertion that makes the two above worth making.
+select is(
+  (select private.stock_on_hand(tests.cement(), 'store', 'available')),
+  95::bigint,
+  'the store still holds all ninety-five bags');
+
+select is(
+  (select available_quantity from public.product_availability where product_id = tests.cement()),
+  15::bigint,
+  'and availability is untouched by two refusals');
+
+select is(
+  (select status::text from public.production_batches
+    where id = (select batch_id from public.production_batch_inputs where actual_quantity = 20)),
+  'draft',
+  'the refused batch is still a draft');
 
 select tests.acting_as('a1000000-0000-0000-0000-000000000001'::uuid);   -- Director
 

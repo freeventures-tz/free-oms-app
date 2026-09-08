@@ -6,7 +6,7 @@ import { createLiveStaff, ensureDirector, type Fixture } from "@/tests/integrati
 /**
  * One stock-availability rule, over real HTTP and under genuine concurrency (issue #7).
  *
- * pgTAP 015 proves the rule inside the database, in one session, in one transaction. Two things it
+ * pgTAP 014 proves the rule inside the database, in one session, in one transaction. Two things it
  * structurally cannot prove are here instead:
  *
  *   1. THE RULE SURVIVES THE JOURNEY A BROWSER TAKES — a session token, a schema header, a JSON
@@ -33,11 +33,20 @@ import { createLiveStaff, ensureDirector, type Fixture } from "@/tests/integrati
 let director: Fixture;
 let manager: Fixture;
 let salesRep: Fixture;
+/** The till. §12.4 gives the walk-in sale and §12.5 the settlement to this role. */
+let cashier: Fixture;
 
 let cementId: string;
+/** A SECOND product a batch consumes and a customer buys, for the overlapping-product races. */
+let sandId: string;
 let customerId: string;
+/** §12.4's permanent one-click row, which is what a walk-in sale is written against. */
+let cashCustomerId: string;
+/** §3.2: someone who moves goods but does not use the system. Every dispatch names one. */
+let storekeeperId: string;
 
 const YARD = "yard";
+const UNIT_PRICE = 20_000;
 
 beforeAll(async () => {
   director = await ensureDirector();
@@ -74,14 +83,74 @@ beforeAll(async () => {
   });
   expect(customer?.ok, JSON.stringify(customer)).toBe(true);
   customerId = (customer.customer as { id: string }).id;
+
+  // ---------------------------------------------------------------------
+  // The rest of the cast, for the committed-stock and cross-command races
+  // ---------------------------------------------------------------------
+  cashier = await createLiveStaff(director, "cashier");
+
+  const { data: sand } = await director.read
+    .from("products")
+    .select("id")
+    .eq("name", "Sand")
+    .maybeSingle();
+  expect(sand, "product.md §6 seeds Sand, which §11.1 also makes a recipe input").not.toBeNull();
+  sandId = (sand as { id: string }).id;
+
+  // Sand is priced too, because the overlapping-product race sells it as well as consuming it.
+  const { data: sandPriced } = await director.api.rpc("admin_set_product_price", {
+    p_product_id: sandId,
+    p_price_tzs: UNIT_PRICE,
+    p_reason: "stock invariant fixture",
+    p_idempotency_key: randomUUID(),
+  });
+  expect(
+    sandPriced?.ok || sandPriced?.reason === "price_unchanged",
+    JSON.stringify(sandPriced),
+  ).toBeTruthy();
+
+  // §12.4 seeds exactly one Cash Customer, forever. It is found, never created.
+  const { data: cash } = await salesRep.read
+    .from("customers")
+    .select("id")
+    .eq("is_cash_customer", true)
+    .maybeSingle();
+  expect(cash, "product.md §12.4 seeds the permanent Cash Customer").not.toBeNull();
+  cashCustomerId = (cash as { id: string }).id;
+
+  // One storekeeper for the whole file. Already-registered is the rule holding, not a failure.
+  const { data: keeper } = await director.api.rpc("admin_add_storekeeper", {
+    p_full_name: `Invariant Storekeeper ${randomUUID().slice(0, 8)}`,
+    p_phone: `07${Math.floor(10_000_000 + Math.random() * 89_999_999)}`,
+    p_start_date: new Date().toISOString().slice(0, 10),
+    p_note: null,
+    p_idempotency_key: randomUUID(),
+  });
+  expect(keeper?.ok, JSON.stringify(keeper)).toBe(true);
+  storekeeperId = (keeper.storekeeper as { id: string }).id;
 });
 
-/** The §8.1 figure, read through a session that obeys RLS. */
-async function availability(): Promise<{ physical: number; promised: number; available: number }> {
+/**
+ * The §8.1 figures, read through a session that obeys RLS.
+ *
+ * RESERVED AND COMMITTED ARE REPORTED SEPARATELY as well as summed. §8.1 lists them as two states
+ * of one promise and subtracts both, but they are not interchangeable — a claim moves from one to
+ * the other when the customer pays — and a test that only ever saw the sum could not tell whether
+ * a refusal was protecting an unpaid order or a paid one.
+ */
+type Availability = {
+  physical: number;
+  reserved: number;
+  committed: number;
+  promised: number;
+  available: number;
+};
+
+async function availabilityOf(productId: string): Promise<Availability> {
   const { data, error } = await director.read
     .from("product_availability")
     .select("physical_quantity, reserved_quantity, committed_quantity, available_quantity")
-    .eq("product_id", cementId)
+    .eq("product_id", productId)
     .maybeSingle();
 
   expect(error, error?.message).toBeNull();
@@ -90,9 +159,15 @@ async function availability(): Promise<{ physical: number; promised: number; ava
   const row = data as Record<string, number>;
   return {
     physical: Number(row.physical_quantity),
+    reserved: Number(row.reserved_quantity),
+    committed: Number(row.committed_quantity),
     promised: Number(row.reserved_quantity) + Number(row.committed_quantity),
     available: Number(row.available_quantity),
   };
+}
+
+async function availability(): Promise<Availability> {
+  return availabilityOf(cementId);
 }
 
 /** What one place physically holds, which is the other half of the rule. */
@@ -223,6 +298,197 @@ async function ensureAvailable(minimum: number): Promise<void> {
   expect(data?.ok, JSON.stringify(data)).toBe(true);
 }
 
+/**
+ * A batch consuming SEVERAL products at once, for the overlapping-product race.
+ *
+ * `draftBatch` above puts the whole quantity on the cement because every other test in this file
+ * is about one product. This one names each product it wants and confirms the rest of the recipe at
+ * zero, which is what lets two batches contend for two products simultaneously.
+ */
+async function draftBatchOf(
+  lines: { productId: string; quantity: number }[],
+  location = YARD,
+): Promise<string> {
+  const wanted = new Map(lines.map((line) => [line.productId, line.quantity]));
+
+  if (!cachedRecipe) await recipeInputs(0);
+  for (const productId of wanted.keys()) {
+    expect(cachedRecipe, "every product raced here must be a recipe input").toContain(productId);
+  }
+
+  const { data } = await manager.api.rpc("staff_enter_production_batch", {
+    p_location_code: location,
+    p_moulded_at: new Date().toISOString(),
+    p_inputs: cachedRecipe!.map((productId) => ({
+      product_id: productId,
+      actual_quantity: wanted.get(productId) ?? 0,
+    })),
+    p_outputs: [{ product_id: await brickId(), quantity_moulded: 22 }],
+    p_yield_note: null,
+    p_idempotency_key: randomUUID(),
+  });
+  expect(data?.ok, JSON.stringify(data)).toBe(true);
+  return (data.batch as { id: string }).id;
+}
+
+/** A correction on any product, not only the cement. */
+async function draftAdjustmentOf(productId: string, delta: number): Promise<string> {
+  const { data } = await manager.api.rpc("staff_enter_stock_adjustment", {
+    p_product_id: productId,
+    p_location_code: YARD,
+    p_quantity_delta: delta,
+    p_reason: "stock invariant integration test",
+    p_idempotency_key: randomUUID(),
+  });
+  expect(data?.ok, JSON.stringify(data)).toBe(true);
+  return (data.adjustment as { id: string }).id;
+}
+
+/** `ensureAvailable`, for a product other than the cement. */
+async function ensureAvailableOf(productId: string, minimum: number): Promise<void> {
+  const current = await availabilityOf(productId);
+  if (current.available >= minimum) return;
+
+  const id = await draftAdjustmentOf(productId, minimum - current.available);
+  const { data } = await approveAdjustment(id);
+  expect(data?.ok, JSON.stringify(data)).toBe(true);
+}
+
+/**
+ * An order for the Cash Customer, confirmed and waiting at the till (§12.4).
+ *
+ * IT IS CONFIRMED AND STILL RESERVES NOTHING, which is the whole shape of the walk-in path and the
+ * reason this races the way it does. `staff_confirm_order` branches on the cash sale and returns
+ * `confirmed_cash_sale` WITHOUT writing an allocation; `staff_take_cash_payment` is the single
+ * command that takes the stock, invoices it and settles it together, and it creates the claim
+ * already COMMITTED because the money is already in. So the §8.1 contention is at payment, not at
+ * confirmation, and that is the moment worth racing a batch against.
+ */
+async function draftCashOrder(quantity: number, productId = cementId): Promise<string> {
+  const { data } = await salesRep.api.rpc("staff_create_order", {
+    p_customer_id: cashCustomerId,
+    p_lines: [{ product_id: productId, quantity }],
+    p_idempotency_key: randomUUID(),
+  });
+  expect(data?.ok, JSON.stringify(data)).toBe(true);
+  const orderId = (data.order as { id: string }).id;
+
+  const { data: confirmed } = await salesRep.api.rpc("staff_confirm_order", {
+    p_order_id: orderId,
+    p_idempotency_key: randomUUID(),
+  });
+  expect(confirmed?.ok, JSON.stringify(confirmed)).toBe(true);
+  expect(
+    confirmed.reason,
+    "a cash sale confirms without reserving; the till is what takes the stock",
+  ).toBe("confirmed_cash_sale");
+
+  return orderId;
+}
+
+/** The till taking the money for a walk-in, in full, which §12.4 requires. */
+async function takeCashPayment(orderId: string, quantity: number) {
+  return cashier.api.rpc("staff_take_cash_payment", {
+    p_order_id: orderId,
+    p_method: "cash",
+    p_amount_tzs: quantity * UNIT_PRICE,
+    p_idempotency_key: randomUUID(),
+  });
+}
+
+/**
+ * A claim carried all the way from RESERVED to COMMITTED: confirmed, paid in full, settled.
+ *
+ * This is the state the review found untested. Everything else in this file refuses against a
+ * reservation — an order somebody might still cancel. Once the money is in, §8 says the goods stay
+ * physically present and cannot be sold again, so the rule has to hold harder here, not less.
+ */
+async function commitStock(quantity: number): Promise<{ invoiceId: string; allocationId: string }> {
+  const orderId = await draftOrder(quantity);
+
+  const { data: confirmed } = await confirmOrder(orderId);
+  expect(confirmed?.ok, JSON.stringify(confirmed)).toBe(true);
+  const invoiceId = (confirmed.invoice as { id: string }).id;
+
+  const { data: paid } = await cashier.api.rpc("staff_record_payment", {
+    p_invoice_id: invoiceId,
+    p_method: "cash",
+    p_amount_tzs: quantity * UNIT_PRICE,
+    p_idempotency_key: randomUUID(),
+  });
+  expect(paid?.ok, JSON.stringify(paid)).toBe(true);
+
+  const { data: settled } = await cashier.api.rpc("staff_approve_settlement", {
+    p_invoice_id: invoiceId,
+    p_idempotency_key: randomUUID(),
+  });
+  expect(settled?.ok, JSON.stringify(settled)).toBe(true);
+
+  const { data: allocation } = await director.read
+    .from("stock_allocations")
+    .select("id, state, quantity")
+    .eq("product_id", cementId)
+    .eq("state", "committed")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  expect(allocation, "settlement commits the claim").not.toBeNull();
+
+  return { invoiceId, allocationId: (allocation as { id: string }).id };
+}
+
+/** Assigned to a storekeeper and given its paper number — still moving nothing (§14). */
+async function assignDispatch(
+  invoiceId: string,
+  allocationId: string,
+  quantity: number,
+  location: string,
+): Promise<string> {
+  const { data } = await cashier.api.rpc("staff_assign_dispatch", {
+    p_invoice_id: invoiceId,
+    p_storekeeper_id: storekeeperId,
+    p_source_location: location,
+    p_lines: [{ allocation_id: allocationId, quantity }],
+    p_idempotency_key: randomUUID(),
+  });
+  expect(data?.ok, JSON.stringify(data)).toBe(true);
+
+  const dispatchId = (data.dispatch as { id: string }).id;
+
+  const { data: noted } = await manager.api.rpc("staff_record_dispatch_note", {
+    p_dispatch_id: dispatchId,
+    p_note_no: `DN-${randomUUID().slice(0, 8).toUpperCase()}`,
+    p_idempotency_key: randomUUID(),
+  });
+  expect(noted?.ok, JSON.stringify(noted)).toBe(true);
+
+  return dispatchId;
+}
+
+/** The signature that lets goods leave (§14). Takes the LOCATION key alone, and no more. */
+async function confirmRelease(dispatchId: string) {
+  return manager.api.rpc("staff_confirm_release", {
+    p_dispatch_id: dispatchId,
+    p_idempotency_key: randomUUID(),
+  });
+}
+
+/**
+ * Every result of a concurrent burst reached the database and came back.
+ *
+ * A DEADLOCK OR A DROPPED CONNECTION IS NOT A REFUSAL, and the difference is the whole point of one
+ * documented lock order. Without this, "nobody succeeded" would satisfy a test that only counted
+ * successes — which is precisely the hole the review found in the two races below.
+ */
+function expectNoTransportFailure(results: { error: unknown }[]): void {
+  for (const result of results) {
+    expect(result.error, `a command failed in transport: ${JSON.stringify(result.error)}`).toBeNull();
+  }
+}
+
+/** The refusals a stock command is allowed to give. Anything else is a defect wearing a reason. */
+const STOCK_REFUSALS = ["insufficient_stock", "insufficient_stock_at_location"];
+
 async function cancelOrder(orderId: string) {
   const { data } = await salesRep.api.rpc("staff_cancel_order", {
     p_order_id: orderId,
@@ -348,11 +614,32 @@ describe("commands arriving at the same moment", () => {
 
     const [order, batch] = await Promise.all([confirmOrder(orderId), approveBatch(batchId)]);
 
-    const succeeded = [order, batch].filter((r) => r.error === null && r.data?.ok === true);
-    expect(succeeded.length, "both succeeding is the defect").toBeLessThanOrEqual(1);
+    // BOTH REACHED THE DATABASE. Asserted before anything is counted, because two commands that
+    // deadlocked would otherwise look like a well-behaved race with one winner — or with none.
+    expectNoTransportFailure([order, batch]);
+
+    const succeeded = [order, batch].filter((r) => r.data?.ok === true);
+    const refused = [order, batch].filter((r) => r.data?.ok === false);
+
+    // EXACTLY one, not at most one. Both wanted everything there is, and one of them can have it:
+    // "neither succeeded" is a serialisation failure, not a safe outcome, and this is what the
+    // earlier `toBeLessThanOrEqual(1)` could not tell apart.
+    expect(succeeded.length, "exactly one of the two may take the last of the stock").toBe(1);
+    expect(refused.length).toBe(1);
+    expect(STOCK_REFUSALS, JSON.stringify(refused[0].data)).toContain(refused[0].data.reason);
 
     const after = await availability();
     expect(after.available, "availability may reach zero; it may never pass it").toBeGreaterThanOrEqual(0);
+
+    // EXACT, not merely non-negative. Whichever won took the whole of what was there.
+    expect(after.available).toBe(0);
+    if (batch.data?.ok === true) {
+      expect(after.physical, "the batch consumed it").toBe(before.physical - before.available);
+      expect(after.promised).toBe(before.promised);
+    } else {
+      expect(after.physical, "the reservation moved nothing").toBe(before.physical);
+      expect(after.promised).toBe(before.promised + before.available);
+    }
 
     if (order.data?.ok === true) await cancelOrder(orderId);
   });
@@ -369,9 +656,20 @@ describe("commands arriving at the same moment", () => {
       approveAdjustment(adjustmentId),
     ]);
 
-    const succeeded = [batch, adjustment].filter((r) => r.error === null && r.data?.ok === true);
-    expect(succeeded.length).toBeLessThanOrEqual(1);
-    expect((await availability()).available).toBeGreaterThanOrEqual(0);
+    expectNoTransportFailure([batch, adjustment]);
+
+    const succeeded = [batch, adjustment].filter((r) => r.data?.ok === true);
+    const refused = [batch, adjustment].filter((r) => r.data?.ok === false);
+
+    expect(succeeded.length, "exactly one of the two may take the last of the stock").toBe(1);
+    expect(refused.length).toBe(1);
+    expect(STOCK_REFUSALS, JSON.stringify(refused[0].data)).toContain(refused[0].data.reason);
+
+    // Both take stock OUT of the business, so whichever won, the arithmetic is the same.
+    const after = await availability();
+    expect(after.available).toBe(0);
+    expect(after.physical).toBe(before.physical - before.available);
+    expect(after.promised).toBe(before.promised);
   });
 
   it("survives a burst of competing claims without going negative", async () => {
@@ -422,6 +720,237 @@ describe("commands arriving at the same moment", () => {
     for (const [index, id] of orders.entries()) {
       if (results[batches.length + index].data?.ok === true) await cancelOrder(id);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMMITTED stock — the half of §8.1 the reservation tests never reach
+//
+// Every refusal above protects a RESERVED claim: an order confirmed and not yet paid, which the
+// customer might still cancel. §8.1 subtracts committed stock by the same arithmetic, and §8 is
+// blunter about why: paid items remain physically present until signature and cannot be sold
+// again. So the rule has to hold at least as hard once the money is in — and then the dispatch it
+// protected has to go out, which is the entire purpose of refusing anything.
+// ---------------------------------------------------------------------------
+describe("stock a customer has already paid for", () => {
+  it("refuses production and a write-off while committed, then lets the dispatch out", async () => {
+    const start = await availability();
+
+    const promisedQuantity = 40;
+    const { invoiceId, allocationId } = await commitStock(promisedQuantity);
+
+    const committed = await availability();
+    expect(committed.committed, "settlement moved the claim into committed").toBe(
+      start.committed + promisedQuantity,
+    );
+    expect(committed.reserved, "and out of reserved").toBe(start.reserved);
+    expect(committed.physical, "the bags have not moved").toBe(start.physical);
+    expect(committed.available).toBe(start.available - promisedQuantity);
+
+    // MORE than is free, LESS than is physically there: the location can supply it and the
+    // business cannot. That gap is exactly what the committed claim creates.
+    const overreach = committed.available + 10;
+    expect(overreach, "the fixture needs the yard to hold more than is free").toBeLessThanOrEqual(
+      await locationBalance(YARD),
+    );
+
+    const batchId = await draftBatch(overreach);
+    const { data: refusedBatch, error: batchError } = await approveBatch(batchId);
+
+    expect(batchError, JSON.stringify(batchError)).toBeNull();
+    expect(refusedBatch?.ok).toBe(false);
+    expect(refusedBatch.reason).toBe("insufficient_stock");
+    expect(Number(refusedBatch.available)).toBe(committed.available);
+    expect(Number(refusedBatch.promised)).toBe(committed.promised);
+    expect(Number(refusedBatch.physical)).toBe(committed.physical);
+    expect(Number(refusedBatch.requested)).toBe(overreach);
+
+    const adjustmentId = await draftAdjustment(-overreach);
+    const { data: refusedWriteOff, error: writeOffError } = await approveAdjustment(adjustmentId);
+
+    expect(writeOffError, JSON.stringify(writeOffError)).toBeNull();
+    expect(refusedWriteOff?.ok).toBe(false);
+    expect(refusedWriteOff.reason).toBe("insufficient_stock");
+    expect(Number(refusedWriteOff.promised)).toBe(committed.promised);
+
+    // Two refusals, and not one figure moved by either.
+    const afterRefusals = await availability();
+    expect(afterRefusals).toEqual(committed);
+
+    // ---------------------------------------------------------------------
+    // And now the point of all of it: the customer gets their goods.
+    // ---------------------------------------------------------------------
+    const dispatchId = await assignDispatch(invoiceId, allocationId, promisedQuantity, YARD);
+    const { data: released, error: releaseError } = await confirmRelease(dispatchId);
+
+    expect(releaseError, JSON.stringify(releaseError)).toBeNull();
+    expect(released?.ok, JSON.stringify(released)).toBe(true);
+
+    // The ledger falls by what left AND the claim that covered it falls with it, so the §8.1
+    // figure is unmoved. That is why a release needs no product lock.
+    const afterRelease = await availability();
+    expect(afterRelease.physical).toBe(committed.physical - promisedQuantity);
+    expect(afterRelease.committed).toBe(start.committed);
+    expect(afterRelease.reserved).toBe(start.reserved);
+    expect(afterRelease.available, "availability is unchanged by a release").toBe(
+      committed.available,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two sales commands this ticket did NOT re-issue, raced against the two it did
+//
+// Scope kept `staff_take_cash_payment` and `staff_confirm_release` out of migration 36 — Stage 12B
+// re-issues them. The claim made for that decision is that nothing is unprotected by the wait:
+// the walk-in already takes `stock:<product>`, and release takes the location key alone and needs
+// no more. A claim of that shape is worth exactly as much as the test that fires the commands at
+// each other, which is what this block does.
+// ---------------------------------------------------------------------------
+describe("the sales commands that were left alone", () => {
+  it("does not let a walk-in sale and a batch both take the last of the stock", async () => {
+    const before = await availability();
+    expect(before.available).toBeGreaterThan(0);
+
+    const orderId = await draftCashOrder(before.available);
+    const batchId = await draftBatch(before.available);
+
+    const [sale, batch] = await Promise.all([
+      takeCashPayment(orderId, before.available),
+      approveBatch(batchId),
+    ]);
+
+    expectNoTransportFailure([sale, batch]);
+
+    const succeeded = [sale, batch].filter((r) => r.data?.ok === true);
+    const refused = [sale, batch].filter((r) => r.data?.ok === false);
+
+    expect(succeeded.length, "the till and the yard cannot both have it").toBe(1);
+    expect(refused.length).toBe(1);
+
+    const after = await availability();
+    expect(after.available, "and the figure lands exactly on zero").toBe(0);
+
+    if (sale.data?.ok === true) {
+      // A walk-in is paid at the till, so the claim is COMMITTED the moment it exists (§12.4).
+      expect(refused[0].data.reason).toBe("insufficient_stock");
+      expect(after.committed).toBe(before.committed + before.available);
+      expect(after.physical).toBe(before.physical);
+    } else {
+      expect(STOCK_REFUSALS, JSON.stringify(refused[0].data)).toContain(refused[0].data.reason);
+      expect(after.physical).toBe(before.physical - before.available);
+      expect(after.promised).toBe(before.promised);
+    }
+  });
+
+  it("lets a release, a batch and a write-off through together, claiming different things", async () => {
+    const start = await availability();
+
+    const promisedQuantity = 30;
+    const { invoiceId, allocationId } = await commitStock(promisedQuantity);
+    const dispatchId = await assignDispatch(invoiceId, allocationId, promisedQuantity, YARD);
+
+    const committed = await availability();
+
+    // BOTH changed commands, raced against the release at once. The batch and the write-off split
+    // the UNPROMISED remainder exactly between them, so all three may succeed and any refusal is a
+    // finding: the release discharges a claim that was already subtracted, and neither of the other
+    // two touches the goods it is carrying out. All three want the same LOCATION in the same
+    // moment, which is the contention the shared location key exists to order rather than refuse.
+    const forBatch = Math.floor(committed.available / 2);
+    const forWriteOff = committed.available - forBatch;
+    expect(forBatch, "the remainder has to split into two real halves").toBeGreaterThan(0);
+
+    const batchId = await draftBatch(forBatch);
+    const writeOffId = await draftAdjustment(-forWriteOff);
+
+    const [release, batch, writeOff] = await Promise.all([
+      confirmRelease(dispatchId),
+      approveBatch(batchId),
+      approveAdjustment(writeOffId),
+    ]);
+
+    expectNoTransportFailure([release, batch, writeOff]);
+    expect(release.data?.ok, JSON.stringify(release.data)).toBe(true);
+    expect(batch.data?.ok, JSON.stringify(batch.data)).toBe(true);
+    expect(writeOff.data?.ok, JSON.stringify(writeOff.data)).toBe(true);
+
+    const after = await availability();
+    expect(after.physical, "all three movements left the ledger").toBe(
+      committed.physical - promisedQuantity - committed.available,
+    );
+    expect(after.committed, "the claim went out with the goods").toBe(start.committed);
+    expect(after.reserved).toBe(start.reserved);
+    expect(after.available, "and the yard is empty of unpromised stock").toBe(0);
+  });
+
+  it("keeps two products straight when four commands take them at once", async () => {
+    // OVERLAPPING PRODUCTS, which is the case one product can never exercise. `lock_product_stock`
+    // is taken in ascending product id, so a batch consuming both and a batch consuming both in
+    // the other order still queue rather than deadlock — and a deadlock here would surface as a
+    // transport error rather than a refusal, which is what the assertion below separates.
+    await ensureAvailable(80);
+    await ensureAvailableOf(sandId, 80);
+
+    const cement = await availability();
+    const sand = await availabilityOf(sandId);
+
+    const share = 30;
+
+    // Two batches, each consuming BOTH products; a walk-in taking cement; a write-off taking sand.
+    const batchOne = await draftBatchOf([
+      { productId: cementId, quantity: share },
+      { productId: sandId, quantity: share },
+    ]);
+    const batchTwo = await draftBatchOf([
+      { productId: cementId, quantity: share },
+      { productId: sandId, quantity: share },
+    ]);
+    const cashOrderId = await draftCashOrder(share);
+    const writeOffId = await draftAdjustmentOf(sandId, -share);
+
+    const results = await Promise.all([
+      approveBatch(batchOne),
+      approveBatch(batchTwo),
+      takeCashPayment(cashOrderId, share),
+      approveAdjustment(writeOffId),
+    ]);
+
+    // NOT ONE of the four failed in transport. Four commands crossing two products in one moment
+    // is the deadlock case, and one documented lock order is the only reason it is not one.
+    expectNoTransportFailure(results);
+
+    for (const result of results) {
+      if (result.data?.ok === false) {
+        expect(STOCK_REFUSALS, JSON.stringify(result.data)).toContain(result.data.reason);
+      }
+    }
+
+    // EXACT finals for both products, derived from which commands actually reported success —
+    // deterministic given the outcome, rather than a range that would accept anything.
+    const [one, two, sale, writeOff] = results;
+    const wonOne = one.data?.ok === true;
+    const wonTwo = two.data?.ok === true;
+    const wonSale = sale.data?.ok === true;
+    const wonWriteOff = writeOff.data?.ok === true;
+
+    const cementConsumed = (wonOne ? share : 0) + (wonTwo ? share : 0);
+    const sandConsumed = (wonOne ? share : 0) + (wonTwo ? share : 0) + (wonWriteOff ? share : 0);
+
+    const cementAfter = await availability();
+    const sandAfter = await availabilityOf(sandId);
+
+    expect(cementAfter.physical).toBe(cement.physical - cementConsumed);
+    expect(cementAfter.committed).toBe(cement.committed + (wonSale ? share : 0));
+    expect(cementAfter.available).toBe(cement.available - cementConsumed - (wonSale ? share : 0));
+
+    expect(sandAfter.physical).toBe(sand.physical - sandConsumed);
+    expect(sandAfter.promised).toBe(sand.promised);
+    expect(sandAfter.available).toBe(sand.available - sandConsumed);
+
+    // Neither product may pass through zero, whoever won.
+    expect(cementAfter.available).toBeGreaterThanOrEqual(0);
+    expect(sandAfter.available).toBeGreaterThanOrEqual(0);
   });
 });
 
