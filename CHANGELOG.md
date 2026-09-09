@@ -2,7 +2,7 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
-## [0.0.6] — UNRELEASED
+## [0.0.6] — 2026-09-09
 
 **Stock that has been sold stays sold.** Making bricks and writing stock off both used to look at
 one thing: how much was standing in that place. Goods a customer had already paid for are standing
@@ -10,9 +10,10 @@ there too, so a batch could grind up cement that was sold, and the delivery that
 empty yard. From this release every command that takes stock out of the business asks the same
 question the sales screens have always asked — how much is there that nobody has been promised.
 
-**Not yet released, and not yet in production.** The production, sales and stock workflows remain
-closed to day-to-day operation until this release has passed production verification. Nothing here
-activates an account or launches an operation.
+**The staff workflows stay closed until this release has been verified in production.** This is the
+correction the v0.0.5 entry promised. The production, sales and stock workflows remain closed to
+day-to-day operation until v0.0.6 has passed production verification, which is a separate step with
+its own approval. Nothing here activates an account or launches an operation.
 
 ### Fixed
 
