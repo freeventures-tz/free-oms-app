@@ -38,6 +38,13 @@ its own approval. Nothing here activates an account or launches an operation.
 - **Availability cannot go below zero even if a command forgets to ask.** A deferred check at the
   end of every transaction refuses it outright — a backstop for a command written next year, not a
   replacement for the queueing above.
+- **One of our own checks was reading the wrong record, and now names what it is asking about.**
+  The check that proves a refusal reaches the record asked for "the most recent refusal" at a moment
+  when several of them shared one timestamp, so it could read a different refusal than the one it
+  meant — reporting "this place does not hold it" where it should have found "somebody has already
+  been promised it". Nothing a person sees was ever wrong, and no rule changed: the refusals
+  themselves were correct throughout. The check now asks about the exact batch or correction it is
+  testing, so it cannot wander onto another one.
 
 ### Changed
 

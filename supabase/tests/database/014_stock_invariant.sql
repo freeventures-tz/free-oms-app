@@ -40,7 +40,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(81);
+select plan(83);
 
 create schema if not exists tests;
 
@@ -105,13 +105,29 @@ $$;
  * Asserted through this rather than by reading the returned jsonb, because the point of the rule is
  * that the refusal SURVIVES the transaction. A function that returned the right numbers and wrote
  * nothing would pass every other test in this file.
+ *
+ * BOUND TO THE ENTITY, because nothing else here can order these rows. `audit_events.occurred_at`
+ * defaults to `now()` — the TRANSACTION timestamp — and pgTAP runs this file as one transaction, so
+ * every refusal below shares a single value. The primary key is `gen_random_uuid()`, so breaking the
+ * tie on it is a coin toss.
+ *
+ * An earlier version asked for "the last refusal of this operation" and ordered by exactly those two
+ * columns. There are eleven batch refusals in this file across four batches; it returned whichever
+ * the dice chose. It passed locally, passed twice on the pull request, and then returned the LOCATION
+ * refusal in place of the committed-stock one on `main`. The comment above the transfer selection
+ * further down names this same trap — it was applied to choosing the transfer and missed here.
+ *
+ * Asking for one entity's refusal removes the ordering from the question. A block's repeated calls
+ * refuse the SAME entity identically, so every field asserted below is equal across the rows that
+ * match, which is the property the ordering was only pretending to supply.
  */
-create or replace function tests.last_refusal(p_operation text)
+create or replace function tests.refusal_for(p_operation text, p_entity_id uuid)
 returns public.audit_events language sql stable as $$
   select * from public.audit_events
    where action = 'command_refused'
      and source_operation = p_operation
-   order by occurred_at desc, id desc
+     and entity_id = p_entity_id
+   order by id
    limit 1;
 $$;
 
@@ -232,47 +248,65 @@ select is(
 
 -- The refusal is on the record, not merely on the screen (architecture.md §14.2).
 select isnt(
-  (select id from tests.last_refusal('api.staff_approve_production_batch')),
+  (select id from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   null,
   'the refusal is written to the audit trail, because it committed');
 
 select is(
-  (select actor_id::text from tests.last_refusal('api.staff_approve_production_batch')),
+  (select actor_id::text from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   'a1000000-0000-0000-0000-000000000002',
   'naming the person who attempted it');
 
 select is(
-  (select actor_role::text from tests.last_refusal('api.staff_approve_production_batch')),
+  (select actor_role::text from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   'manager',
   'and the live role they held at the time');
 
 select is(
-  (select after_state ->> 'reason' from tests.last_refusal('api.staff_approve_production_batch')),
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   'insufficient_stock',
   'and why it was refused');
 
 select is(
-  (select after_state ->> 'available' from tests.last_refusal('api.staff_approve_production_batch')),
+  (select after_state ->> 'available' from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   '20',
   'with the numbers, so the trail says what was refused and not merely that something was');
 
 select is(
-  (select after_state ->> 'outcome' from tests.last_refusal('api.staff_approve_production_batch')),
+  (select after_state ->> 'outcome' from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   'refused',
   'marked as a refusal rather than left to be inferred from the action name');
 
 select is(
-  (select entity_type from tests.last_refusal('api.staff_approve_production_batch')),
+  (select entity_type from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   'production_batch',
   'against the entity it was refused on');
 
 select isnt(
-  (select correlation_id from tests.last_refusal('api.staff_approve_production_batch')),
+  (select correlation_id from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   null,
   'with a correlation identifier, generated by the database because no api function accepts one');
 
 select isnt(
-  (select occurred_at from tests.last_refusal('api.staff_approve_production_batch')),
+  (select occurred_at from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 50))),
   null,
   'and the moment it happened');
 
@@ -307,7 +341,9 @@ select is(
   'and nothing was written off');
 
 select is(
-  (select after_state ->> 'reason' from tests.last_refusal('api.admin_approve_stock_adjustment')),
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.admin_approve_stock_adjustment',
+     (select id from public.stock_adjustments where quantity_delta = -50))),
   'insufficient_stock',
   'the refused correction is audited under its own operation name');
 
@@ -407,7 +443,9 @@ select is(
   'and the location refusal is the one that fires');
 
 select is(
-  (select after_state ->> 'reason' from tests.last_refusal('api.staff_approve_stock_transfer')),
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.staff_approve_stock_transfer',
+     (select transfer_id from public.stock_transfer_lines where quantity = 1))),
   'insufficient_stock_at_location',
   'audited under the transfer operation');
 
@@ -490,9 +528,35 @@ select is(
   'beside the fifteen that are genuinely free');
 
 select is(
-  (select after_state ->> 'reason' from tests.last_refusal('api.staff_approve_production_batch')),
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 20))),
   'insufficient_stock',
   'and the committed-stock refusal is audited like any other');
+
+-- THE COUNTEREXAMPLE FOR THE LOOKUP ABOVE, and the reason this file gained two tests.
+--
+-- Both of these are refusals of `api.staff_approve_production_batch`, written inside one
+-- transaction, so they carry the same `occurred_at` and no ordering can separate them. Asked for by
+-- entity, each must return ITS OWN refusal: the location reason for the batch that found the store
+-- empty, the availability reason for the batch that reached for stock a customer had already bought.
+--
+-- The previous helper took whichever the random primary key put last and returned the first of these
+-- where the second was asserted. These two tests fail against it and pass against the lookup that
+-- names its entity.
+select is(
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 10))),
+  'insufficient_stock_at_location',
+  'the batch that emptied one location is audited with the LOCATION reason');
+
+select is(
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.staff_approve_production_batch',
+     (select batch_id from public.production_batch_inputs where actual_quantity = 20))),
+  'insufficient_stock',
+  'while the batch that reached for promised stock is audited with the availability reason');
 
 select is(
   (api.staff_enter_stock_adjustment(tests.cement(), 'store', -20, 'damp damage', 'inv-adj-committed')
@@ -516,7 +580,9 @@ select is(
   'with the same promised figure behind it');
 
 select is(
-  (select after_state ->> 'reason' from tests.last_refusal('api.admin_approve_stock_adjustment')),
+  (select after_state ->> 'reason' from tests.refusal_for(
+     'api.admin_approve_stock_adjustment',
+     (select id from public.stock_adjustments where quantity_delta = -20))),
   'insufficient_stock',
   'audited under the correction operation');
 
