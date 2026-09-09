@@ -567,8 +567,9 @@ select is(
   (api.staff_approve_stock_transfer(
      (select id from public.stock_transfers where from_location = 'yard'), 'tr-approve-2')
    ->> 'reason'),
-  'insufficient_stock',
-  'and is refused at APPROVAL, which is the moment that decides anything');
+  'insufficient_stock_at_location',
+  'and is refused at APPROVAL, which is the moment that decides anything -- by the LOCATION rule, '
+  'because a transfer takes nothing out of the business and cannot consume a promise (issue #7)');
 
 select is(
   (select private.stock_on_hand(tests.product('Dangote Cement 42R'), 'yard', 'available')),

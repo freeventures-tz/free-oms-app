@@ -1,3 +1,4 @@
+import { refusalContext } from "@/lib/stock-refusal";
 import { userApi } from "@/lib/supabase/api";
 import { instantFromBusinessLocal } from "@/lib/time/business-date";
 
@@ -35,10 +36,16 @@ function mapDatabaseError(message: string): string {
   return "generic";
 }
 
-/** The refusals that are only actionable with their numbers, and the keys that carry them. */
-const CONTEXT_KEYS = [
-  "available",
-  "requested",
+/**
+ * The refusals only production makes, and the keys that carry them.
+ *
+ * The STOCK keys are not listed here: `available`, `requested`, `promised`, `physical` and
+ * `location` come from `refusalContext`, which inventory reads from too, because they are the shape
+ * of what the database sends back rather than anything this module decides. These six are the ones
+ * only a batch or a lot can be refused on — "ready at 14:20 on Thursday" beats "still curing", and
+ * a recipe's expected and confirmed counts explain an entry that does not add up.
+ */
+const PRODUCTION_CONTEXT_KEYS = [
   "curing",
   "offered",
   "ready_at",
@@ -76,18 +83,13 @@ async function issue(
   const body = data as Record<string, unknown>;
 
   if (body.ok !== true) {
-    const context: Record<string, unknown> = {};
-
-    // "There are 12 and you asked for 30" beats "not enough"; "ready at 14:20 on Thursday" beats
-    // "still curing".
-    for (const key of CONTEXT_KEYS) {
-      if (key in body && body[key] !== null) context[key] = body[key];
-    }
-
     return {
       ok: false,
       reason: typeof body.reason === "string" ? body.reason : "generic",
-      context: Object.keys(context).length > 0 ? context : undefined,
+      // "There are 12 and you asked for 30" beats "not enough"; "eighty are promised to a customer"
+      // beats both, because it is the only one that explains a refusal in a yard the Manager can
+      // see is full.
+      context: refusalContext(body, PRODUCTION_CONTEXT_KEYS),
     };
   }
 

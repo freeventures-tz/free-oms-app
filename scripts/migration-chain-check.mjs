@@ -55,7 +55,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,6 +69,12 @@ const V004_VERSION = "20260822001000";
 /** Migration 33 alone — the state a hosted apply passes through, and can sit in for a while. */
 const MIGRATION_33_VERSION = "20260822001100";
 
+/**
+ * The 34th and last RELEASED migration: v0.0.5, and exactly the shape production is in before
+ * v0.0.6 applies. The issue #7 pair sits after this and nothing else does.
+ */
+const V005_VERSION = "20260822001200";
+
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -79,6 +86,8 @@ const ASSERT_PRICE_SURVIVED = join(SQL_DIR, "02b_assert_price_survived.sql");
 const BUILD_V004 = join(SQL_DIR, "03_build_v004_fixture.sql");
 const ASSERT_V005 = join(SQL_DIR, "04_assert_v005.sql");
 const ASSERT_MIGRATION_33 = join(SQL_DIR, "05_assert_migration33_boundary.sql");
+const BUILD_V005 = join(SQL_DIR, "11_build_v005_fixture.sql");
+const ASSERT_V006 = join(SQL_DIR, "12_assert_v006.sql");
 
 /**
  * The gate's counterexamples: one same-count rewrite, and two broken links.
@@ -90,6 +99,7 @@ const ASSERT_MIGRATION_33 = join(SQL_DIR, "05_assert_migration33_boundary.sql");
 const COUNTEREXAMPLE_CUSTOMER = join(SQL_DIR, "06_counterexample_customer_rename.sql");
 const COUNTEREXAMPLE_REVERSAL = join(SQL_DIR, "07_counterexample_reversal_linkage.sql");
 const COUNTEREXAMPLE_SETTLEMENT = join(SQL_DIR, "08_counterexample_settlement_linkage.sql");
+const COUNTEREXAMPLE_PRODUCTION = join(SQL_DIR, "13_counterexample_production_rewrite.sql");
 
 /**
  * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
@@ -106,6 +116,8 @@ const COUNTEREXAMPLE_MASKED = join(SQL_DIR, "10_counterexample_masked_rename.sql
 /** The one source of each preservation query. The runbook pastes these same files, unedited. */
 const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservation.sql");
 const V004_PRESERVATION = join("supabase", "release-checks", "v004_preservation.sql");
+const V005_PRESERVATION = join("supabase", "release-checks", "v005_preservation.sql");
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v005_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -148,6 +160,9 @@ const PHASES = [
     subject: "migrations 33 and 34",
     what: "the v0.0.4 database",
     version: V004_VERSION,
+    // v0.0.5 AND NO FURTHER. This phase asserts that nothing from a later release arrived with
+    // it, which only means anything while the later release is held back.
+    upTo: V005_VERSION,
     describes: "v0.0.4, before brick production",
     query: V004_PRESERVATION,
     fixtures: [
@@ -163,6 +178,33 @@ const PHASES = [
             name: "a customer renamed behind a migration's own permitted writes",
             compatibilityWrites: COMPATIBILITY_WRITES,
             file: COUNTEREXAMPLE_MASKED,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "migrations 35 and 36",
+    what: "the v0.0.5 database",
+    version: V005_VERSION,
+    describes: "v0.0.5, before the stock invariant",
+    query: V005_PRESERVATION,
+    fixtures: [
+      {
+        // The v0.0.4 fixture's ground PLUS brick production, because that is what v0.0.5 added and
+        // what migration 36 re-issues the commands for. Sixteen `api` functions change schema in
+        // that migration and eight helpers are created; none of it should move a single row, and
+        // this is what says so rather than assuming it.
+        name: "sales, money, dispatch AND an approved batch with an inspected lot",
+        setup: [BUILD_V005],
+        assertions: [ASSERT_V006],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "what a batch consumed and yielded, rewritten in place",
+            file: COUNTEREXAMPLE_PRODUCTION,
           },
         ],
       },
@@ -244,6 +286,106 @@ function describePreservation(line) {
 }
 
 /**
+ * Runs one phase's upgrade with the migrations that come AFTER it held back.
+ *
+ * `supabase migration up` applies everything pending and takes no target version, so once a later
+ * release exists in the chain the v0.0.5 phase would apply that too — and its own assertion says
+ * "nothing from a later release came with it", which would then be false for an honest reason.
+ * Measuring one upgrade means applying one upgrade, so the files past the boundary are moved out
+ * of the directory for the duration and put back in a `finally`.
+ *
+ * A phase with no `upTo` applies everything, which is what the Part C phase has always done and
+ * deliberately still does: it is the standing check that a NEW migration has not broken the
+ * oldest boundary in the repository.
+ */
+function withMigrationsUpTo(upTo, run) {
+  if (!upTo) return run();
+
+  const dir = join("supabase", "migrations");
+  const held = readdirSync(dir)
+    .filter((name) => name.endsWith(".sql") && name.slice(0, 14) > upTo)
+    .sort();
+
+  const parked = join(dir, "..", ".migration-chain-held");
+  if (held.length > 0) mkdirSync(parked, { recursive: true });
+  for (const name of held) renameSync(join(dir, name), join(parked, name));
+
+  try {
+    return run();
+  } finally {
+    for (const name of held) renameSync(join(parked, name), join(dir, name));
+    if (held.length > 0) rmSync(parked, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The 34 released migrations, byte for byte as v0.0.5 applied them.
+ *
+ * A released migration is HISTORY. The hosted database has already run those exact bytes, so
+ * editing one does not change what production did — it only makes this repository disagree with
+ * it, and every future `db reset` would then build a database no deployment has ever been. The
+ * correction for a released migration is always a NEW forward migration.
+ *
+ * Nothing enforced that. This does: the manifest records the sha256 of each released file at
+ * `525418e`, and the run refuses to continue if one has moved.
+ *
+ * LINE ENDINGS ARE NORMALISED FIRST, and that is not a loophole. `core.autocrlf` is on for Windows
+ * checkouts, so the working tree holds CRLF where the repository holds LF, and hashing the file as
+ * it sits on disk would fail on one developer machine and pass on another. What the hosted database
+ * received is the repository bytes, which is what this compares.
+ */
+function assertReleasedMigrationsUnchanged({ log }) {
+  const manifest = readFileSync(MIGRATION_MANIFEST, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.startsWith("#"))
+    .map((line) => {
+      const [digest, name] = line.trim().split(/\s+/);
+      return { digest, name };
+    });
+
+  const moved = [];
+  for (const { digest, name } of manifest) {
+    const path = join("supabase", "migrations", name);
+    let actual;
+    try {
+      actual = createHash("sha256")
+        .update(readFileSync(path, "utf8").replace(/\r\n/g, "\n"))
+        .digest("hex");
+    } catch {
+      moved.push(`${name} is missing`);
+      continue;
+    }
+    if (actual !== digest) moved.push(`${name} changed`);
+  }
+
+  if (moved.length > 0) {
+    throw new Error(
+      `released migrations must never be edited: ${moved.join(", ")}. Correct a released ` +
+        "migration with a NEW forward migration, never by rewriting history the hosted database " +
+        "has already applied.",
+    );
+  }
+
+  // And nothing may be INSERTED among them either: a new migration sorts after the released ones
+  // or it changes the order in which the hosted database would have applied them.
+  const onDisk = readdirSync(join("supabase", "migrations")).filter((n) => n.endsWith(".sql")).sort();
+  const released = manifest.map((m) => m.name);
+  const prefix = onDisk.slice(0, released.length);
+
+  if (prefix.join("|") !== released.join("|")) {
+    throw new Error(
+      "the released migrations are no longer the first " + released.length + " in the chain: " +
+        `found ${prefix.join(", ")}`,
+    );
+  }
+
+  log(
+    `--- ${released.length} released migrations unchanged; ` +
+      `${onDisk.length - released.length} new after them ---`,
+  );
+}
+
+/**
  * The whole check, with its commands injected.
  *
  * Injected rather than reached for directly, so the orchestration — which failure exits non-zero,
@@ -254,6 +396,9 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
   let proofFailure = null;
 
   try {
+    // Before any database work: the released history this whole harness assumes is intact.
+    assertReleasedMigrationsUnchanged({ log });
+
     for (const phase of PHASES) {
       for (const fixture of phase.fixtures) {
         log(`\n=== ${phase.subject} · fixture: ${fixture.name} ===`);
@@ -298,8 +443,12 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
           );
         }
 
-        log("\n--- applying everything after it, the ordinary way ---");
-        supabase(["migration", "up", "--local"]);
+        log(
+          phase.upTo
+            ? "\n--- applying this release only, up to " + phase.upTo + ", the ordinary way ---"
+            : "\n--- applying everything after it, the ordinary way ---",
+        );
+        withMigrationsUpTo(phase.upTo, () => supabase(["migration", "up", "--local"]));
 
         log("\n--- running the same preservation query, after ---");
         const after = preservation(phase.query);

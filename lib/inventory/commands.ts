@@ -1,3 +1,4 @@
+import { refusalContext } from "@/lib/stock-refusal";
 import { userApi } from "@/lib/supabase/api";
 
 /**
@@ -57,14 +58,14 @@ async function issue(
   if (error) return { ok: false, reason: mapDatabaseError(error.message) };
 
   if (!data?.ok) {
-    const reason = reasonOf(data, "generic");
-    // `insufficient_stock` is the one refusal a person can act on only if they are told the
-    // numbers: "there are 12, you asked for 30" beats "not enough".
-    const context =
-      data && "available" in data
-        ? { available: Number(data.available), requested: Number(data.requested) }
-        : undefined;
-    return { ok: false, reason, context };
+    return {
+      ok: false,
+      reason: reasonOf(data, "generic"),
+      // Which numbers a refusal carries depends on WHICH rule refused — the business-wide promise
+      // or the location — and the list lives in one place so inventory and production cannot drift
+      // apart on it.
+      context: refusalContext(data),
+    };
   }
 
   return { ok: true, detail: reasonOf(data, successFallback) };

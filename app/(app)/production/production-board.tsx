@@ -1021,9 +1021,9 @@ function BatchDecision({ batchId }: { batchId: string }) {
         <div className="flex flex-col gap-2">
           <FormError>
             {t(result.error)}
-            {result.errorValues?.available !== undefined ? (
+            {result.errorDetail && result.errorValues ? (
               <span className="fv-numeric mt-1 block font-normal">
-                {t("productionErrors.insufficient_stock_detail", result.errorValues)}
+                {t(result.errorDetail, result.errorValues)}
               </span>
             ) : null}
           </FormError>
