@@ -556,11 +556,11 @@ test("a walk-in sale is completed in one action at the till", async ({ page }) =
 
     // THE CONFIRMATION SHEET MAKES EVERY CARD DISAPPEAR, and not by doing any work.
     //
-    // `ConfirmSheet` is a Radix `AlertDialog` in a portal, so while it is open everything behind it
-    // carries `aria-hidden`. `getByRole` reads the accessibility tree, so `card` reaches count 0
-    // about ten milliseconds after the click — dialog still open, card still in the DOM, payment
-    // still in flight. Waiting for the sheet to go is what makes the assertions after it mean
-    // anything at all.
+    // `ConfirmSheet` is a Radix `AlertDialog` in a portal, and Radix hides everything outside that
+    // portal from the accessibility tree while it is open. `getByRole` reads that tree, so `card`
+    // can reach count 0 with the sheet still open and the card still in the DOM — a modal covering
+    // the queue, not the queue letting the order go. Waiting for the sheet is what makes the
+    // assertions after it mean anything.
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
 
     // The same order, now an invoice card in the same queue. Found by its link rather than by an
@@ -572,10 +572,10 @@ test("a walk-in sale is completed in one action at the till", async ({ page }) =
     // SERVER-CONFIRMED, AND BEFORE THE RELOAD. This card exists only once the payment has landed and
     // the route has revalidated, so waiting for it here is what proves the money was taken.
     //
-    // Reloading first is what used to break this test: the navigation went out while the action was
-    // still in flight — measured at 69 ms before the payment's transaction had even begun — and the
-    // server rendered a page WITHOUT the sale on it. That document is static, so the ten-second wait
-    // that followed had nothing that could ever change. §12.4 and AC-16.
+    // Reloading first is what used to break this test: the navigation could go out while the action
+    // was still in flight, and the server would then render a page WITHOUT the sale on it. That
+    // document is static, so the wait that followed had nothing that could ever change. §12.4 and
+    // AC-16.
     await expect(invoiced.getByText(/^FV-INV-\d{8}-\d{4}$/)).toBeVisible();
 
     // Only NOW does the walk-in card leaving the queue mean the queue let it go, rather than a modal
