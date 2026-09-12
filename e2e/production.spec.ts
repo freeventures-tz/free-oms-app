@@ -1059,6 +1059,20 @@ test.describe("a refusal a Manager can read, and a correction the database accep
 
       await lot.getByRole("button", { name: /record the inspection/i }).click();
 
+      // WAIT FOR THE RECORD BEFORE NAVIGATING, because navigating cancels what is still in flight.
+      //
+      // Measured with a four-second delay injected on the action: navigating straight after the
+      // click aborts the request and the inspection never reaches the database at all — the lot
+      // keeps `inspected_at` null and the board has nothing to show. Waiting for its record first,
+      // under the same delay, lets the command finish, and it then survives the reload below. The
+      // two steps above this one already wait for a server-confirmed outcome; this one did not.
+      await expect(
+        page
+          .getByRole("article", { name: batchNo, exact: true })
+          .locator('[data-testid^="lot-inspection-"]')
+          .first(),
+      ).toBeVisible();
+
       // The SERVER-CONFIRMED record, kept on the batch: twenty-two accepted, none rejected, and no
       // reason attached to a rejection that never happened.
       await page.goto(PRODUCTION_HREF);
