@@ -1,0 +1,39 @@
+name: Release classification
+
+# Checks that a pull request's title can be classified under the SemVer policy in issue #36 before
+# it merges: a declared Conventional Commit type, and for a breaking change, deprecation or revert
+# the footer the policy requires. It is advisory. The classification that counts is re-read from the
+# immutable merge commit after the merge.
+#
+# Read-only by construction. No secret is used, the token can only read contents, the checkout keeps
+# no credential, dependencies install without lifecycle scripts, and the title and body reach the
+# controller as environment variables, so no PR text is ever expanded into a script.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    name: Release classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # Pinned to the exact commits the CI workflow's `@v4` resolves to today.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install pinned dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Classify the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/release/controller.mjs check-pr-title --title-env PR_TITLE --body-env PR_BODY
