@@ -344,6 +344,96 @@ async function draftAdjustmentOf(productId: string, delta: number): Promise<stri
   return (data.adjustment as { id: string }).id;
 }
 
+/** What one location holds of one product, in the available state. */
+async function balanceOf(productId: string, location: string): Promise<number> {
+  const { data, error } = await director.read
+    .from("current_stock")
+    .select("quantity")
+    .eq("product_id", productId)
+    .eq("location_code", location)
+    .eq("stock_state", "available")
+    .maybeSingle();
+
+  expect(error, error?.message).toBeNull();
+  return data ? Number((data as { quantity: number | string }).quantity) : 0;
+}
+
+/** Every location holding this product, so the fixture can see what it does not control. */
+async function locationsHolding(
+  productId: string,
+): Promise<Array<{ location: string; quantity: number }>> {
+  const { data, error } = await director.read
+    .from("current_stock")
+    .select("location_code, quantity")
+    .eq("product_id", productId)
+    .eq("stock_state", "available");
+
+  expect(error, error?.message).toBeNull();
+  return ((data ?? []) as Array<{ location_code: string; quantity: number | string }>)
+    .map((row) => ({ location: row.location_code, quantity: Number(row.quantity) }))
+    .filter((row) => row.quantity !== 0);
+}
+
+/** A correction at ANY location, through the ordinary two-hand path. */
+async function correctAt(productId: string, location: string, delta: number): Promise<void> {
+  const { data } = await manager.api.rpc("staff_enter_stock_adjustment", {
+    p_product_id: productId,
+    p_location_code: location,
+    p_quantity_delta: delta,
+    p_reason: "stock invariant integration test",
+    p_idempotency_key: randomUUID(),
+  });
+  expect(data?.ok, JSON.stringify(data)).toBe(true);
+
+  const { data: approved } = await approveAdjustment((data.adjustment as { id: string }).id);
+  expect(approved?.ok, JSON.stringify(approved)).toBe(true);
+}
+
+/**
+ * A determinate position for a race whose commands ask TWO questions.
+ *
+ * `private.claim_stock_for_withdrawal` refuses on two separate grounds: the business must own the
+ * quantity unpromised — a product-wide figure — and the PLACE must physically hold it. Setting
+ * availability alone satisfies the first and says nothing about the second, so the yard can be short
+ * while availability reads exactly right, and a batch is then refused for the LOCATION with
+ * availability still positive. The arithmetic below reads that as stock nobody claimed, because from
+ * where it stands that is what it looks like.
+ *
+ * Demonstrated rather than assumed: with six units of sand at the store, availability reads 60 while
+ * the yard holds 54, and two of the four commands are refused `insufficient_stock_at_location` for
+ * 24 against 30. The same race from the position this establishes refuses only for
+ * `insufficient_stock`, which is the resource genuinely running out.
+ *
+ * So this brings BOTH to a stated position: nothing left anywhere these four commands do not look,
+ * and the yard carrying the promises as well as the target, because availability is physical minus
+ * what is promised.
+ */
+async function setRaceStock(productId: string, target: number): Promise<void> {
+  for (const row of await locationsHolding(productId)) {
+    if (row.location !== YARD && row.quantity > 0) {
+      await correctAt(productId, row.location, -row.quantity);
+    }
+  }
+
+  const before = await availabilityOf(productId);
+  const wantAtYard = target + before.promised;
+  const atYard = await balanceOf(productId, YARD);
+  if (atYard !== wantAtYard) await correctAt(productId, YARD, wantAtYard - atYard);
+
+  expect(
+    (await availabilityOf(productId)).available,
+    "the business owns exactly the target, unpromised",
+  ).toBe(target);
+  expect(
+    await balanceOf(productId, YARD),
+    "and the yard holds enough of it to serve every claim",
+  ).toBeGreaterThanOrEqual(target);
+  expect(
+    (await locationsHolding(productId)).filter((row) => row.location !== YARD),
+    "with nothing left where none of these commands looks",
+  ).toEqual([]);
+}
+
 /**
  * Availability moved to an EXACT figure, up or down, through the ordinary correction path.
  *
@@ -932,8 +1022,8 @@ describe("the sales commands that were left alone", () => {
     //     any other winning combination needs three. One success cannot drain 2q of both, and zero
     //     successes is not a safe outcome — it is a serialisation failure wearing the same face.
     const share = 30;
-    await setAvailableTo(cementId, 2 * share);
-    await setAvailableTo(sandId, 2 * share);
+    await setRaceStock(cementId, 2 * share);
+    await setRaceStock(sandId, 2 * share);
 
     const cement = await availability();
     const sand = await availabilityOf(sandId);
