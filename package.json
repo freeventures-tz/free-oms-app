@@ -21,6 +21,7 @@
     "db:advisors": "supabase db lint --level warning && node scripts/run-advisors.mjs",
     "release:check-title": "node scripts/release/controller.mjs check-pr-title",
     "release:preview": "node scripts/release/controller.mjs preview",
+    "release:evaluate-build": "node scripts/release/controller.mjs evaluate-build",
     "test:release": "vitest run --project unit tests/unit/release"
   },
   "dependencies": {

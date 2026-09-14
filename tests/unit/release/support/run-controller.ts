@@ -11,14 +11,15 @@ export type ControllerRun = {
 };
 
 /**
- * The parent environment minus anything that could reach a real repository or a real token. A
- * developer running the suite with `GITHUB_TOKEN` exported must not hand it to a fixture, and a
- * stray `GIT_DIR` must not point a disposable repository at a real one.
+ * The parent environment minus anything that could reach a real repository or a real token, or decide
+ * a test's outcome. A developer running the suite with `GITHUB_TOKEN` exported must not hand it to a
+ * fixture, a stray `GIT_DIR` must not point a disposable repository at a real one, and an exported
+ * `RELEASE_BUILD_PUBLICATION` must not activate publication in a test that leaves it unset.
  */
 function isolatedEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (/^(GITHUB_|GH_|GIT_)/i.test(key)) delete env[key];
+    if (/^(GITHUB_|GH_|GIT_|RELEASE_)/i.test(key)) delete env[key];
   }
   return env;
 }
@@ -29,10 +30,10 @@ function isolatedEnvironment(): NodeJS.ProcessEnv {
  */
 export function runController(
   args: string[],
-  options: { cwd?: string; env?: Record<string, string | undefined> } = {},
+  options: { cwd?: string; env?: Record<string, string | undefined>; controller?: string } = {},
 ): Promise<ControllerRun> {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [CONTROLLER, ...args], {
+    const child = spawn(process.execPath, [options.controller ?? CONTROLLER, ...args], {
       cwd: options.cwd ?? process.cwd(),
       env: { ...isolatedEnvironment(), ...options.env },
       windowsHide: true,

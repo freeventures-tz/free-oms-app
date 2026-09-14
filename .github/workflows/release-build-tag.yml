@@ -1,0 +1,150 @@
+name: Release build tag
+
+# When CI finishes on an exact merge to main, decides whether that commit earns an immutable build
+# tag, vX.Y.Z-dev.N, and creates it only if the Owner has activated build publication. Policy: issue
+# #36. Operation, and what the tests prove: scripts/release/README.md.
+#
+# OFF BY DEFAULT. Nothing is written unless the repository variable RELEASE_BUILD_PUBLICATION is
+# exactly `enabled`. Until then only the read-only evaluation runs: no tag, no reference, no commit
+# status, no artifact. The controller checks the same variable again before any write.
+#
+# Trust. `workflow_run` runs this file as it is on the default branch, never a pull request's copy.
+# No job checks out the commit being evaluated or runs its code: the controller is main's, and the
+# commit is data. Dependencies install once, lockfile-pinned with lifecycle scripts disabled, in the
+# evaluation job, which cannot write. The writing jobs install nothing; they check the digest of that
+# job's bundle before using it. Only the tag writer can write contents, only the status job can write
+# statuses, and event values reach scripts as environment variables, never as expressions.
+#
+# No deployment, migration, production credential or secret is used, and nothing here is triggered by
+# a tag or a release.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  evaluate:
+    name: Evaluate the exact merge
+    # A pull-request run, a fork, another branch or another workflow never reaches the controller. The
+    # controller checks the same facts again from the API rather than trusting this event.
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      decision: ${{ steps.evaluate.outputs.decision }}
+      bundle-digest: ${{ steps.bundle.outputs.digest }}
+    steps:
+      # Pinned to the exact commits the CI workflow's `@v4` resolves to today.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install pinned dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Evaluate the exact merge
+        id: evaluate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set +e
+          node scripts/release/controller.mjs evaluate-build \
+            --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
+            --sha "$HEAD_SHA" --run-id "$RUN_ID" --main-ref origin/main \
+            --format json --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" \
+            > "$RUNNER_TEMP/build-plan.json"
+          code=$?
+          set -e
+          # 0 eligible, already tagged or not applicable; 3 pending; 4 refused; 5 a required gate is
+          # unsatisfied. Each is a decision, reported on the commit once publication is activated.
+          # Anything else means the controller could not finish, and fails this job.
+          case "$code" in 0|3|4|5) ;; *) exit "$code" ;; esac
+      - name: Bundle the plan and the controller's pinned dependencies for the writing jobs
+        id: bundle
+        if: vars.RELEASE_BUILD_PUBLICATION == 'enabled'
+        run: |
+          node scripts/release/controller.mjs runtime-dependencies > "$RUNNER_TEMP/bundle-files.txt"
+          cp "$RUNNER_TEMP/build-plan.json" build-plan.json
+          tar -cf "$RUNNER_TEMP/release-controller-bundle.tar" build-plan.json -T "$RUNNER_TEMP/bundle-files.txt"
+          rm build-plan.json
+          echo "digest=$(sha256sum "$RUNNER_TEMP/release-controller-bundle.tar" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: vars.RELEASE_BUILD_PUBLICATION == 'enabled'
+        with:
+          name: release-controller-bundle
+          path: ${{ runner.temp }}/release-controller-bundle.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Create the build tag
+    needs: evaluate
+    if: needs.evaluate.outputs.decision == 'eligible' && vars.RELEASE_BUILD_PUBLICATION == 'enabled'
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/release-tag-writer.yml
+    with:
+      operation: build
+      bundle-digest: ${{ needs.evaluate.outputs.bundle-digest }}
+
+  status:
+    name: Report the result on the commit
+    needs: [evaluate, publish]
+    if: >-
+      !cancelled() &&
+      needs.evaluate.result == 'success' &&
+      vars.RELEASE_BUILD_PUBLICATION == 'enabled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # contents: read only lets the checkout read this private repository. Writing is statuses alone.
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-controller-bundle
+          path: ${{ runner.temp }}/bundle
+      - name: Check the bundle digest, then unpack it
+        env:
+          BUNDLE_DIGEST: ${{ needs.evaluate.outputs.bundle-digest }}
+        run: |
+          echo "$BUNDLE_DIGEST  $RUNNER_TEMP/bundle/release-controller-bundle.tar" | sha256sum --check --strict
+          tar -xf "$RUNNER_TEMP/bundle/release-controller-bundle.tar" -C "$RUNNER_TEMP/bundle"
+          mv "$RUNNER_TEMP/bundle/node_modules" node_modules
+      - name: Write the build-tag status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_BUILD_PUBLICATION: ${{ vars.RELEASE_BUILD_PUBLICATION }}
+          WRITER_RESULT: ${{ needs.publish.result }}
+          WRITER_DECISION: ${{ needs.publish.outputs.decision }}
+          WRITER_TAG: ${{ needs.publish.outputs.tag }}
+        run: |
+          node scripts/release/controller.mjs write-build-status \
+            --repo "$GITHUB_REPOSITORY" --plan "$RUNNER_TEMP/bundle/build-plan.json" \
+            --writer-result "$WRITER_RESULT" --writer-decision "$WRITER_DECISION" --writer-tag "$WRITER_TAG" \
+            --target-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

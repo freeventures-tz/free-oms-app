@@ -33,7 +33,7 @@ function pending(code, detail, { commit = null, pr = null } = {}) {
  * lower version — is refused rather than skipped, because skipping it would silently choose a
  * different base.
  */
-function selectReleaseBase(git, line, sha) {
+function selectReleaseBase(git, line, sha, ignoreNormalTagAt) {
   const position = new Map(line.map((commit, index) => [commit.sha, index]));
   const reasons = [];
   const candidates = [];
@@ -42,6 +42,7 @@ function selectReleaseBase(git, line, sha) {
     if (!NORMAL_TAG.test(tag.name)) continue;
 
     const target = tag.objectType === "tag" ? tag.peeledName : tag.objectName;
+    if (ignoreNormalTagAt !== null && target === ignoreNormalTagAt) continue;
     const onLine = position.has(target);
     const inHistory = onLine || (git.commit(target) !== null && git.isAncestor(target, sha));
     if (!inHistory) continue;
@@ -124,9 +125,13 @@ function retainedMessage(message) {
 /**
  * Reads the release range ending at `sha`.
  *
+ * `ignoreNormalTagAt` names a commit whose own normal release tags are not a base. A build tag uses
+ * it for its own commit: the build identifies the merge as it was accepted, so a normal release
+ * later published at that same commit does not turn its range into nothing.
+ *
  * @returns {Promise<{ base: object|null, merges: object[], reasons: object[] }>}
  */
-export async function readAcceptedRange({ git, github, repository, sha, mainRef, serverUrl }) {
+export async function readAcceptedRange({ git, github, repository, sha, mainRef, serverUrl, ignoreNormalTagAt = null }) {
   const pullUrl = (number) => `${serverUrl}/${repository}/pull/${number}`;
   const commitUrl = (commit) => `${serverUrl}/${repository}/commit/${commit}`;
 
@@ -160,7 +165,7 @@ export async function readAcceptedRange({ git, github, repository, sha, mainRef,
   }
 
   const line = git.firstParentLine(sha);
-  const selected = selectReleaseBase(git, line, sha);
+  const selected = selectReleaseBase(git, line, sha, ignoreNormalTagAt);
   if (selected.reasons.length > 0) {
     return { base: null, merges: [], reasons: selected.reasons };
   }

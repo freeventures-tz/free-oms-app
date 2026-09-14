@@ -71,6 +71,26 @@ export function createGitReader(cwd) {
         });
     },
 
+    /** An annotated tag object's `object`, `type` and `tag` headers and its message, exactly as stored. */
+    tagObject(objectName) {
+      const raw = run(["cat-file", "tag", objectName]);
+      const split = raw.indexOf("\n\n");
+      const header = split < 0 ? raw : raw.slice(0, split);
+      const fields = {};
+      for (const line of header.split("\n")) {
+        const space = line.indexOf(" ");
+        if (space > 0 && !Object.hasOwn(fields, line.slice(0, space))) {
+          fields[line.slice(0, space)] = line.slice(space + 1);
+        }
+      }
+      return {
+        object: fields.object ?? null,
+        type: fields.type ?? null,
+        tag: fields.tag ?? null,
+        message: split < 0 ? "" : raw.slice(split + 2),
+      };
+    },
+
     /** Every tag: its name, what the ref points at, and what that peels to. */
     tags() {
       return run([

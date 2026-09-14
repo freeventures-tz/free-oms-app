@@ -48,6 +48,10 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: dir, env: env(), encoding: "utf8" }).trim();
 
+  /** Git with standard input and untrimmed output, quiet on failure: what the GitHub simulator serves Git data with. */
+  const gitRaw = (args: string[], input?: string) =>
+    execFileSync("git", args, { cwd: dir, env: env(), encoding: "utf8", input, stdio: ["pipe", "pipe", "pipe"] });
+
   const commit = (message: string) => {
     files += 1;
     writeFileSync(join(dir, `change-${files}.txt`), `${message}\n${files}\n`);
@@ -76,7 +80,45 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
     dir,
     root,
     git,
+    gitRaw,
     commit,
+
+    /** Commits one file with exact contents. */
+    commitFile(name: string, contents: string, message: string) {
+      writeFileSync(join(dir, name), contents);
+      git("add", "--", name);
+      git("commit", "-q", "-m", message);
+      return git("rev-parse", "HEAD");
+    },
+
+    /**
+     * A separate clone, standing in for a workflow's checkout: its own object store, and only what
+     * `sync` fetched. Tags created in this repository afterwards are not in it until the next sync.
+     */
+    clone() {
+      const checkoutDir = mkdtempSync(join(tmpdir(), "release-checkout-"));
+      git("clone", "-q", dir, checkoutDir);
+      const inCheckout = (...args: string[]) => git("-C", checkoutDir, ...args);
+      return {
+        dir: checkoutDir,
+        git: inCheckout,
+        /** What a full-history checkout sees: every branch as origin/*, and every tag exactly as GitHub has it. */
+        sync() {
+          inCheckout(
+            "fetch",
+            "-q",
+            "--prune",
+            "--prune-tags",
+            "origin",
+            "+refs/heads/*:refs/remotes/origin/*",
+            "+refs/tags/*:refs/tags/*",
+          );
+        },
+        cleanup() {
+          rmSync(checkoutDir, { recursive: true, force: true });
+        },
+      };
+    },
 
     /**
      * Merges a pull request the way `gh pr merge --merge` does on this repository: a two-parent merge
@@ -186,3 +228,4 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
 }
 
 export type FixtureRepository = ReturnType<typeof createFixtureRepository>;
+export type FixtureCheckout = ReturnType<FixtureRepository["clone"]>;

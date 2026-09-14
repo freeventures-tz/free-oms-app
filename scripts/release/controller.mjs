@@ -2,21 +2,27 @@
 /**
  * Free Ventures OMS release controller — the public command boundary for issue #36.
  *
- * This slice is read-only. It classifies pull-request titles and previews the next version and the
- * release notes for an exact accepted merge. It publishes nothing: no tag, no ref, no status, no
- * release, no push. Its GitHub client can only send GET requests, and its Git client runs only
- * reading commands against the local clone it is pointed at.
+ *   check-pr-title        Classify a PR title and its description before merge.
+ *   preview               Calculate the version and notes for one exact accepted merge on main.
+ *   evaluate-build        Decide whether an exact merge earns a build tag. Reads only.
+ *   publish-build         Create that build tag, when publication is activated. The only tag writer.
+ *   write-build-status    Report the decision as a commit status, when publication is activated.
+ *   runtime-dependencies  List the lockfile paths the writing jobs receive instead of installing.
  *
- *   check-pr-title   Classify a PR title and its description before merge.
- *   preview          Calculate the version and notes for one exact accepted merge on main.
+ * Only publish-build and write-build-status can write, each through a client that makes exactly one
+ * kind of write, and neither writes anything unless RELEASE_BUILD_PUBLICATION is exactly `enabled`.
+ * Every other command's GitHub client can only send GET requests, and the Git client only reads the
+ * local clone it is pointed at. Nothing pushes, and nothing writes a package version.
  *
  * Exit status is part of the interface:
  *
- *   0  classified, calculated, or nothing to release
- *   1  the controller could not finish (Git or GitHub failed); nothing was guessed
+ *   0  classified, calculated, eligible, tagged, already tagged, or nothing to do
+ *   1  the controller could not finish (Git or GitHub failed, or a write was not confirmed); nothing was guessed
  *   2  usage error
- *   3  pending decision: an unsupported merge shape or a missing association, for the Owner
- *   4  refused: the input is malformed, conflicting or ambiguous
+ *   3  pending: an Owner decision, or final-merge CI that has not finished
+ *   4  refused: the input is malformed, conflicting or ambiguous, or cannot be trusted
+ *   5  a required final-merge CI gate is unsatisfied
+ *   6  publication is not activated, so nothing was written
  *
  * Usage and the scope of what the tests prove: scripts/release/README.md.
  */
@@ -25,7 +31,14 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import {
+  evaluateBuildCommand,
+  publishBuildCommand,
+  runtimeDependenciesCommand,
+  writeBuildStatusCommand,
+} from "./lib/build-commands.mjs";
 import { classifyChange, highestChange } from "./lib/classification.mjs";
+import { EXIT, FULL_SHA, json, readFormat, REF, REPOSITORY, UsageError } from "./lib/cli.mjs";
 import { ControllerError } from "./lib/errors.mjs";
 import { createGitReader } from "./lib/git.mjs";
 import { createGitHubReader } from "./lib/github.mjs";
@@ -34,21 +47,7 @@ import { escapeMarkdown, listParagraphs } from "./lib/markdown.mjs";
 import { renderPreviewReport, renderReleaseNotes } from "./lib/notes.mjs";
 import { nextVersion, policyFor } from "./lib/version.mjs";
 
-export const EXIT = Object.freeze({ ok: 0, failure: 1, usage: 2, pending: 3, refused: 4 });
-
-const REPOSITORY = /^[A-Za-z0-9-]+\/(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
-const FULL_SHA = /^[0-9a-f]{40}$/;
-const REF = /^(?!-)[A-Za-z0-9._/-]+$/;
-
-class UsageError extends Error {}
-
-function readFormat(value) {
-  const format = value ?? "markdown";
-  if (format !== "json" && format !== "markdown") {
-    throw new UsageError("--format must be json or markdown");
-  }
-  return format;
-}
+export { EXIT };
 
 /** A string option that may be given directly or named as an environment variable. */
 function readText(values, env, name, { required }) {
@@ -68,10 +67,6 @@ function readText(values, env, name, { required }) {
   if (direct !== undefined) return direct;
   if (required) throw new UsageError(`--${name} or --${name}-env is required`);
   return "";
-}
-
-function json(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 function checkPrTitle(args, env) {
@@ -282,6 +277,10 @@ async function preview(args, env) {
 const COMMANDS = {
   "check-pr-title": checkPrTitle,
   preview,
+  "evaluate-build": evaluateBuildCommand,
+  "publish-build": publishBuildCommand,
+  "write-build-status": writeBuildStatusCommand,
+  "runtime-dependencies": runtimeDependenciesCommand,
 };
 
 /**
