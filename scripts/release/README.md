@@ -37,7 +37,7 @@ GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs preview --repo f
 | --- | --- |
 | `--sha` | The exact merge, as a full 40-character sha. It must be on the first-parent line of `--main-ref` |
 | `--main-ref` | Default `origin/main`. The preview reads the local clone and never fetches, so fetch first |
-| `--proposed-title` | Repeatable. Adds a title that is not in history yet. It is reported apart from the accepted merges and changes only `versionIncludingProposed` |
+| `--proposed-title` | Repeatable. Adds a title that is not in history yet. It is reported apart from the accepted merges, in both formats and even when nothing has merged since the release, and changes only `versionIncludingProposed` |
 | `--accept-stable-contract` | A reference to the Owner's stable-contract acceptance. During 0.x it makes the target `1.0.0`. The preview records the reference but does not validate it |
 | `--path` | The clone to read. Default: the current directory |
 | `--format` | `markdown` (default) or `json` |
@@ -66,6 +66,9 @@ concerns.
   `style` are patch. Any other type is refused, and so is a capitalised one.
 - **Breaking.** A breaking change needs both `!` in the title and a line
   `BREAKING CHANGE: <explanation>`. Either one alone is refused.
+- **Footer extent.** A `BREAKING CHANGE:` or `DEPRECATED:` explanation may run over several
+  paragraphs. It ends at the next footer (`Token: value` or `Token #value`), not at a blank line, and
+  every paragraph appears in the explanation, the lines to retain and the notes.
 - **Deprecation.** Write a line `DEPRECATED: <what and why>` and use `feat`. The same footer under a
   patch type is refused.
 - **Revert.** Choose the type for the contract that results, and name the reverted commit with a line

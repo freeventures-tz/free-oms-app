@@ -7,7 +7,7 @@
  * user actions are visible without reading every entry.
  */
 
-import { escapeMarkdown } from "./markdown.mjs";
+import { escapeMarkdown, listParagraphs } from "./markdown.mjs";
 
 const POLICY = {
   "0.x": "0.x — a breaking change raises the minor version and is listed below",
@@ -42,14 +42,14 @@ export function renderReleaseNotes(preview) {
   const breaking = preview.merges.filter((m) => m.breaking);
   if (breaking.length === 0) lines.push("None.");
   for (const m of breaking) {
-    lines.push(`- **${escapeMarkdown(m.title)}** ([#${m.pr}](${m.url})): ${escapeMarkdown(m.breakingExplanation)}`);
+    lines.push(`- **${escapeMarkdown(m.title)}** ([#${m.pr}](${m.url})): ${listParagraphs(m.breakingExplanation)}`);
   }
 
   lines.push("", "### Deprecations", "");
   const deprecations = preview.merges.filter((m) => m.deprecation);
   if (deprecations.length === 0) lines.push("None.");
   for (const m of deprecations) {
-    lines.push(`- **${escapeMarkdown(m.title)}** ([#${m.pr}](${m.url})): ${escapeMarkdown(m.deprecation)}`);
+    lines.push(`- **${escapeMarkdown(m.title)}** ([#${m.pr}](${m.url})): ${listParagraphs(m.deprecation)}`);
   }
 
   lines.push("", `### Accepted merges (${preview.merges.length})`, "");
@@ -67,20 +67,29 @@ export function renderReleaseNotes(preview) {
     );
   });
 
-  if (preview.proposed.length > 0) {
-    lines.push(
-      "",
-      `### Proposed, not accepted (${preview.proposed.length})`,
-      "",
-      `Not in history, so not in the version above. Including them, the calculation gives **${preview.versionIncludingProposed}**.`,
-      "",
-    );
-    for (const p of preview.proposed) {
-      lines.push(`- **${escapeMarkdown(p.title)}** — \`${p.type}\` → ${p.change}`);
-    }
-  }
+  lines.push(...proposedSection(preview));
 
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Titles given with `--proposed-title` and the version they would give. Kept apart from accepted
+ * merges in every state, including right after a normal release when nothing has merged yet.
+ */
+function proposedSection(preview) {
+  if (preview.proposed.length === 0) return [];
+  const lead =
+    preview.status === "calculated"
+      ? "Not in history, so not in the version above."
+      : "Not in history, so there is still nothing to release.";
+  return [
+    "",
+    `### Proposed, not accepted (${preview.proposed.length})`,
+    "",
+    `${lead} Including them, the calculation gives **${preview.versionIncludingProposed}**.`,
+    "",
+    ...preview.proposed.map((p) => `- **${escapeMarkdown(p.title)}** — \`${p.type}\` → ${p.change}`),
+  ];
 }
 
 /** What `preview --format markdown` prints: the notes, or what stopped them. */
@@ -88,7 +97,13 @@ export function renderPreviewReport(preview) {
   if (preview.status === "calculated") return preview.notes;
 
   if (preview.status === "no_accepted_changes") {
-    return `## Release preview: nothing to release\n\n\`${preview.sha}\` is the normal release \`${preview.base.tag}\` itself.\n`;
+    const lines = [
+      "## Release preview: nothing to release",
+      "",
+      `\`${preview.sha}\` is the normal release \`${preview.base.tag}\` itself.`,
+      ...proposedSection(preview),
+    ];
+    return `${lines.join("\n")}\n`;
   }
 
   const heading =

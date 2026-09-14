@@ -51,35 +51,51 @@ const BREAKING_NEAR_MISS = /^\s*(?:[*-]\s+)?breaking[\s_-]*changes?\b/i;
 
 const DEPRECATED_FOOTER = /^DEPRECATED: (\S.*)$/;
 const DEPRECATED_FOOTER_EMPTY = /^DEPRECATED:\s*$/;
-const DEPRECATED_NEAR_MISS = /^\s*(?:[*-]\s+)?deprecat(?:ed|ion|es)s?\s*[:-]/i;
+const DEPRECATED_NEAR_MISS = /^\s*(?:[*-]\s+)?deprecat(?:ed|ion|es)s?\s*(?:[:-]|#)/i;
 
 const REVERTS_FOOTER = /^Reverts: (\S+)$/;
-const REVERTS_NEAR_MISS = /^\s*(?:[*-]\s+)?reverts?\s*:|^Reverts\s+\S+#\d+\s*$|^This reverts commit\b/i;
+const REVERTS_NEAR_MISS = /^\s*(?:[*-]\s+)?reverts?\s*(?::|#)|^Reverts\s+\S+#\d+\s*$|^This reverts commit\b/i;
 
 const OVERRIDE_FOOTER = /^\s*(?:release-as|semver|semver-bump|version-bump)\s*:/i;
 const OVERRIDE_TOKEN = /\[(?:major|minor|patch)\]|\+semver:\s*\w+/i;
 
-/** Any `Token: value` line, used to end a multi-line footer value. */
-const FOOTER_TOKEN = /^(?:BREAKING[ -]CHANGE|[A-Za-z][\w-]*): /;
+/**
+ * The start of the next footer, which is where a footer's value ends. Conventional Commits 1.0.0
+ * lets a value span lines and paragraphs and ends it at the next token/separator pair: a token —
+ * `BREAKING CHANGE`, or word characters and hyphens — followed by `: ` or ` #`.
+ */
+const FOOTER_BOUNDARY = /^(?:BREAKING CHANGE|[\w-]+)(?:: | #)/;
 
 function reason(code, detail) {
   return { code, detail };
 }
 
 /**
- * A footer's value — the rest of its line plus continuation lines up to a blank line or the next
- * footer — and the raw lines it came from, which are what a merge body has to keep.
+ * A footer's value, and the raw lines it came from, which are what a merge body has to keep.
+ *
+ * The value runs from the rest of the footer's own line to the line before the next footer, across
+ * blank lines, so a second paragraph — a migration step, the replacement to use — stays part of it.
+ * Lines within a paragraph are joined with a space and paragraphs stay separated by a blank line.
+ * Trailing blank lines belong to nothing.
  */
 function footerValue(lines, index, firstLine) {
-  const parts = [firstLine];
-  const raw = [lines[index]];
-  for (let next = index + 1; next < lines.length; next += 1) {
-    const line = lines[next];
-    if (!line.trim() || FOOTER_TOKEN.test(line)) break;
-    parts.push(line.trim());
-    raw.push(line);
+  let end = index + 1;
+  while (end < lines.length && !FOOTER_BOUNDARY.test(lines[end])) end += 1;
+  while (end > index + 1 && !lines[end - 1].trim()) end -= 1;
+
+  const raw = lines.slice(index, end);
+  const paragraphs = [];
+  let paragraph = [firstLine];
+  for (const line of raw.slice(1)) {
+    if (line.trim()) {
+      paragraph.push(line.trim());
+    } else if (paragraph.length > 0) {
+      paragraphs.push(paragraph.join(" "));
+      paragraph = [];
+    }
   }
-  return { value: parts.join(" "), raw };
+  if (paragraph.length > 0) paragraphs.push(paragraph.join(" "));
+  return { value: paragraphs.join("\n\n"), raw };
 }
 
 /**
@@ -166,7 +182,7 @@ export function classifyChange({ title, description = "" }) {
 
     if (breaking) {
       const { value, raw } = footerValue(lines, index, breaking[1]);
-      breakingExplanation = breakingExplanation ? `${breakingExplanation} ${value}` : value;
+      breakingExplanation = breakingExplanation ? `${breakingExplanation}\n\n${value}` : value;
       footersToRetain.push(...raw);
     } else if (BREAKING_FOOTER_EMPTY.test(line)) {
       reasons.push(reason("breaking_missing_explanation", "`BREAKING CHANGE:` has no explanation"));
@@ -181,7 +197,7 @@ export function classifyChange({ title, description = "" }) {
 
     if (deprecated) {
       const { value, raw } = footerValue(lines, index, deprecated[1]);
-      deprecation = deprecation ? `${deprecation} ${value}` : value;
+      deprecation = deprecation ? `${deprecation}\n\n${value}` : value;
       footersToRetain.push(...raw);
     } else if (DEPRECATED_FOOTER_EMPTY.test(line)) {
       reasons.push(reason("deprecation_missing_explanation", "`DEPRECATED:` has no explanation"));

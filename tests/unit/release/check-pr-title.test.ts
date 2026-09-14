@@ -82,6 +82,62 @@ describe("check-pr-title", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("keeps every paragraph of a breaking explanation, in the explanation and in the lines to retain", async () => {
+    const title = "feat(api)!: remove the legacy field";
+    const body = "BREAKING CHANGE: The legacy field is removed.\n\nMigrate saved records before upgrading.";
+
+    const { code, json } = await check(title, body);
+    expect(code).toBe(0);
+    expect(json.classification).toMatchObject({
+      change: "breaking",
+      breakingExplanation: "The legacy field is removed.\n\nMigrate saved records before upgrading.",
+    });
+    expect(json.footersToRetain).toEqual([
+      "BREAKING CHANGE: The legacy field is removed.",
+      "",
+      "Migrate saved records before upgrading.",
+    ]);
+
+    const markdown = await runController(["check-pr-title", "--title-env", "PR_TITLE", "--body-env", "PR_BODY"], {
+      env: { PR_TITLE: title, PR_BODY: body },
+    });
+    expect(markdown.code).toBe(0);
+    const copyBlock = markdown.stdout.slice(markdown.stdout.indexOf("Copy these lines"));
+    expect(copyBlock).toContain(
+      "    BREAKING CHANGE: The legacy field is removed.\n\n    Migrate saved records before upgrading.",
+    );
+  });
+
+  it("ends a footer's explanation at the next footer, whichever separator it uses, not at a blank line", async () => {
+    const body = [
+      "BREAKING CHANGE: The legacy field is removed.",
+      "",
+      "Migrate saved records before upgrading.",
+      "Refs #7",
+      "",
+      "DEPRECATED: the legacy export; use the ledger export.",
+      "",
+      "Remove calls to it before 0.3.0.",
+      "Acked-by: Owner",
+      "",
+    ].join("\n");
+
+    const { code, json } = await check("feat(api)!: remove the legacy field", body);
+    expect(code).toBe(0);
+    expect(json.classification).toMatchObject({
+      breakingExplanation: "The legacy field is removed.\n\nMigrate saved records before upgrading.",
+      deprecation: "the legacy export; use the ledger export.\n\nRemove calls to it before 0.3.0.",
+    });
+    expect(json.footersToRetain).toEqual([
+      "BREAKING CHANGE: The legacy field is removed.",
+      "",
+      "Migrate saved records before upgrading.",
+      "DEPRECATED: the legacy export; use the ledger export.",
+      "",
+      "Remove calls to it before 0.3.0.",
+    ]);
+  });
+
   it("treats a breaking fix as breaking, not as a patch", async () => {
     const { json } = await check("fix!: refuse a negative quantity", "BREAKING CHANGE: zero is now refused too");
     expect(json.classification).toMatchObject({ type: "fix", breaking: true, change: "breaking" });
@@ -171,6 +227,13 @@ describe("check-pr-title", { timeout: 60_000 }, () => {
       "a misspelt deprecation footer",
       "feat: retire the unit field",
       "Deprecation: the unit field",
+      ["malformed_deprecation_footer"],
+    ],
+    ["a Reverts footer using the # separator", "fix: restore the layout", "Reverts #12", ["ambiguous_revert"]],
+    [
+      "a DEPRECATED footer using the # separator",
+      "feat: retire the unit field",
+      "DEPRECATED #12",
       ["malformed_deprecation_footer"],
     ],
     ["a version override footer", "fix: a change", "Release-As: 1.0.0", ["unsupported_override"]],

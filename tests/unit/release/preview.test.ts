@@ -206,6 +206,89 @@ describe("preview: versions and notes", { timeout: 180_000 }, () => {
     expect(accepted.json.notes).toContain("recorded here, not validated");
   });
 
+  it("carries multi-paragraph breaking and deprecation explanations from the retained merge body into the notes", async () => {
+    const { repo } = state;
+    repo.tag("v0.0.6", repo.root);
+    const title = "feat(api)!: remove the legacy field";
+    const body = [
+      "BREAKING CHANGE: The legacy field is removed.",
+      "",
+      "Migrate saved records before upgrading.",
+      "Refs #7",
+      "",
+      "DEPRECATED: the legacy export.",
+      "",
+      "Remove calls to it before 0.3.0.",
+    ].join("\n");
+    const merge = repo.mergePullRequest({ number: 101, title, retainedBody: `${title}\n\n${body}` });
+
+    const { code, json } = await preview(["--sha", merge.mergeSha]);
+    expect(code).toBe(0);
+    expect(json).toMatchObject({ version: "0.1.0", highestChange: "breaking" });
+    expect((json.merges as PreviewMerge[])[0]).toMatchObject({
+      breakingExplanation: "The legacy field is removed.\n\nMigrate saved records before upgrading.",
+      deprecation: "the legacy export.\n\nRemove calls to it before 0.3.0.",
+    });
+
+    const notes = json.notes as string;
+    const breaking = notes.slice(notes.indexOf("### Breaking changes"), notes.indexOf("### Deprecations"));
+    expect(breaking).toContain("The legacy field is removed.");
+    expect(breaking).toContain("Migrate saved records before upgrading.");
+    expect(breaking).not.toContain("Refs");
+    const deprecations = notes.slice(notes.indexOf("### Deprecations"), notes.indexOf("### Accepted merges"));
+    expect(deprecations).toContain("the legacy export.");
+    expect(deprecations).toContain("Remove calls to it before 0.3.0.");
+
+    // The default Markdown output is those same notes.
+    const markdown = await previewMarkdown(["--sha", merge.mergeSha]);
+    expect(markdown.code).toBe(0);
+    expect(markdown.stdout).toBe(notes);
+  });
+
+  it("shows proposed titles and their target in both formats when nothing has merged since the normal release", async () => {
+    const { repo } = state;
+    const released = repo.mergePullRequest({ number: 101, title: "feat(receipts): print a receipt" });
+    repo.tag("v0.1.0", released.mergeSha);
+    const extra = [
+      "--sha",
+      released.mergeSha,
+      "--proposed-title",
+      "feat: add receipt exports",
+      "--proposed-title",
+      "fix: round receipt totals",
+    ];
+
+    const { code, json } = await preview(extra);
+    expect(code).toBe(0);
+    expect(json).toMatchObject({
+      status: "no_accepted_changes",
+      version: null,
+      merges: [],
+      notes: null,
+      versionIncludingProposed: "0.2.0",
+    });
+    const proposed = json.proposed as Array<{ title: string; type: string; change: string }>;
+    expect(proposed.map((p) => [p.title, p.change])).toEqual([
+      ["feat: add receipt exports", "minor"],
+      ["fix: round receipt totals", "patch"],
+    ]);
+
+    const markdown = await previewMarkdown(extra);
+    expect(markdown.code).toBe(0);
+    expect(markdown.stdout).toContain("## Release preview: nothing to release");
+    expect(markdown.stdout).toContain("### Proposed, not accepted (2)");
+    for (const p of proposed) {
+      expect(markdown.stdout).toContain(`- **${p.title}** — \`${p.type}\` → ${p.change}`);
+    }
+    expect(markdown.stdout).toContain(`**${json.versionIncludingProposed}**`);
+
+    // Without proposals, nothing to release stays exactly that.
+    const plain = await previewMarkdown(["--sha", released.mergeSha]);
+    expect(plain.code).toBe(0);
+    expect(plain.stdout).toContain("## Release preview: nothing to release");
+    expect(plain.stdout).not.toContain("Proposed");
+  });
+
   it("maps patch, minor and breaking to PATCH, MINOR and MAJOR at or above 1.0.0, resetting lower components", async () => {
     const { repo } = state;
     repo.tag("v1.4.2", repo.root);

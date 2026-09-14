@@ -9,3 +9,8 @@ export function escapeMarkdown(text) {
     .replace(/>/g, "&gt;")
     .replace(/([\\`*_[\]|#])/g, "\\$1");
 }
+
+/** Escaped text for a list item: paragraphs stay paragraphs, indented so they remain inside the item. */
+export function listParagraphs(text) {
+  return String(text).split("\n\n").map(escapeMarkdown).join("\n\n  ");
+}

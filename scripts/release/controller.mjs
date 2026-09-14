@@ -30,7 +30,7 @@ import { ControllerError } from "./lib/errors.mjs";
 import { createGitReader } from "./lib/git.mjs";
 import { createGitHubReader } from "./lib/github.mjs";
 import { readAcceptedRange } from "./lib/history.mjs";
-import { escapeMarkdown } from "./lib/markdown.mjs";
+import { escapeMarkdown, listParagraphs } from "./lib/markdown.mjs";
 import { renderPreviewReport, renderReleaseNotes } from "./lib/notes.mjs";
 import { nextVersion, policyFor } from "./lib/version.mjs";
 
@@ -122,16 +122,16 @@ function renderTitleCheck(report) {
     lines.push(
       `- Type: \`${c.type}\`${c.scope ? ` · scope \`${escapeMarkdown(c.scope)}\`` : ""}`,
       `- Change: **${c.change}**`,
-      `- Breaking: ${c.breaking ? `yes — ${escapeMarkdown(c.breakingExplanation)}` : "no"}`,
+      `- Breaking: ${c.breaking ? `yes — ${listParagraphs(c.breakingExplanation)}` : "no"}`,
     );
-    if (c.deprecation) lines.push(`- Deprecation: ${escapeMarkdown(c.deprecation)}`);
+    if (c.deprecation) lines.push(`- Deprecation: ${listParagraphs(c.deprecation)}`);
     for (const sha of c.reverts) lines.push(`- Reverts: \`${sha}\``);
     if (report.footersToRetain.length > 0) {
       lines.push(
         "",
         "The merge body keeps only the PR title by default. Copy these lines into the merge body when merging, or the merge will be refused at integration:",
         "",
-        ...report.footersToRetain.map((line) => `    ${line}`),
+        ...report.footersToRetain.map((line) => (line ? `    ${line}` : "")),
       );
     }
   } else {
