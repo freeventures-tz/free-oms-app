@@ -39,7 +39,7 @@ import { FULL_SHA } from "./cli.mjs";
 import { ControllerError } from "./errors.mjs";
 import { STATUS_CONTEXT } from "./github.mjs";
 import { readAcceptedRange } from "./history.mjs";
-import { BUILD_TAG, NORMAL_TAG, nextVersion, policyFor } from "./version.mjs";
+import { NORMAL_TAG, nextVersion, policyFor } from "./version.mjs";
 
 export const PLAN_SCHEMA = 1;
 
@@ -101,13 +101,25 @@ function finish(report, decision, reasons = []) {
   return report;
 }
 
-/** Whether an annotation's CI run and attempt are evidence about this commit's final-merge CI. */
+/**
+ * Whether an annotation's CI run and attempt prove that this commit passed final-merge CI. The cited
+ * attempt itself must have concluded success with every required gate passing in it. Other attempts do
+ * not matter either way: a later failing re-run cannot unprove an attempt that passed, and a later
+ * passing one cannot prove an attempt that did not. An attempt that has not finished, or that GitHub
+ * cannot describe, proves nothing.
+ */
 function ciEvidenceDifferences(fields, report) {
   if (!fields) return [];
   const run = report.ci.runs.find((candidate) => String(candidate.runId) === fields["CI-Run"]);
   if (!run) return [`CI-Run ${fields["CI-Run"]} is not a final-merge CI run of this commit`];
-  if (Number(fields["CI-Attempt"]) > run.attempt) {
-    return [`CI-Attempt ${fields["CI-Attempt"]} is later than run ${run.runId}'s latest attempt`];
+  const attempt = run.attempts.find((candidate) => String(candidate.attempt) === fields["CI-Attempt"]);
+  if (!attempt) return [`CI-Attempt ${fields["CI-Attempt"]} is not an attempt of run ${run.runId}`];
+  if (!attempt.satisfied) {
+    const outcome = [
+      attempt.status === "completed" ? `concluded ${attempt.conclusion ?? "without a conclusion"}` : `is ${attempt.status ?? "unavailable"}`,
+      ...attempt.gates.filter((gate) => gate.result !== "success").map((gate) => `${gate.name} ${gate.result}`),
+    ];
+    return [`run ${run.runId} attempt ${attempt.attempt} did not pass final-merge CI (${outcome.join("; ")})`];
   }
   return [];
 }
@@ -202,9 +214,21 @@ export async function evaluateBuild({ git, github, repository, repositoryId, sha
     readMessage: (object) => git.tagObject(object).message,
   });
 
-  if (inventory.forCommit.length > 1) {
-    const names = inventory.forCommit.map((tag) => tag.name).join(" and ");
-    return finish(report, "refused", [refusal("duplicate_build_tags", `${names} are all build tags of ${sha}`, sha)]);
+  // Every build reference on the commit counts — a lightweight or malformed one too — before a valid tag
+  // can be confirmed, so an incompatible duplicate is never hidden behind an idempotent success.
+  const onCommit = [
+    ...inventory.forCommit.map((tag) => tag.name),
+    ...inventory.untrustedOnCommit.map((tag) => tag.name),
+  ].sort();
+  if (onCommit.length > 1) {
+    return finish(report, "refused", [
+      refusal(
+        "duplicate_build_tags",
+        `${onCommit.join(" and ")} are all build tags of ${sha}; none is confirmed and no other is allocated`,
+        sha,
+      ),
+      ...inventory.untrustedOnCommit.map((tag) => tag.reason),
+    ]);
   }
   if (inventory.forCommit.length === 1) {
     const [existing] = inventory.forCommit;
@@ -453,22 +477,20 @@ export async function publishBuild({ git, github, makeTagWriter, repository, rep
 }
 
 /**
- * The status to write on the commit, from the evaluation plan and what the tag writer reported. A
- * plan that was eligible reports success only when the writer confirmed a build tag.
+ * The status to write on the commit, decided from `fresh`, an evaluation made when the status is
+ * written. A plan is an older evaluation: CI may have been retried and the build tag published since,
+ * so an old failed or pending plan must not report "no build tag" over a tag that exists. What exists
+ * now decides. The plan and the writer's result only explain a commit that is still eligible and still
+ * has no tag: if its own plan was eligible, the writer ran and did not tag it.
  */
-export function statusToWrite({ plan, writer }) {
-  if (plan.decision !== "eligible") return commitStatusFor(plan);
-  const confirmed =
-    writer.result === "success" &&
-    (writer.decision === "tagged" || writer.decision === "already_tagged") &&
-    BUILD_TAG.test(writer.tag);
-  if (confirmed) {
-    return { context: STATUS_CONTEXT, state: "success", description: describeStatus(`Build tag ${writer.tag}`) };
+export function statusToWrite({ plan, fresh, writer }) {
+  if (fresh.decision === "eligible" && plan.decision === "eligible") {
+    const detail = [writer.result || "no result", writer.decision].filter(Boolean).join(", ");
+    return {
+      context: STATUS_CONTEXT,
+      state: "failure",
+      description: describeStatus(`No build tag: the tag writer did not confirm one (${detail})`),
+    };
   }
-  const detail = [writer.result || "no result", writer.decision].filter(Boolean).join(", ");
-  return {
-    context: STATUS_CONTEXT,
-    state: "failure",
-    description: describeStatus(`No build tag: the tag writer did not confirm one (${detail})`),
-  };
+  return commitStatusFor(fresh);
 }

@@ -7,11 +7,15 @@
  * fork, and a run of another workflow are not final-merge CI, whatever they concluded. Every page of
  * runs and jobs is read.
  *
- * A run satisfies the gate when its latest attempt concluded success and every required job ran in
- * that attempt exactly once, for this commit and this run, and concluded success. A job that failed in
- * an earlier attempt and passed when the same run was retried is an accepted flaky retry: it satisfies
- * the gate and stays on the record. Nothing else stands in for a failed job — not a passing job of
- * another commit or another run, and not an explanation of why it failed.
+ * An attempt passes when it concluded success and every required job ran in that attempt exactly once,
+ * for this commit and this run, and concluded success. Every attempt of every run is judged on its own
+ * jobs. The run's latest attempt decides whether the commit is eligible now. An earlier attempt is the
+ * evidence an existing build tag may cite: a tag made from an attempt that passed stays proven when a
+ * later re-run fails, and a tag citing an attempt that did not pass is never proven by a later one.
+ *
+ * A job that failed in an earlier attempt and passed when the same run was retried is an accepted flaky
+ * retry: it satisfies the gate and stays on the record. Nothing else stands in for a failed job — not a
+ * passing job of another commit or another run, and not an explanation of why it failed.
  */
 
 import { ControllerError } from "./errors.mjs";
@@ -60,20 +64,31 @@ function runMismatches(run, { repository, repositoryId, workflowId, sha }) {
   return found;
 }
 
+/** Each required gate's result in one attempt, from that attempt's own jobs. */
+function gateResults(counted, attempt) {
+  return FINAL_MERGE_CI.requiredJobs.map((name) => {
+    const executions = counted.filter((job) => job.name === name && job.run_attempt === attempt);
+    if (executions.length === 0) return { name, result: "missing", conclusion: null };
+    if (executions.length > 1) return { name, result: "ambiguous", conclusion: null };
+    const [job] = executions;
+    if (job.status !== "completed") return { name, result: "incomplete", conclusion: null };
+    const conclusion = job.conclusion ?? null;
+    const result =
+      conclusion === "success"
+        ? "success"
+        : conclusion === "skipped"
+          ? "skipped"
+          : conclusion === "cancelled"
+            ? "cancelled"
+            : "failed";
+    return { name, result, conclusion };
+  });
+}
+
 async function evaluateRun(github, run, sha) {
   const attempt = run.run_attempt;
   if (!Number.isInteger(attempt) || attempt < 1 || attempt > MAX_ATTEMPTS) {
     throw new ControllerError("github_response_invalid", `run ${run.id} reports attempt ${JSON.stringify(attempt)}`);
-  }
-  const summary = {
-    runId: run.id,
-    attempt,
-    url: run.html_url ?? null,
-    status: run.status ?? null,
-    conclusion: run.conclusion ?? null,
-  };
-  if (run.status !== "completed") {
-    return { ...summary, complete: false, satisfied: false, gates: [], attempts: [], acceptedFlakes: [], ignoredJobs: [] };
   }
 
   const counted = [];
@@ -91,38 +106,28 @@ async function evaluateRun(github, run, sha) {
     }
   }
 
-  const gates = FINAL_MERGE_CI.requiredJobs.map((name) => {
-    const executions = counted.filter((job) => job.name === name && job.run_attempt === attempt);
-    if (executions.length === 0) return { name, result: "missing", conclusion: null };
-    if (executions.length > 1) return { name, result: "ambiguous", conclusion: null };
-    const [job] = executions;
-    if (job.status !== "completed") return { name, result: "incomplete", conclusion: null };
-    const conclusion = job.conclusion ?? null;
-    const result =
-      conclusion === "success"
-        ? "success"
-        : conclusion === "skipped"
-          ? "skipped"
-          : conclusion === "cancelled"
-            ? "cancelled"
-            : "failed";
-    return { name, result, conclusion };
-  });
-
+  // An attempt GitHub cannot describe has an unknown status, and so did not pass.
   const attempts = [];
   for (let n = 1; n <= attempt; n += 1) {
     const snapshot = n === attempt ? run : await github.workflowRunAttempt(run.id, n);
+    const status = snapshot?.status ?? null;
+    const conclusion = snapshot?.conclusion ?? null;
+    const gates = gateResults(counted, n);
     attempts.push({
       attempt: n,
-      conclusion: snapshot?.conclusion ?? null,
+      status,
+      conclusion,
+      satisfied: status === "completed" && conclusion === "success" && gates.every((gate) => gate.result === "success"),
+      gates,
       unsuccessfulJobs: counted
         .filter((job) => job.run_attempt === n && job.conclusion !== "success")
         .map((job) => ({ name: job.name, conclusion: job.conclusion ?? job.status ?? null }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     });
   }
+  const latest = attempts[attempt - 1];
 
-  const acceptedFlakes = gates
+  const acceptedFlakes = latest.gates
     .filter((gate) => gate.result === "success")
     .flatMap((gate) => {
       const unsuccessful = counted
@@ -133,10 +138,14 @@ async function evaluateRun(github, run, sha) {
     });
 
   return {
-    ...summary,
-    complete: gates.every((gate) => gate.result !== "incomplete"),
-    satisfied: run.conclusion === "success" && gates.every((gate) => gate.result === "success"),
-    gates,
+    runId: run.id,
+    attempt,
+    url: run.html_url ?? null,
+    status: run.status ?? null,
+    conclusion: run.conclusion ?? null,
+    complete: latest.status === "completed" && latest.gates.every((gate) => gate.result !== "incomplete"),
+    satisfied: latest.satisfied,
+    gates: latest.gates,
     attempts,
     acceptedFlakes,
     ignoredJobs,

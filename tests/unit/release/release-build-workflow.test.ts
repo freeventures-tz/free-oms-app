@@ -93,10 +93,28 @@ describe("the build-tag workflows", () => {
 
     const statusWriters = everyJob().filter(({ job }) => typeof job.permissions === "object" && job.permissions.statuses === "write");
     expect(statusWriters.map(({ file, id }) => `${file}#${id}`)).toEqual(["release-build-tag.yml#status"]);
-    // Every scope a job does not name is none, so the status job needs contents: read to check out a
-    // private repository. It holds nothing else.
-    expect(build.workflow.jobs.status.permissions).toEqual({ contents: "read", statuses: "write" });
-    expect(build.workflow.jobs.status.steps!.some((s) => s.uses?.startsWith("actions/checkout@"))).toBe(true);
+    // Every scope a job does not name is none. The status job reads what it evaluates again, with its
+    // full history, and writes statuses alone.
+    expect(build.workflow.jobs.status.permissions).toEqual({
+      contents: "read",
+      actions: "read",
+      "pull-requests": "read",
+      statuses: "write",
+    });
+    const statusCheckout = build.workflow.jobs.status.steps!.find((s) => s.uses?.startsWith("actions/checkout@"));
+    expect(statusCheckout?.with?.["fetch-depth"]).toBe(0);
+
+    // Tags and statuses are written under the one lock, so a status is never decided while a tag is created.
+    const lock = { group: "release-tag-writer", "cancel-in-progress": false, queue: "max" };
+    const lockedWriters = everyJob().filter(({ job }) => {
+      const granted = typeof job.permissions === "object" ? job.permissions : {};
+      return job.steps !== undefined && (granted.contents === "write" || granted.statuses === "write");
+    });
+    expect(lockedWriters.map(({ file, id }) => `${file}#${id}`).sort()).toEqual([
+      "release-build-tag.yml#status",
+      "release-tag-writer.yml#write",
+    ]);
+    for (const { file, id, job } of lockedWriters) expect(job.concurrency, `${file}#${id}`).toEqual(lock);
 
     for (const { file, id, job } of everyJob()) {
       expect(job.permissions, `${file}#${id}`).not.toBe("write-all");

@@ -133,14 +133,25 @@ What happens when something goes wrong:
 ### `write-build-status`
 
 ```bash
-node scripts/release/controller.mjs write-build-status --repo freeventures-tz/free-oms-app --plan build-plan.json --writer-result success --writer-decision tagged --writer-tag v0.0.7-dev.1
+node scripts/release/controller.mjs write-build-status --repo freeventures-tz/free-oms-app --repo-id <id> --plan build-plan.json --writer-result success --writer-decision tagged
 ```
 
 Writes one commit status in the `release/build-tag` context, and only when `RELEASE_BUILD_PUBLICATION`
-is `enabled` (otherwise exit 6). An eligible plan is reported as success only when the writer job
-succeeded, reported `tagged` or `already_tagged`, and named a build tag. Any other writer outcome is a
-failure. Other plans are reported as their decision calls for. `--target-url` must be a workflow run of
-this repository.
+is `enabled` (otherwise exit 6). It does not report the plan as it stood. It evaluates the plan's commit
+again, exactly as `evaluate-build` does, and reports what exists now:
+
+| Evaluated now | Status |
+| --- | --- |
+| `already_tagged` | Success, naming the verified build tag, whatever the plan or the writer reported |
+| `eligible`, and the plan was eligible | Failure: the tag writer ran and did not confirm a tag. `--writer-result` and `--writer-decision` explain why |
+| `eligible`, and the plan was not | Pending |
+| `pending`, `failed` or `refused` | As `evaluate-build` reports it |
+| `not_applicable` | None |
+
+The workflow runs it under the tag writer's lock, so no tag can be created between that evaluation and
+the status it writes. So when the status job of a failed or pending evaluation runs late, it cannot
+report "no build tag" over a tag published since. It takes `--repo-id`, `--main-ref` and `--path` for
+the evaluation. `--target-url` must be a workflow run of this repository.
 
 ### `runtime-dependencies`
 
@@ -235,6 +246,11 @@ of another commit or run never counts, and there is no option to waive a failure
 like a known fixture defect, such as [issue #34](https://github.com/freeventures-tz/free-oms-app/issues/34),
 still fails the gate until a retry of the same run passes.
 
+Every attempt is judged on its own jobs. The latest attempt decides whether a commit is eligible now. An
+existing build tag must cite an attempt that itself concluded `success` with every required gate
+passing. A later failing re-run does not unmake such a tag. A later passing attempt does not make good a
+tag that cites an attempt that failed, has not finished or cannot be read.
+
 ### Names and ordinals
 
 `X.Y.Z` is the version the commit's own range calculates from its own ancestral normal release. `N` is
@@ -263,14 +279,15 @@ The annotation begins `Build <tag> of <repository>` and carries these fields:
 The annotation then lists the CI evidence and the accepted merges by number and sha. It deliberately
 leaves out pull-request titles.
 
-An existing build tag on the commit is `already_tagged` only when every field before `CI-Run` matches
-the fresh calculation, and `CI-Run` is a final-merge CI run of the commit. Otherwise it is refused, and
-the evaluation stops for any of these codes:
+An existing build tag on the commit is `already_tagged` only when three things hold. It is the commit's
+only build reference. Every field before `CI-Run` matches the fresh calculation. And the `CI-Run` and
+`CI-Attempt` it cites passed final-merge CI. Otherwise it is refused, and the evaluation stops for any
+of these codes:
 
 | Code | Tag found |
 | --- | --- |
-| `conflicting_build_provenance` | A build tag on the commit with other provenance, including one naming another commit's run |
-| `duplicate_build_tags` | More than one build tag on the commit |
+| `conflicting_build_provenance` | A build tag on the commit with other provenance, including one citing another commit's run or an attempt that did not pass |
+| `duplicate_build_tags` | More than one build reference on the commit, counting a lightweight or malformed one beside a valid tag |
 | `untrusted_build_tag` | Another commit's tag for the same target whose annotation does not name that tag, repository, commit and target. The target's ordinals cannot be trusted, so none is allocated past it |
 | `malformed_build_tag` | A name like a build tag but not `vX.Y.Z-dev.N` with a positive ordinal |
 | `lightweight_build_tag` | A build tag that is not an annotated tag of a commit |
@@ -284,7 +301,7 @@ runs this kind of workflow from the default branch only, so a pull request canno
 | --- | --- | --- | --- |
 | `evaluate` | `contents`, `actions`, `pull-requests`: read | The completed run was a push to main by this repository's CI | Installs the pinned dependencies with lifecycle scripts disabled, then runs `evaluate-build`. While publication is activated, it also bundles the plan and `runtime-dependencies` into an artifact and outputs its SHA-256 |
 | `publish` | Grants `contents: write` to the writer | The decision is `eligible` and publication is activated | Calls `release-tag-writer.yml` with operation `build` |
-| `status` | `statuses: write`, and `contents: read` so the checkout can read this private repository | Publication is activated | Checks the bundle digest, then runs `write-build-status` |
+| `status` | `statuses: write`; `contents`, `actions` and `pull-requests`: read, for the evaluation | Publication is activated | Waits on the tag writer's lock, checks the bundle digest, then runs `write-build-status` |
 
 `.github/workflows/release-tag-writer.yml` is callable only. Its one job is the only job in the
 repository that can create tags. Later publishers call it instead of holding their own write permission.
@@ -293,7 +310,8 @@ repository that can create tags. Later publishers call it instead of holding the
   and `queue: max`. As GitHub documented on 14 September 2026, `queue: max` keeps up to 100 callers
   pending instead of replacing the one already queued, and cancels callers beyond that. The group
   serialises writers; it is not a record of merges. A caller that is cancelled, or an event that never
-  arrives, leaves its commit without a build tag until the next slice of #36 adds recovery.
+  arrives, leaves its commit without a build tag until the next slice of #36 adds recovery. The
+  `status` job waits on the same group, so a status is never decided while a tag is being created.
 - **No untrusted code beside the token.** Neither writing job checks out the evaluated commit, runs
   `npm`, restores a cache or runs application code. Both check the bundle's digest before running
   anything, and both run only `scripts/release/controller.mjs` from main. Event values reach scripts as
@@ -357,12 +375,16 @@ checkout.
 - Interruption between object and reference, a lost response and a failed read-back: no success is
   reported, and a retry creates or confirms exactly one tag
 - A name collision refused without renaming; an identical writer's tag confirmed
-- Duplicate, untrusted, malformed, lightweight and forged tags refused
+- Duplicate, untrusted, malformed, lightweight and forged tags refused. That includes a lightweight or
+  malformed duplicate beside a valid tag, and a tag citing an attempt that failed, has not finished or
+  never existed. A tag stays proven while a later re-run fails or is still running
 - Ordinals in allocation order, the exact commit tagged however far main has moved, a feature raising
   the target, earlier tags never moving, and an older commit calculated from its own ancestral release
 - Tampered, foreign, ineligible and drifted plans refused before any write
 - Hostile history kept out of the annotation and any shell; the token never printed
-- The status writer's decision table, its zero writes while off, and its input checks
+- The status writer deciding from the commit as it stands. When an older failed or pending evaluation
+  reports late, a confirmed tag's success stays in place, in both completion orders. The writer makes
+  zero writes while off, and checks its inputs
 - The bundle list complete, and the controller evaluating and publishing from the bundle alone
 - The workflows' triggers, permissions, lock, activation conditions, digest check, pinned actions and
   the absence of installs, caches, secrets and deployment, checked as YAML

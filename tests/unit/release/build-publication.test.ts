@@ -4,7 +4,15 @@ import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { FixtureRepository } from "./support/fixture-repository";
-import { DATABASE_GATE, E2E_GATE, REPOSITORY, TOKEN, useBuildFixture } from "./support/build-harness";
+import {
+  DATABASE_GATE,
+  E2E_GATE,
+  REPOSITORY,
+  TOKEN,
+  useBuildFixture,
+  type AttemptSpec,
+  type BuildReport,
+} from "./support/build-harness";
 import type { Fault } from "./support/github-simulator";
 
 /**
@@ -384,6 +392,151 @@ describe("publish-build: an immutable build tag for an exact merge", { timeout: 
     expect(code).toBe(4);
     expect(codes(json.reasons)).toEqual(["conflicting_build_provenance"]);
     expect(json.reasons[0].detail).toContain(`CI-Run ${otherRun} is not a final-merge CI run of this commit`);
+  });
+
+  /** An annotation carrying this commit's correct stable provenance, citing a chosen run and attempt. */
+  const provenance = (plan: BuildReport, run: number, attempt: number) =>
+    [
+      `Build v0.0.7-dev.1 of ${REPOSITORY}`,
+      "",
+      "Written for the test, with every stable field correct.",
+      "",
+      "Release-Controller-Schema: 1",
+      `Repository: ${REPOSITORY}`,
+      `Commit: ${plan.sha}`,
+      `Target-Version: ${plan.target!.version}`,
+      `Classification: ${plan.target!.highestChange}`,
+      `Release-Base: ${plan.target!.base.tag} ${plan.target!.base.tagObject} ${plan.target!.base.commit}`,
+      `Notes-Digest: ${plan.target!.notesDigest}`,
+      "CI-Workflow: .github/workflows/ci.yml",
+      `CI-Run: ${run}`,
+      `CI-Attempt: ${attempt}`,
+    ].join("\n");
+
+  it.each<{ label: string; attempts: AttemptSpec[]; cited: number; detail: string }>([
+    {
+      label: "the only attempt, which failed",
+      attempts: [{ jobs: { [E2E_GATE]: "failure" } }],
+      cited: 1,
+      detail: `attempt 1 did not pass final-merge CI (concluded failure; ${E2E_GATE} failed)`,
+    },
+    {
+      label: "a failed attempt of a run whose retry later passed",
+      attempts: [{ jobs: { [E2E_GATE]: "failure" } }, {}],
+      cited: 1,
+      detail: `attempt 1 did not pass final-merge CI (concluded failure; ${E2E_GATE} failed)`,
+    },
+    {
+      label: "an attempt that has not finished",
+      attempts: [{}, { jobs: { [E2E_GATE]: "in_progress" } }],
+      cited: 2,
+      detail: `attempt 2 did not pass final-merge CI (is in_progress; ${E2E_GATE} incomplete)`,
+    },
+    {
+      label: "an attempt the run never had",
+      attempts: [{}],
+      cited: 3,
+      detail: "CI-Attempt 3 is not an attempt of run",
+    },
+  ])("refuses an existing build tag whose provenance cites $label", async ({ attempts, cited, detail }) => {
+    const { repo, github } = state;
+    const { pr33 } = fixture.releasedHistory();
+    const run = fixture.ci(pr33.mergeSha, { attempts });
+    const before = await fixture.evaluate(pr33.mergeSha, run);
+    expect(before.json.target).not.toBeNull();
+    repo.tag("v0.0.7-dev.1", pr33.mergeSha, provenance(before.json, run, cited));
+    const tagsBefore = fixture.remoteTags();
+
+    const { code, json } = await fixture.evaluate(pr33.mergeSha, run);
+
+    expect(code).toBe(4);
+    expect(json).toMatchObject({ decision: "refused", existingTag: null, tag: null, status: { state: "failure" } });
+    expect(codes(json.reasons)).toEqual(["conflicting_build_provenance"]);
+    expect(json.reasons[0].detail).toContain(detail);
+
+    const publication = await fixture.publish(json);
+    expect(publication.code).toBe(4);
+    expect(github.writes()).toEqual([]);
+    expect(fixture.remoteTags()).toBe(tagsBefore);
+  });
+
+  it("keeps a build tag proven by the attempt it cites while a later re-run of the same run is running or has failed", async () => {
+    const { github } = state;
+    const { pr33 } = fixture.releasedHistory();
+    const run = fixture.ci(pr33.mergeSha);
+    expect((await fixture.tagBuild(pr33.mergeSha, run)).publication.json.decision).toBe("tagged");
+    const writes = github.writes().length;
+
+    fixture.retry(run, { jobs: { [E2E_GATE]: "in_progress" } });
+    const running = await fixture.evaluate(pr33.mergeSha, run);
+    expect(running.code).toBe(0);
+    expect(running.json).toMatchObject({
+      decision: "already_tagged",
+      existingTag: { name: "v0.0.7-dev.1", ciRun: String(run), ciAttempt: "1" },
+      status: { state: "success" },
+    });
+
+    github.runs.get(run)!.attempts.pop();
+    fixture.retry(run, { jobs: { [E2E_GATE]: "failure" } });
+    const failed = await fixture.evaluate(pr33.mergeSha, run);
+    expect(failed.code).toBe(0);
+    expect(failed.json).toMatchObject({ decision: "already_tagged", existingTag: { name: "v0.0.7-dev.1" } });
+    expect(github.writes()).toHaveLength(writes);
+  });
+
+  it("refuses a same-named tag created first that cites an attempt which did not pass, even though a later attempt did", async () => {
+    const { repo, github } = state;
+    const { pr33 } = fixture.releasedHistory();
+    const run = fixture.ci(pr33.mergeSha, { attempts: [{ jobs: { [E2E_GATE]: "failure" } }, {}] });
+    const evaluation = await fixture.evaluate(pr33.mergeSha, run);
+    expect(evaluation.json.ci!.satisfiedBy).toMatchObject({ runId: run, attempt: 2 });
+    github.faults.push({
+      method: "POST",
+      path: /\/git\/refs$/,
+      when: "before",
+      effect: (body) => {
+        const { ref, sha } = body as { ref: string; sha: string };
+        const message = repo.git("cat-file", "tag", sha).split("\n\n").slice(1).join("\n\n");
+        repo.tag(ref.slice("refs/tags/".length), pr33.mergeSha, message.replace("CI-Attempt: 2", "CI-Attempt: 1"));
+      },
+    });
+
+    const { code, json } = await fixture.publish(evaluation.json);
+
+    expect(code).toBe(4);
+    expect(json).toMatchObject({ decision: "refused", publication: "none", existingTag: null });
+    expect(codes(json.reasons)).toEqual(["build_tag_name_collision"]);
+    expect(json.reasons[0].detail).toContain(`run ${run} attempt 1 did not pass final-merge CI`);
+    expect(github.writes().filter((w) => w.path.endsWith("/git/refs"))).toHaveLength(1);
+  });
+
+  it.each<{ label: string; add: (repo: FixtureRepository, sha: string) => void; code: string }>([
+    { label: "a lightweight build tag", add: (repo, sha) => repo.lightweightTag("v0.0.7-dev.2", sha), code: "lightweight_build_tag" },
+    { label: "a malformed build tag", add: (repo, sha) => repo.tag("v0.0.7-dev.02", sha), code: "malformed_build_tag" },
+  ])("refuses $label beside a valid build tag on the same commit instead of confirming the valid one", async ({ add, code }) => {
+    const { repo, github } = state;
+    const { pr33 } = fixture.releasedHistory();
+    const run = fixture.ci(pr33.mergeSha);
+    const { evaluation, publication } = await fixture.tagBuild(pr33.mergeSha, run);
+    expect(publication.json.decision).toBe("tagged");
+    const valid = repo.git("rev-parse", "v0.0.7-dev.1");
+    add(repo, pr33.mergeSha);
+    const tagsBefore = fixture.remoteTags();
+    const writes = github.writes().length;
+
+    const reevaluated = await fixture.evaluate(pr33.mergeSha, run);
+    expect(reevaluated.code).toBe(4);
+    expect(reevaluated.json).toMatchObject({ decision: "refused", existingTag: null, tag: null, status: { state: "failure" } });
+    expect(codes(reevaluated.json.reasons)).toEqual(["duplicate_build_tags", code]);
+
+    const republished = await fixture.publish(evaluation.json);
+    expect(republished.code).toBe(4);
+    expect(codes(republished.json.reasons)).toEqual(["duplicate_build_tags", code]);
+
+    expect(github.writes()).toHaveLength(writes);
+    expect(fixture.remoteTags()).toBe(tagsBefore);
+    expect(repo.git("rev-parse", "v0.0.7-dev.1")).toBe(valid);
+    expect(tagsOn(pr33.mergeSha)).toHaveLength(2);
   });
 
   it("allocates ordinals in allocation order, tags the exact commit however far main has moved, and never moves an earlier tag", async () => {

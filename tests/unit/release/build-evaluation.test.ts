@@ -199,10 +199,21 @@ describe("evaluate-build: identity and final-merge CI", { timeout: 240_000 }, ()
     expect(code).toBe(0);
     expect(json).toMatchObject({ decision: "eligible", tag: { name: "v0.0.7-dev.1" } });
     expect(json.ci!.satisfiedBy).toMatchObject({ runId: run, attempt: 2 });
-    expect(json.ci!.runs[0].attempts).toEqual([
-      { attempt: 1, conclusion: "failure", unsuccessfulJobs: [{ name: DATABASE_GATE, conclusion: "failure" }] },
-      { attempt: 2, conclusion: "success", unsuccessfulJobs: [] },
+    expect(json.ci!.runs[0].attempts).toMatchObject([
+      {
+        attempt: 1,
+        status: "completed",
+        conclusion: "failure",
+        satisfied: false,
+        unsuccessfulJobs: [{ name: DATABASE_GATE, conclusion: "failure" }],
+      },
+      { attempt: 2, status: "completed", conclusion: "success", satisfied: true, unsuccessfulJobs: [] },
     ]);
+    expect(json.ci!.runs[0].attempts[0].gates.find((gate) => gate.name === DATABASE_GATE)).toEqual({
+      name: DATABASE_GATE,
+      result: "failed",
+      conclusion: "failure",
+    });
     expect(json.ci!.runs[0].acceptedFlakes).toEqual([
       { job: DATABASE_GATE, unsuccessful: [{ attempt: 1, conclusion: "failure" }], passedAttempt: 2 },
     ]);

@@ -101,7 +101,7 @@ export function ciEvidence(ci) {
     for (const attempt of run.attempts) {
       const unsuccessful = attempt.unsuccessfulJobs.map((job) => `${oneLine(job.name)} ${job.conclusion}`).join(", ");
       lines.push(
-        `run ${run.runId} attempt ${attempt.attempt}: ${attempt.conclusion ?? "unknown"}${unsuccessful ? ` (${unsuccessful})` : ""}`,
+        `run ${run.runId} attempt ${attempt.attempt}: ${attempt.conclusion ?? attempt.status ?? "unknown"}${unsuccessful ? ` (${unsuccessful})` : ""}`,
       );
     }
     if (!run.satisfied) continue;
@@ -177,12 +177,20 @@ export function provenanceDifferences({ message, expected }) {
  * another commit's tag of the same target — an annotation whose provenance does not name that tag,
  * this repository, that commit and that target. An ordinal sequence with an untrusted member is
  * refused rather than allocated past. The caller verifies the commit's own tags in full.
+ *
+ * `untrustedOnCommit` names the malformed and lightweight build references on the commit itself, so the
+ * caller can count them as duplicates before it confirms a valid tag.
  */
 export function inspectBuildTags({ tags, sha, version, repository, readMessage }) {
   const refusal = (code, detail) => ({ kind: "refusal", code, detail, commit: sha, pr: null });
   const forCommit = [];
+  const untrustedOnCommit = [];
   const problems = [];
   let highestOrdinal = 0;
+  const reject = (tag, onCommit, reason) => {
+    problems.push(reason);
+    if (onCommit) untrustedOnCommit.push({ name: tag.name, reason });
+  };
 
   for (const tag of tags) {
     if (!BUILD_TAG_LIKE.test(tag.name)) continue;
@@ -195,11 +203,15 @@ export function inspectBuildTags({ tags, sha, version, repository, readMessage }
     if (!onCommit && !forVersion) continue;
 
     if (!strict || !Number.isSafeInteger(Number(strict[4]))) {
-      problems.push(refusal("malformed_build_tag", `${tag.name} looks like a build tag but is not vX.Y.Z-dev.N with a positive ordinal`));
+      reject(
+        tag,
+        onCommit,
+        refusal("malformed_build_tag", `${tag.name} looks like a build tag but is not vX.Y.Z-dev.N with a positive ordinal`),
+      );
       continue;
     }
     if (tag.objectType !== "tag" || tag.peeledType !== "commit") {
-      problems.push(refusal("lightweight_build_tag", `${tag.name} is not an annotated tag of a commit`));
+      reject(tag, onCommit, refusal("lightweight_build_tag", `${tag.name} is not an annotated tag of a commit`));
       continue;
     }
     if (forVersion && !onCommit) {
@@ -225,5 +237,5 @@ export function inspectBuildTags({ tags, sha, version, repository, readMessage }
     if (onCommit) forCommit.push({ name: tag.name, object: tag.objectName });
   }
 
-  return { forCommit, highestOrdinal, problems };
+  return { forCommit, untrustedOnCommit, highestOrdinal, problems };
 }

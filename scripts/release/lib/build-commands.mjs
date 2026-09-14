@@ -29,7 +29,6 @@ import { ControllerError } from "./errors.mjs";
 import { createGitReader } from "./git.mjs";
 import { createGitHubReader, createStatusWriter, createTagWriter } from "./github.mjs";
 import { escapeMarkdown } from "./markdown.mjs";
-import { BUILD_TAG } from "./version.mjs";
 
 const DECISION_EXIT = Object.freeze({
   eligible: EXIT.ok,
@@ -163,6 +162,12 @@ export async function publishBuildCommand(args, env) {
 
 function renderStatusReport(report) {
   const lines = [`## Build-tag status: ${report.decision.replace("_", " ")}`, "", `Exact merge \`${report.sha ?? "unknown"}\`.`];
+  if (report.evaluation) {
+    lines.push(
+      "",
+      `- Evaluated when written: ${report.evaluation.decision}${report.evaluation.tag ? ` · \`${report.evaluation.tag}\`` : ""}`,
+    );
+  }
   if (report.status) {
     lines.push("", `- Context: \`${report.status.context}\``, `- State: ${report.status.state}`, `- Description: ${escapeMarkdown(report.status.description)}`);
   }
@@ -176,30 +181,29 @@ export async function writeBuildStatusCommand(args, env) {
     strict: true,
     options: {
       repo: { type: "string" },
+      "repo-id": { type: "string" },
+      "main-ref": { type: "string" },
+      path: { type: "string" },
       plan: { type: "string" },
       "writer-result": { type: "string" },
       "writer-decision": { type: "string" },
-      "writer-tag": { type: "string" },
       "target-url": { type: "string" },
       format: { type: "string" },
     },
   });
   const format = readFormat(values.format);
   const repository = readRepository(values);
+  const repositoryId = readPositiveInteger(values["repo-id"], "repo-id");
+  const mainRef = readMainRef(values);
   const { apiUrl, token, serverUrl, activation } = settings(env);
 
-  const writer = {
-    result: values["writer-result"] ?? "",
-    decision: values["writer-decision"] ?? "",
-    tag: values["writer-tag"] ?? "",
-  };
+  const writer = { result: values["writer-result"] ?? "", decision: values["writer-decision"] ?? "" };
   if (!WRITER_RESULTS.has(writer.result)) {
     throw new UsageError("--writer-result must be success, failure, cancelled, skipped or empty");
   }
   if (writer.decision && !Object.hasOwn(DECISION_EXIT, writer.decision)) {
     throw new UsageError("--writer-decision must be a decision the controller reports");
   }
-  if (writer.tag && !BUILD_TAG.test(writer.tag)) throw new UsageError("--writer-tag must be a build tag");
 
   const targetUrl = values["target-url"] ?? null;
   const runsPrefix = `${serverUrl}/${repository}/actions/runs/`;
@@ -208,8 +212,16 @@ export async function writeBuildStatusCommand(args, env) {
   }
 
   const plan = readPlan(values.plan);
-  const report = { command: "write-build-status", decision: null, sha: null, status: null, written: false, reasons: [] };
-  const problems = planProblems(plan, { repository, repositoryId: plan?.repositoryId ?? null });
+  const report = {
+    command: "write-build-status",
+    decision: null,
+    sha: null,
+    evaluation: null,
+    status: null,
+    written: false,
+    reasons: [],
+  };
+  const problems = planProblems(plan, { repository, repositoryId });
   const finishStatus = (decision) => {
     report.decision = decision;
     return { code: DECISION_EXIT[decision], output: format === "json" ? json(report) : renderStatusReport(report) };
@@ -222,7 +234,25 @@ export async function writeBuildStatusCommand(args, env) {
   report.sha = plan.sha;
   if (activation !== ACTIVATED) return finishStatus("publication_disabled");
 
-  const status = statusToWrite({ plan, writer });
+  // Decide from what exists now, not from the plan alone. The workflow runs this under the tag writer's
+  // lock, so no build tag can be created between this evaluation and the status it decides.
+  const fresh = await evaluateBuild({
+    git: createGitReader(values.path ?? process.cwd()),
+    github: createGitHubReader({ apiUrl, token, repository }),
+    repository,
+    repositoryId,
+    sha: plan.sha,
+    runId: plan.runId,
+    mainRef,
+    serverUrl,
+  });
+  report.evaluation = {
+    decision: fresh.decision,
+    tag: fresh.existingTag?.name ?? null,
+    reasons: fresh.reasons.map((r) => r.code),
+  };
+
+  const status = statusToWrite({ plan, fresh, writer });
   if (!status) return finishStatus("no_status");
 
   await createStatusWriter({ apiUrl, token, repository }).createStatus({

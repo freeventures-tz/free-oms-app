@@ -7,7 +7,9 @@ name: Release tag writer
 #
 # The group never cancels the writer that is running, and `queue: max` keeps up to 100 callers pending
 # rather than replacing the one already queued. GitHub cancels a caller beyond that. Recovering the
-# commit of a cancelled caller is the next slice of issue #36; this workflow does not claim it.
+# commit of a cancelled caller is the next slice of issue #36; this workflow does not claim it. The build
+# workflow's status job waits on the same group, so a commit status is never decided while a tag is
+# being created.
 #
 # The job installs nothing and runs no application code. It checks the digest of the bundle the
 # calling run's read-only job prepared, and runs main's controller with it. The controller evaluates

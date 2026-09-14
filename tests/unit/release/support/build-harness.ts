@@ -41,7 +41,14 @@ export type BuildRun = {
   conclusion: string | null;
   satisfied: boolean;
   gates: BuildGate[];
-  attempts: Array<{ attempt: number; conclusion: string | null; unsuccessfulJobs: Array<{ name: string; conclusion: string }> }>;
+  attempts: Array<{
+    attempt: number;
+    status: string | null;
+    conclusion: string | null;
+    satisfied: boolean;
+    gates: BuildGate[];
+    unsuccessfulJobs: Array<{ name: string; conclusion: string }>;
+  }>;
   acceptedFlakes: Array<{ job: string; unsuccessful: Array<{ attempt: number; conclusion: string }>; passedAttempt: number }>;
   ignoredJobs: unknown[];
 };
@@ -233,15 +240,16 @@ export function useBuildFixture() {
       return { evaluation, publication };
     },
 
+    /** The status job: evaluates the plan's commit again, as it stands, and writes its status. */
     writeStatus(
       plan: unknown,
-      writer: { result?: string; decision?: string; tag?: string },
-      options: { activation?: string | null; extra?: string[] } = {},
+      writer: { result?: string; decision?: string },
+      options: { activation?: string | null; extra?: string[]; sync?: boolean } = {},
     ) {
-      const args = ["write-build-status", "--repo", REPOSITORY, "--plan", writePlan(plan)];
+      if (options.sync !== false) state.checkout.sync();
+      const args = ["write-build-status", ...scope(), "--plan", writePlan(plan)];
       if (writer.result !== undefined) args.push("--writer-result", writer.result);
       if (writer.decision !== undefined) args.push("--writer-decision", writer.decision);
-      if (writer.tag !== undefined) args.push("--writer-tag", writer.tag);
       const activation = options.activation === undefined ? "enabled" : options.activation;
       return withReport(
         runController([...args, ...(options.extra ?? []), "--format", "json"], { env: environment(activation) }),

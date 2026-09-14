@@ -113,15 +113,25 @@ jobs:
       needs.evaluate.result == 'success' &&
       vars.RELEASE_BUILD_PUBLICATION == 'enabled'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # contents: read only lets the checkout read this private repository. Writing is statuses alone.
+    timeout-minutes: 20
+    # The status is decided from the commit evaluated again now, not from the plan alone, and this job
+    # waits on the tag writer's lock: no build tag can be created between that evaluation and the status
+    # it decides, so a late failed or pending evaluation cannot contradict a tag that exists.
+    concurrency:
+      group: release-tag-writer
+      cancel-in-progress: false
+      queue: max
+    # Reading is what the evaluation needs. Writing is statuses alone.
     permissions:
       contents: read
+      actions: read
+      pull-requests: read
       statuses: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -142,9 +152,9 @@ jobs:
           RELEASE_BUILD_PUBLICATION: ${{ vars.RELEASE_BUILD_PUBLICATION }}
           WRITER_RESULT: ${{ needs.publish.result }}
           WRITER_DECISION: ${{ needs.publish.outputs.decision }}
-          WRITER_TAG: ${{ needs.publish.outputs.tag }}
         run: |
           node scripts/release/controller.mjs write-build-status \
-            --repo "$GITHUB_REPOSITORY" --plan "$RUNNER_TEMP/bundle/build-plan.json" \
-            --writer-result "$WRITER_RESULT" --writer-decision "$WRITER_DECISION" --writer-tag "$WRITER_TAG" \
+            --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
+            --plan "$RUNNER_TEMP/bundle/build-plan.json" --main-ref origin/main \
+            --writer-result "$WRITER_RESULT" --writer-decision "$WRITER_DECISION" \
             --target-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
