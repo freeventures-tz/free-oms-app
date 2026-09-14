@@ -112,6 +112,16 @@ function selectReleaseBase(git, line, sha, ignoreNormalTagAt) {
   return { base: { tag, tagObject, commit, version }, baseIndex: nearest, reasons: [] };
 }
 
+/**
+ * The normal release a commit's range starts from, read from Git alone: the base `readAcceptedRange` uses,
+ * or null with the reasons none can be chosen. `ignoreNormalTagAt` is as for `readAcceptedRange`. `line` is
+ * the commit's first-parent line, when the caller already has it.
+ */
+export function releaseBaseFor({ git, sha, line = git.firstParentLine(sha), ignoreNormalTagAt = null }) {
+  const selected = selectReleaseBase(git, line, sha, ignoreNormalTagAt);
+  return { base: selected.base ?? null, reasons: selected.reasons };
+}
+
 /** Splits a merge message into its subject and the title and description its body retains. */
 function retainedMessage(message) {
   const lines = message.split("\n");

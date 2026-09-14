@@ -83,6 +83,75 @@ export type BuildReport = {
 
 export type ReportRun = ControllerRun & { json: BuildReport };
 
+/** One commit in a reconciliation's window. */
+export type ReconciledCommit = {
+  sha: string;
+  pr: number | null;
+  decision: string;
+  tag: { name: string; ordinal: number; provisional: boolean } | null;
+  recordedTag: { name: string; object: string; ciRun: string; ciAttempt: string; verification: string } | null;
+  releasedAs: string[];
+  target: BuildReport["target"];
+  ci: BuildReport["ci"];
+  reasons: BuildReason[];
+};
+
+export type ReconciliationReport = {
+  command: string;
+  schema: number;
+  decision: string;
+  publication: string;
+  repository: string;
+  repositoryId: number | null;
+  mainRef: string;
+  main: string | null;
+  since: { tag: string; tagObject: string; commit: string } | null;
+  trigger: { sha: string; runId: number; inWindow: boolean | null } | null;
+  counts: { recorded: number; eligible: number; blocked: number; notApplicable: number };
+  commits: ReconciledCommit[];
+  reasons: BuildReason[];
+};
+
+/** One eligible commit's outcome in `publish-reconciled-builds`. */
+export type PublishedCommit = {
+  sha: string;
+  pr: number | null;
+  planned: boolean;
+  decision: string;
+  tag: { name: string; ordinal: number; provisional: boolean; object?: string; commit?: string } | null;
+  existingTag: { name: string; object: string } | null;
+  target: BuildReport["target"];
+  reasons: BuildReason[];
+};
+
+export type ReconciledPublication = {
+  command: string;
+  decision: string;
+  publication: string;
+  main: string | null;
+  since: ReconciliationReport["since"];
+  counts: ReconciliationReport["counts"] | null;
+  commits: PublishedCommit[];
+  reasons: BuildReason[];
+};
+
+export type ReconciledStatus = {
+  command: string;
+  decision: string;
+  commits: Array<{
+    sha: string;
+    trigger: boolean;
+    result: string;
+    evaluation: { decision: string; tag: string | null; reasons: string[] } | null;
+    status: { context: string; state: string; description: string } | null;
+  }>;
+  reasons: BuildReason[];
+};
+
+export type JsonRun<T> = ControllerRun & { json: T };
+
+export type Trigger = { sha: string; runId: number };
+
 /** One attempt of a simulated run. Every required job not named concluded success. */
 export type AttemptSpec = {
   /** A required job's conclusion, or `in_progress`. */
@@ -172,16 +241,17 @@ export function useBuildFixture() {
     ...(activation === null || activation === undefined ? {} : { RELEASE_BUILD_PUBLICATION: activation }),
   });
 
-  const withReport = async (run: Promise<ControllerRun>): Promise<ReportRun> => {
+  const withJson = async <T,>(run: Promise<ControllerRun>): Promise<JsonRun<T>> => {
     const result = await run;
-    let json: BuildReport | null = null;
+    let json: T | null = null;
     try {
-      json = JSON.parse(result.stdout) as BuildReport;
+      json = JSON.parse(result.stdout) as T;
     } catch {
       json = null;
     }
-    return { ...result, json: json as BuildReport };
+    return { ...result, json: json as T };
   };
+  const withReport = (run: Promise<ControllerRun>): Promise<ReportRun> => withJson<BuildReport>(run);
 
   const writePlan = (plan: unknown) => {
     planCount += 1;
@@ -221,12 +291,85 @@ export function useBuildFixture() {
     );
   };
 
+  const triggerArgs = (trigger: Trigger | null) =>
+    trigger === null ? [] : ["--sha", trigger.sha, "--run-id", String(trigger.runId)];
+
+  /** The read-only reconciliation. `trigger` is the CI completion that started it; null is a recovery dispatch. */
+  const reconcile = (trigger: Trigger | null = null, options: { extra?: string[]; sync?: boolean } = {}) => {
+    if (options.sync !== false) state.checkout.sync();
+    return withJson<ReconciliationReport>(
+      runController(
+        ["reconcile-builds", ...scope(), ...triggerArgs(trigger), ...(options.extra ?? []), "--format", "json"],
+        { env: environment(null) },
+      ),
+    );
+  };
+
+  /** The tag writer's reconciled publication. `activation` defaults to `enabled`; null leaves it unset. */
+  const publishReconciled = (
+    plan: unknown,
+    options: { activation?: string | null; extra?: string[]; sync?: boolean; planPath?: string } = {},
+  ) => {
+    if (options.sync !== false) state.checkout.sync();
+    const planPath = options.planPath ?? writePlan(plan);
+    const activation = options.activation === undefined ? "enabled" : options.activation;
+    return withJson<ReconciledPublication>(
+      runController(
+        ["publish-reconciled-builds", ...scope(), "--plan", planPath, ...(options.extra ?? []), "--format", "json"],
+        { env: environment(activation) },
+      ),
+    );
+  };
+
+  /** The status job of a reconciliation. */
+  const writeReconciledStatuses = (
+    plan: unknown,
+    writer: { result?: string; decision?: string },
+    options: { activation?: string | null; extra?: string[]; sync?: boolean } = {},
+  ) => {
+    if (options.sync !== false) state.checkout.sync();
+    const args = ["write-reconciled-statuses", ...scope(), "--plan", writePlan(plan)];
+    if (writer.result !== undefined) args.push("--writer-result", writer.result);
+    if (writer.decision !== undefined) args.push("--writer-decision", writer.decision);
+    const activation = options.activation === undefined ? "enabled" : options.activation;
+    return withJson<ReconciledStatus>(
+      runController([...args, ...(options.extra ?? []), "--format", "json"], { env: environment(activation) }),
+    );
+  };
+
   return {
     state,
     evaluate,
     publish,
     writePlan,
     environment,
+    reconcile,
+    publishReconciled,
+    writeReconciledStatuses,
+
+    reconcileMarkdown(trigger: Trigger | null = null, extra: string[] = []) {
+      state.checkout.sync();
+      return runController(["reconcile-builds", ...scope(), ...triggerArgs(trigger), ...extra], { env: environment(null) });
+    },
+
+    /**
+     * One run of the build-tag workflow, in its job order: the read-only reconciliation, the writer when
+     * anything is eligible, then the status job. Each job re-reads what exists when it runs.
+     */
+    async workflowRun(trigger: Trigger | null) {
+      const plan = await reconcile(trigger);
+      const publication = plan.json?.decision === "eligible" ? await publishReconciled(plan.json) : null;
+      const writer = publication
+        ? { result: publication.code === 0 ? "success" : "failure", decision: publication.json?.decision ?? "" }
+        : { result: "skipped" };
+      const statuses = await writeReconciledStatuses(plan.json, writer);
+      return { plan, publication, statuses };
+    },
+
+    /** The tags on one commit in GitHub's repository. */
+    tagsOn(sha: string) {
+      return state.repo.git("tag", "--points-at", sha).split("\n").filter(Boolean);
+    },
 
     evaluateMarkdown(sha: string, runId: number | null, extra: string[] = []) {
       state.checkout.sync();

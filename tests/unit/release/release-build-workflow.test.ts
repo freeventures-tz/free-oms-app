@@ -44,35 +44,60 @@ const WRITER_CALL = "./.github/workflows/release-tag-writer.yml";
 const conjuncts = (condition: string | undefined) =>
   (condition ?? "").split("&&").map((part) => part.replace(/\s+/g, " ").trim());
 
+/** The top-level `||` alternatives of a condition, each unparenthesised and split into its `&&` parts. */
+const alternatives = (condition: string | undefined) =>
+  (condition ?? "").split("||").map((alternative) => conjuncts(alternative.trim().replace(/^\(([\s\S]*)\)$/, "$1")));
+
 const everyJob = () =>
   workflows.flatMap(({ file, workflow }) => Object.entries(workflow.jobs).map(([id, job]) => ({ file, id, job })));
 
 describe("the build-tag workflows", () => {
-  it("run only when CI completes on main; nothing is triggered by a tag, a release, a pull request or by hand", () => {
-    expect(build.workflow.on).toEqual({ workflow_run: { workflows: ["CI"], types: ["completed"], branches: ["main"] } });
+  it("run when CI completes on main or by a recovery dispatch that takes no input; nothing is triggered by a tag, a release or a pull request", () => {
+    expect(build.workflow.on).toEqual({
+      workflow_run: { workflows: ["CI"], types: ["completed"], branches: ["main"] },
+      workflow_dispatch: null,
+    });
     expect(Object.keys(writer.workflow.on)).toEqual(["workflow_call"]);
 
     for (const { file, workflow } of workflows) {
       for (const [event, filter] of Object.entries(workflow.on)) {
-        expect(["push", "pull_request", "workflow_run", "workflow_call"], `${file} ${event}`).toContain(event);
+        expect(["push", "pull_request", "workflow_run", "workflow_call", "workflow_dispatch"], `${file} ${event}`).toContain(event);
         if (event === "push") expect((filter as Record<string, unknown>)?.tags, file).toBeUndefined();
+        if (event === "workflow_dispatch") expect(file).toBe("release-build-tag.yml");
       }
     }
     const ci = load("ci.yml").workflow;
     expect(ci.on).toEqual({ push: { branches: ["**"] }, pull_request: null });
   });
 
-  it("evaluates only a push to main by this repository's CI, in a job that can only read", () => {
+  it("reconciles only for a push to main by this repository's CI or a dispatch from main, in a job that can only read", () => {
     const evaluate = build.workflow.jobs.evaluate;
     expect(build.workflow.permissions).toEqual({});
-    expect(conjuncts(evaluate.if)).toEqual([
-      "github.event.workflow_run.event == 'push'",
-      "github.event.workflow_run.head_branch == 'main'",
-      "github.event.workflow_run.path == '.github/workflows/ci.yml'",
-      "github.event.workflow_run.repository.full_name == github.repository",
-      "github.event.workflow_run.head_repository.full_name == github.repository",
+    expect(alternatives(evaluate.if)).toEqual([
+      ["github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'"],
+      [
+        "github.event_name == 'workflow_run'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.head_branch == 'main'",
+        "github.event.workflow_run.path == '.github/workflows/ci.yml'",
+        "github.event.workflow_run.repository.full_name == github.repository",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+      ],
     ]);
     expect(evaluate.permissions).toEqual({ contents: "read", actions: "read", "pull-requests": "read" });
+  });
+
+  it("reconciles the whole window on every run, passing a CI completion only as its trigger; the window is the controller's, not an input", () => {
+    const step = build.workflow.jobs.evaluate.steps!.find((s) => s.id === "evaluate")!;
+    expect(step.run).toContain("node scripts/release/controller.mjs reconcile-builds");
+    expect(step.run).toMatch(/if \[ "\$GITHUB_EVENT_NAME" = "workflow_run" \]; then\n\s*trigger=\(--sha "\$HEAD_SHA" --run-id "\$RUN_ID"\)\n\s*fi\n/);
+    expect(step.run).toContain('"${trigger[@]}"');
+    expect(step.env).toMatchObject({
+      HEAD_SHA: "${{ github.event.workflow_run.head_sha }}",
+      RUN_ID: "${{ github.event.workflow_run.id }}",
+    });
+    expect(step.run).toMatch(/case "\$code" in 0\|4\) ;; \*\) exit "\$code" ;; esac/);
+    for (const { file, text } of release) expect(text, file).not.toContain("--since");
   });
 
   it("gives contents: write to exactly one job that runs steps — the writer — under one lock that never cancels or replaces a waiting writer", () => {
@@ -133,8 +158,8 @@ describe("the build-tag workflows", () => {
     }
 
     const controllerSteps = [
-      ...writer.workflow.jobs.write.steps!.filter((s) => s.run?.includes("publish-build")),
-      ...jobs.status.steps!.filter((s) => s.run?.includes("write-build-status")),
+      ...writer.workflow.jobs.write.steps!.filter((s) => s.run?.includes("publish-reconciled-builds")),
+      ...jobs.status.steps!.filter((s) => s.run?.includes("write-reconciled-statuses")),
     ];
     expect(controllerSteps).toHaveLength(2);
     for (const step of controllerSteps) {
@@ -182,7 +207,7 @@ describe("the build-tag workflows", () => {
     const step = writer.workflow.jobs.write.steps!.find((s) => s.id === "write")!;
     expect(step.env?.OPERATION).toBe("${{ inputs.operation }}");
     expect(step.run).toContain('case "$OPERATION" in');
-    expect(step.run).toMatch(/\n\s*build\)\n/);
+    expect(step.run).toMatch(/\n\s*build\)\n\s*node scripts\/release\/controller\.mjs publish-reconciled-builds \\\n/);
     expect(step.run).toMatch(/\*\)\n[^;]*exit 2/);
   });
 

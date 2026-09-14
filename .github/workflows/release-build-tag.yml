@@ -1,19 +1,27 @@
 name: Release build tag
 
-# When CI finishes on an exact merge to main, decides whether that commit earns an immutable build
-# tag, vX.Y.Z-dev.N, and creates it only if the Owner has activated build publication. Policy: issue
-# #36. Operation, and what the tests prove: scripts/release/README.md.
+# When CI finishes on main, or the Owner starts a recovery dispatch, reconciles every accepted merge after
+# v0.0.6 with its immutable build tag, vX.Y.Z-dev.N, and creates the tags that are owed only if the Owner
+# has activated build publication. Policy: issue #36. Operation, and what the tests prove:
+# scripts/release/README.md.
 #
 # OFF BY DEFAULT. Nothing is written unless the repository variable RELEASE_BUILD_PUBLICATION is
-# exactly `enabled`. Until then only the read-only evaluation runs: no tag, no reference, no commit
+# exactly `enabled`. Until then only the read-only reconciliation runs: no tag, no reference, no commit
 # status, no artifact. The controller checks the same variable again before any write.
 #
-# Trust. `workflow_run` runs this file as it is on the default branch, never a pull request's copy.
-# No job checks out the commit being evaluated or runs its code: the controller is main's, and the
-# commit is data. Dependencies install once, lockfile-pinned with lifecycle scripts disabled, in the
-# evaluation job, which cannot write. The writing jobs install nothing; they check the digest of that
-# job's bundle before using it. Only the tag writer can write contents, only the status job can write
-# statuses, and event values reach scripts as environment variables, never as expressions.
+# Durable, not event-driven. Every run derives what is owed again from main's first-parent history, the
+# tags GitHub holds and each commit's own final-merge CI. The CI completion that starts a run is checked
+# and reported on, but it does not choose what is published. A dropped, duplicated, late or replaced run
+# delays a build tag until the next run — any later CI completion on main, or a recovery dispatch — and
+# cannot lose one.
+#
+# Trust. `workflow_run` runs this file as it is on the default branch, never a pull request's copy, and a
+# dispatch is reconciled only when started from main. No job checks out an evaluated commit or runs its
+# code: the controller is main's, and history is data. Dependencies install once, lockfile-pinned with
+# lifecycle scripts disabled, in the reconciliation job, which cannot write. The writing jobs install
+# nothing; they check the digest of that job's bundle before using it. Only the tag writer can write
+# contents, only the status job can write statuses, and event values reach scripts as environment
+# variables, never as expressions.
 #
 # No deployment, migration, production credential or secret is used, and nothing here is triggered by
 # a tag or a release.
@@ -22,20 +30,25 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  # Recovery: the same reconciliation, started by hand from main. It takes no input.
+  workflow_dispatch:
 
 permissions: {}
 
 jobs:
   evaluate:
-    name: Evaluate the exact merge
-    # A pull-request run, a fork, another branch or another workflow never reaches the controller. The
-    # controller checks the same facts again from the API rather than trusting this event.
+    name: Reconcile accepted merges with their build tags
+    # A pull-request run, a fork, another branch or another workflow never reaches the controller, and
+    # neither does a dispatch from another branch. The controller checks a CI completion again from the
+    # API rather than trusting this event.
     if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.path == '.github/workflows/ci.yml' &&
       github.event.workflow_run.repository.full_name == github.repository &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -56,25 +69,30 @@ jobs:
           node-version: 22
       - name: Install pinned dependencies without lifecycle scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Evaluate the exact merge
+      - name: Reconcile accepted merges with their build tags
         id: evaluate
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
+          # A CI completion names its run and commit; a recovery dispatch names none. Neither narrows the scan.
+          trigger=()
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            trigger=(--sha "$HEAD_SHA" --run-id "$RUN_ID")
+          fi
           set +e
-          node scripts/release/controller.mjs evaluate-build \
-            --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
-            --sha "$HEAD_SHA" --run-id "$RUN_ID" --main-ref origin/main \
+          node scripts/release/controller.mjs reconcile-builds \
+            --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" --main-ref origin/main \
+            "${trigger[@]}" \
             --format json --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" \
             > "$RUNNER_TEMP/build-plan.json"
           code=$?
           set -e
-          # 0 eligible, already tagged or not applicable; 3 pending; 4 refused; 5 a required gate is
-          # unsatisfied. Each is a decision, reported on the commit once publication is activated.
-          # Anything else means the controller could not finish, and fails this job.
-          case "$code" in 0|3|4|5) ;; *) exit "$code" ;; esac
+          # 0: the window is reconciled, whether or not anything is eligible; 4: refused, reported on the
+          # triggering commit once publication is activated. Anything else means the controller could not
+          # finish, and fails this job.
+          case "$code" in 0|4) ;; *) exit "$code" ;; esac
       - name: Bundle the plan and the controller's pinned dependencies for the writing jobs
         id: bundle
         if: vars.RELEASE_BUILD_PUBLICATION == 'enabled'
@@ -93,7 +111,7 @@ jobs:
           retention-days: 1
 
   publish:
-    name: Create the build tag
+    name: Create the build tags that are owed
     needs: evaluate
     if: needs.evaluate.outputs.decision == 'eligible' && vars.RELEASE_BUILD_PUBLICATION == 'enabled'
     permissions:
@@ -106,7 +124,7 @@ jobs:
       bundle-digest: ${{ needs.evaluate.outputs.bundle-digest }}
 
   status:
-    name: Report the result on the commit
+    name: Report the results on the commits
     needs: [evaluate, publish]
     if: >-
       !cancelled() &&
@@ -114,7 +132,7 @@ jobs:
       vars.RELEASE_BUILD_PUBLICATION == 'enabled'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The status is decided from the commit evaluated again now, not from the plan alone, and this job
+    # Each status is decided from its commit evaluated again now, not from the plan alone, and this job
     # waits on the tag writer's lock: no build tag can be created between that evaluation and the status
     # it decides, so a late failed or pending evaluation cannot contradict a tag that exists.
     concurrency:
@@ -146,14 +164,14 @@ jobs:
           echo "$BUNDLE_DIGEST  $RUNNER_TEMP/bundle/release-controller-bundle.tar" | sha256sum --check --strict
           tar -xf "$RUNNER_TEMP/bundle/release-controller-bundle.tar" -C "$RUNNER_TEMP/bundle"
           mv "$RUNNER_TEMP/bundle/node_modules" node_modules
-      - name: Write the build-tag status
+      - name: Write the build-tag statuses
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_BUILD_PUBLICATION: ${{ vars.RELEASE_BUILD_PUBLICATION }}
           WRITER_RESULT: ${{ needs.publish.result }}
           WRITER_DECISION: ${{ needs.publish.outputs.decision }}
         run: |
-          node scripts/release/controller.mjs write-build-status \
+          node scripts/release/controller.mjs write-reconciled-statuses \
             --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
             --plan "$RUNNER_TEMP/bundle/build-plan.json" --main-ref origin/main \
             --writer-result "$WRITER_RESULT" --writer-decision "$WRITER_DECISION" \

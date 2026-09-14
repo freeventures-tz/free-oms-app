@@ -153,6 +153,25 @@ async function evaluateRun(github, run, sha) {
 }
 
 /**
+ * Refusals when run `runId` is not final-merge CI for `sha`: the identity check `evaluateFinalMergeCi`
+ * makes first, on its own. Reads the CI workflow and that one run. Empty when the run is final-merge CI.
+ */
+export async function verifyTriggerRun({ github, repository, repositoryId = null, sha, runId }) {
+  const reason = (code, detail) => ({ kind: "refusal", code, detail, commit: sha, pr: null });
+  const workflow = await github.workflow(FINAL_MERGE_CI.workflowFile);
+  if (!workflow || workflow.path !== FINAL_MERGE_CI.workflowPath || !Number.isSafeInteger(workflow.id)) {
+    return [reason("ci_workflow_unavailable", `${FINAL_MERGE_CI.workflowPath} is not a workflow of ${repository}`)];
+  }
+  const run = await github.workflowRun(runId);
+  const mismatches = run
+    ? runMismatches(run, { repository, repositoryId, workflowId: workflow.id, sha })
+    : [`${repository} has no workflow run ${runId}`];
+  return mismatches.length === 0
+    ? []
+    : [reason("not_final_merge_ci", `run ${runId} is not final-merge CI for ${sha}: ${mismatches.join("; ")}`)];
+}
+
+/**
  * Evaluates final-merge CI for a commit. When `runId` is given — the run whose completion started the
  * evaluation — it must itself be final-merge CI for the commit, or nothing else is read.
  *

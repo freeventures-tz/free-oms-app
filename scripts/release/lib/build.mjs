@@ -15,8 +15,9 @@
  *   failed            final-merge CI finished without satisfying a required gate
  *   refused           the identity, the history or an existing tag cannot be trusted
  *
- * `publishBuild` is the only writer. It evaluates the commit again — a plan handed to it is compared
- * with that evaluation, never trusted — and writes only when publication is activated. It allocates
+ * `publishCommit` is the only writer; `publishBuild` reaches it with one plan, and a reconciliation
+ * (lib/reconcile.mjs) with each commit it finds eligible. It evaluates the commit again — a plan handed to
+ * it is compared with that evaluation, never trusted — and writes only when publication is activated. It allocates
  * the ordinal from the tags as they stand, creates the annotated object and then a reference that is
  * never forced, and reports success only after reading both back from GitHub. A name GitHub refuses is
  * read back too: this commit's matching build tag is a no-op, anything else is a refusal, and no other
@@ -52,7 +53,7 @@ const STATUS_DESCRIPTION_LIMIT = 140;
 
 const refusal = (code, detail, commit) => ({ kind: "refusal", code, detail, commit, pr: null });
 
-async function assertCheckoutTagsCurrent(github, tags) {
+export async function assertCheckoutTagsCurrent(github, tags) {
   const local = new Map(tags.map((tag) => [tag.name, tag.objectName]));
   const remote = new Map(
     (await github.tagReferences()).map((ref) => [ref.ref.slice("refs/tags/".length), ref.object?.sha ?? null]),
@@ -158,7 +159,16 @@ function verifyExistingBuildTag({ git, existing, report, rangeReasons }) {
 }
 
 /** Evaluates one exact merge for a build tag. Reads Git and GitHub; writes nothing. */
-export async function evaluateBuild({ git, github, repository, repositoryId, sha, runId, mainRef, serverUrl }) {
+export async function evaluateBuild(options) {
+  await assertCheckoutTagsCurrent(options.github, options.git.tags());
+  return evaluateCommit(options);
+}
+
+/**
+ * The same evaluation, for a caller that has already checked the checkout's tags against GitHub's: a
+ * reconciliation checks them once for every commit it evaluates.
+ */
+export async function evaluateCommit({ git, github, repository, repositoryId, sha, runId, mainRef, serverUrl }) {
   const report = {
     command: "evaluate-build",
     schema: PLAN_SCHEMA,
@@ -179,8 +189,6 @@ export async function evaluateBuild({ git, github, repository, repositoryId, sha
   };
 
   const tags = git.tags();
-  await assertCheckoutTagsCurrent(github, tags);
-
   const range = await readAcceptedRange({ git, github, repository, sha, mainRef, serverUrl, ignoreNormalTagAt: sha });
   const identity = range.reasons.filter((r) => IDENTITY_CODES.has(r.code));
   if (identity.length > 0) return finish(report, "refused", identity);
@@ -378,14 +386,35 @@ export async function publishBuild({ git, github, makeTagWriter, repository, rep
     ]);
   }
 
-  const report = await evaluateBuild({ git, github, repository, repositoryId, sha: plan.sha, runId: plan.runId, mainRef, serverUrl });
+  return publishCommit({
+    git,
+    github,
+    makeTagWriter,
+    repository,
+    repositoryId,
+    sha: plan.sha,
+    runId: plan.runId,
+    planned: plan,
+    mainRef,
+    serverUrl,
+    activation,
+  });
+}
+
+/**
+ * The one path that writes a build tag, for one commit. It evaluates the commit again, refuses when the
+ * target `planned` carries no longer matches that evaluation, and writes only when the commit is eligible
+ * and publication is activated. A reconciliation publishes each eligible commit through here in turn.
+ */
+export async function publishCommit({ git, github, makeTagWriter, repository, repositoryId, sha, runId, planned, mainRef, serverUrl, activation }) {
+  const report = await evaluateBuild({ git, github, repository, repositoryId, sha, runId, mainRef, serverUrl });
   report.command = "publish-build";
 
   if (report.decision === "eligible" || report.decision === "already_tagged") {
-    const drift = planDrift(plan, report);
+    const drift = planDrift(planned, report);
     if (drift.length > 0) {
       return publicationOf(report, "refused", [
-        refusal("plan_drift", `the plan no longer matches Git and GitHub: ${drift.join("; ")}`, plan.sha),
+        refusal("plan_drift", `the plan no longer matches Git and GitHub: ${drift.join("; ")}`, sha),
       ]);
     }
   }
@@ -404,14 +433,14 @@ export async function publishBuild({ git, github, makeTagWriter, repository, rep
 
   const writer = makeTagWriter();
   const { name, ordinal } = report.tag;
-  const message = renderBuildAnnotation({ tag: name, repository, sha: plan.sha, target: report.target, ci: report.ci });
+  const message = renderBuildAnnotation({ tag: name, repository, sha, target: report.target, ci: report.ci });
 
   let object;
   try {
-    object = await writer.createTagObject({ tag: name, message, commit: plan.sha });
+    object = await writer.createTagObject({ tag: name, message, commit: sha });
   } catch (error) {
     if (!(error instanceof ControllerError)) throw error;
-    throw new ControllerError("tag_object_not_created", `no build tag was published for ${plan.sha}: ${error.message}`);
+    throw new ControllerError("tag_object_not_created", `no build tag was published for ${sha}: ${error.message}`);
   }
 
   let reference;
@@ -452,7 +481,7 @@ export async function publishBuild({ git, github, makeTagWriter, repository, rep
       refusal(
         "build_tag_name_collision",
         `${name} already exists and is not this commit's build tag: ${confirmed.differences.join("; ")}. No other name is tried`,
-        plan.sha,
+        sha,
       ),
     ]);
   }
@@ -467,7 +496,7 @@ export async function publishBuild({ git, github, makeTagWriter, repository, rep
   ) {
     throw new ControllerError(
       "tag_readback_mismatch",
-      `refs/tags/${name} was created but does not read back as tag object ${object.sha} of ${plan.sha} with run ${expectedRun} attempt ${expectedAttempt}${confirmed.differences?.length ? `: ${confirmed.differences.join("; ")}` : ""}`,
+      `refs/tags/${name} was created but does not read back as tag object ${object.sha} of ${sha} with run ${expectedRun} attempt ${expectedAttempt}${confirmed.differences?.length ? `: ${confirmed.differences.join("; ")}` : ""}`,
     );
   }
 

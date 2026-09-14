@@ -35,7 +35,16 @@ const PROVENANCE_FIELDS = Object.freeze([
 
 const STABLE_FIELDS = Object.freeze(PROVENANCE_FIELDS.slice(0, 8));
 
-const BUILD_TAG_LIKE = /^v\d+\.\d+\.\d+-dev/;
+/**
+ * The stable fields Git alone can check: all but the classification and the notes digest, which depend on
+ * the pull requests GitHub associates with the accepted merges.
+ */
+export const GIT_CHECKED_FIELDS = Object.freeze(
+  STABLE_FIELDS.filter((field) => field !== "Classification" && field !== "Notes-Digest"),
+);
+
+/** Any name that looks like a build tag, well formed or not. */
+export const BUILD_TAG_LIKE = /^v\d+\.\d+\.\d+-dev/;
 
 export function buildTagName(version, ordinal) {
   return `v${version}-dev.${ordinal}`;
@@ -148,8 +157,20 @@ export function parseBuildProvenance(message) {
   return PROVENANCE_FIELDS.every((field) => Object.hasOwn(fields, field)) ? fields : null;
 }
 
-/** How an annotation differs from the expected provenance. An empty list is a match. */
-export function provenanceDifferences({ message, expected }) {
+/** The pull request an annotation's list of accepted merges records for a merge commit, or null. */
+export function recordedPullRequest(message, sha) {
+  for (const line of String(message).split("\n")) {
+    const match = /^- #([1-9]\d*) ([0-9a-f]{40})$/.exec(line);
+    if (match && match[2] === sha) return Number(match[1]);
+  }
+  return null;
+}
+
+/**
+ * How an annotation differs from the expected provenance. An empty list is a match. `fields` names the
+ * stable fields compared; by default, all of them.
+ */
+export function provenanceDifferences({ message, expected, fields: compared = STABLE_FIELDS }) {
   const differences = [];
   const firstLine = String(message).split("\n")[0];
   if (firstLine !== expected.firstLine) {
@@ -157,7 +178,7 @@ export function provenanceDifferences({ message, expected }) {
   }
   const fields = parseBuildProvenance(message);
   if (!fields) return [...differences, "its annotation carries no complete build provenance"];
-  for (const field of STABLE_FIELDS) {
+  for (const field of compared) {
     if (fields[field] !== expected.fields[field]) {
       differences.push(`${field} is ${JSON.stringify(fields[field])}, not ${JSON.stringify(expected.fields[field])}`);
     }

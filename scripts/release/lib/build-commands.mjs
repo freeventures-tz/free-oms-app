@@ -43,9 +43,9 @@ const DECISION_EXIT = Object.freeze({
   publication_disabled: EXIT.disabled,
 });
 
-const WRITER_RESULTS = new Set(["", "success", "failure", "cancelled", "skipped"]);
+export const WRITER_RESULTS = new Set(["", "success", "failure", "cancelled", "skipped"]);
 
-function settings(env) {
+export function settings(env) {
   return {
     apiUrl: env.GITHUB_API_URL || "https://api.github.com",
     token: env.GITHUB_TOKEN || env.GH_TOKEN || "",
@@ -54,19 +54,29 @@ function settings(env) {
   };
 }
 
-function readRepository(values) {
+export function readRepository(values) {
   if (!values.repo || !REPOSITORY.test(values.repo)) throw new UsageError("--repo owner/name is required");
   return values.repo;
 }
 
-function readMainRef(values) {
+export function readMainRef(values) {
   const mainRef = values["main-ref"] ?? "origin/main";
   if (!REF.test(mainRef)) throw new UsageError("--main-ref must be a plain ref name");
   return mainRef;
 }
 
+/** A commit status's target URL: null, or a workflow run of this repository. */
+export function readTargetUrl(value, { serverUrl, repository }) {
+  if (value === undefined) return null;
+  const runsPrefix = `${serverUrl}/${repository}/actions/runs/`;
+  if (!(value.startsWith(runsPrefix) && /^[1-9]\d*$/.test(value.slice(runsPrefix.length)))) {
+    throw new UsageError(`--target-url must be a workflow run of ${repository}`);
+  }
+  return value;
+}
+
 /** The plan file's JSON, or null when it is not JSON. A file that cannot be read is a usage error. */
-function readPlan(path) {
+export function readPlan(path) {
   if (!path) throw new UsageError("--plan is required: the JSON file evaluate-build wrote");
   let text;
   try {
@@ -205,11 +215,7 @@ export async function writeBuildStatusCommand(args, env) {
     throw new UsageError("--writer-decision must be a decision the controller reports");
   }
 
-  const targetUrl = values["target-url"] ?? null;
-  const runsPrefix = `${serverUrl}/${repository}/actions/runs/`;
-  if (targetUrl !== null && !(targetUrl.startsWith(runsPrefix) && /^[1-9]\d*$/.test(targetUrl.slice(runsPrefix.length)))) {
-    throw new UsageError(`--target-url must be a workflow run of ${repository}`);
-  }
+  const targetUrl = readTargetUrl(values["target-url"], { serverUrl, repository });
 
   const plan = readPlan(values.plan);
   const report = {

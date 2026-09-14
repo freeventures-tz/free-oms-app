@@ -22,6 +22,7 @@
     "release:check-title": "node scripts/release/controller.mjs check-pr-title",
     "release:preview": "node scripts/release/controller.mjs preview",
     "release:evaluate-build": "node scripts/release/controller.mjs evaluate-build",
+    "release:reconcile-builds": "node scripts/release/controller.mjs reconcile-builds",
     "test:release": "vitest run --project unit tests/unit/release"
   },
   "dependencies": {

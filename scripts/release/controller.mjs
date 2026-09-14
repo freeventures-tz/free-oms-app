@@ -7,10 +7,14 @@
  *   evaluate-build        Decide whether an exact merge earns a build tag. Reads only.
  *   publish-build         Create that build tag, when publication is activated. The only tag writer.
  *   write-build-status    Report the decision as a commit status, when publication is activated.
+ *   reconcile-builds      Find every accepted merge after v0.0.6 that is owed a build tag. Reads only.
+ *   publish-reconciled-builds  Tag each merge that is eligible now, through publish-build's writer.
+ *   write-reconciled-statuses  Report those merges as commit statuses, when publication is activated.
  *   runtime-dependencies  List the lockfile paths the writing jobs receive instead of installing.
  *
- * Only publish-build and write-build-status can write, each through a client that makes exactly one
- * kind of write, and neither writes anything unless RELEASE_BUILD_PUBLICATION is exactly `enabled`.
+ * Only publish-build, write-build-status and their two reconciled forms can write, each through a client
+ * that makes exactly one kind of write, and none writes anything unless RELEASE_BUILD_PUBLICATION is
+ * exactly `enabled`.
  * Every other command's GitHub client can only send GET requests, and the Git client only reads the
  * local clone it is pointed at. Nothing pushes, and nothing writes a package version.
  *
@@ -45,6 +49,11 @@ import { createGitHubReader } from "./lib/github.mjs";
 import { readAcceptedRange } from "./lib/history.mjs";
 import { escapeMarkdown, listParagraphs } from "./lib/markdown.mjs";
 import { renderPreviewReport, renderReleaseNotes } from "./lib/notes.mjs";
+import {
+  publishReconciledBuildsCommand,
+  reconcileBuildsCommand,
+  writeReconciledStatusesCommand,
+} from "./lib/reconcile-commands.mjs";
 import { nextVersion, policyFor } from "./lib/version.mjs";
 
 export { EXIT };
@@ -280,6 +289,9 @@ const COMMANDS = {
   "evaluate-build": evaluateBuildCommand,
   "publish-build": publishBuildCommand,
   "write-build-status": writeBuildStatusCommand,
+  "reconcile-builds": reconcileBuildsCommand,
+  "publish-reconciled-builds": publishReconciledBuildsCommand,
+  "write-reconciled-statuses": writeReconciledStatusesCommand,
   "runtime-dependencies": runtimeDependenciesCommand,
 };
 

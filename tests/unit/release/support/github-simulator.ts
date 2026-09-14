@@ -180,6 +180,15 @@ export async function startGitHubSimulator(repository: string) {
         const found = pulls.get(Number(match[1]));
         return found ? { status: 200, body: found } : { status: 404, body: { message: "Not Found" } };
       }
+      match = route("/commits/([0-9a-f]{40})/status", pathname);
+      if (match) {
+        // The combined status: the latest status in each context, as GitHub reports it.
+        const latest = new Map<string, Record<string, unknown>>();
+        for (const { sha, ...status } of statuses) if (sha === match[1]) latest.set(String(status.context), status);
+        const all = [...latest.values()];
+        const { slice, headers } = paged(all, url, host);
+        return { status: 200, body: { sha: match[1], total_count: all.length, statuses: slice }, headers };
+      }
       match = route("/commits/([0-9a-f]{40})/pulls", pathname);
       if (match) {
         const all = (commitPulls.get(match[1]) ?? []).map((n) => pulls.get(n)).filter(Boolean);

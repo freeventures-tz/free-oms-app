@@ -92,5 +92,49 @@ describe("the writer bundle", { timeout: 180_000 }, () => {
         rmSync(bundle, { recursive: true, force: true });
       }
     });
+
+    it("reconciles, publishes and reports statuses with nothing but main's controller and the listed packages", async () => {
+      const bundle = mkdtempSync(join(tmpdir(), "release-bundle-"));
+      try {
+        cpSync("scripts/release", join(bundle, "scripts/release"), { recursive: true });
+        const listed = await runController(["runtime-dependencies"]);
+        for (const path of listed.stdout.split("\n").filter(Boolean)) {
+          cpSync(path, join(bundle, path), { recursive: true });
+        }
+        const controller = join(bundle, "scripts/release/controller.mjs");
+
+        const { state } = fixture;
+        const { pr32, pr33 } = fixture.releasedHistory();
+        fixture.ci(pr32.mergeSha);
+        const run = fixture.ci(pr33.mergeSha);
+        state.checkout.sync();
+        const scope = ["--repo", REPOSITORY, "--repo-id", String(REPOSITORY_ID), "--main-ref", "origin/main", "--path", state.checkout.dir];
+        const options = { cwd: bundle, controller, env: fixture.environment("enabled") };
+
+        const reconciliation = await runController(
+          ["reconcile-builds", ...scope, "--sha", pr33.mergeSha, "--run-id", String(run), "--format", "json"],
+          options,
+        );
+        expect(reconciliation.code, reconciliation.stderr).toBe(0);
+        const plan = fixture.writePlan(JSON.parse(reconciliation.stdout));
+
+        const publication = await runController(["publish-reconciled-builds", ...scope, "--plan", plan, "--format", "json"], options);
+        expect(publication.code, publication.stderr).toBe(0);
+        expect(JSON.parse(publication.stdout).commits.map((commit: { tag: { name: string } }) => commit.tag.name)).toEqual([
+          "v0.0.7-dev.1",
+          "v0.0.7-dev.2",
+        ]);
+
+        state.checkout.sync();
+        const statuses = await runController(
+          ["write-reconciled-statuses", ...scope, "--plan", plan, "--writer-result", "success", "--writer-decision", "published", "--format", "json"],
+          options,
+        );
+        expect(statuses.code, statuses.stderr).toBe(0);
+        expect(state.github.statuses.map((status) => status.state)).toEqual(["success", "success"]);
+      } finally {
+        rmSync(bundle, { recursive: true, force: true });
+      }
+    });
   });
 });

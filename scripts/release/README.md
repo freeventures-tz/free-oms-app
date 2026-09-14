@@ -1,19 +1,22 @@
 # Release controller
 
 This is the release automation from
-[issue #36](https://github.com/freeventures-tz/free-oms-app/issues/36). So far it has two parts:
+[issue #36](https://github.com/freeventures-tz/free-oms-app/issues/36). So far it has three parts:
 
 - **Preview** ([#37](https://github.com/freeventures-tz/free-oms-app/issues/37)). It classifies
   pull-request titles and, for one exact accepted merge, previews the next version and the complete
   release notes. It is read-only.
-- **Build tags** ([#38](https://github.com/freeventures-tz/free-oms-app/issues/38)). When CI finishes
-  on an exact merge to main, it decides whether that commit earns an immutable annotated build tag,
-  `vX.Y.Z-dev.N`, and creates the tag once the Owner has activated publication.
+- **Build tags** ([#38](https://github.com/freeventures-tz/free-oms-app/issues/38)). It decides whether
+  an exact merge to main earns an immutable annotated build tag, `vX.Y.Z-dev.N`, and creates the tag once
+  the Owner has activated publication.
+- **Recovery** ([#39](https://github.com/freeventures-tz/free-oms-app/issues/39)). Every run of the
+  build-tag workflow, whether a CI completion or a recovery dispatch started it, reconciles every accepted
+  merge after `v0.0.6` with its build tag from durable history. A dropped, duplicated, late or replaced
+  event cannot strand an eligible build.
 
 **Build-tag publication is off.** Nothing is written unless the repository variable
-`RELEASE_BUILD_PUBLICATION` is exactly `enabled`, and this change does not set it. Recovery of missed
-build tags, release preparation and normal-release publication belong to later slices of #36. None of
-them exists yet.
+`RELEASE_BUILD_PUBLICATION` is exactly `enabled`, and this change does not set it. Release preparation
+and normal-release publication belong to later slices of #36. Neither exists yet.
 
 Issue #36 owns the policy: the compatibility contract, the version table, the accepted-merge rules and
 the publication contract. This file covers running the commands and what their tests prove.
@@ -104,8 +107,9 @@ The JSON it prints is the **plan** the writing jobs receive. The checks run in t
 node scripts/release/controller.mjs publish-build --repo freeventures-tz/free-oms-app --repo-id <id> --plan build-plan.json
 ```
 
-This is the only command that can create a tag, and only the tag writer workflow runs it. Do not run
-it against this repository with a token that can write. Publication is the Owner's decision.
+It shares the only path that can create a tag with `publish-reconciled-builds`, which is what the tag
+writer workflow runs. Do not run either against this repository with a token that can write.
+Publication is the Owner's decision.
 
 It reads nothing from a plan it can refuse outright. A plan that is not `evaluate-build` JSON for this
 repository is `plan_invalid`, and a plan whose decision is not `eligible` is `plan_not_eligible`. For
@@ -151,7 +155,92 @@ again, exactly as `evaluate-build` does, and reports what exists now:
 The workflow runs it under the tag writer's lock, so no tag can be created between that evaluation and
 the status it writes. So when the status job of a failed or pending evaluation runs late, it cannot
 report "no build tag" over a tag published since. It takes `--repo-id`, `--main-ref` and `--path` for
-the evaluation. `--target-url` must be a workflow run of this repository.
+the evaluation. `--target-url` must be a workflow run of this repository. The status job runs
+`write-reconciled-statuses`, which decides each status this way.
+
+### `reconcile-builds`
+
+Read-only. It shows what the build-tag workflow would publish, and it is the non-publishing backlog
+evidence that activation needs.
+
+```bash
+git fetch origin --tags
+```
+
+```bash
+GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs reconcile-builds --repo freeventures-tz/free-oms-app
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--sha`, `--run-id` | The CI completion that started the run, given together or not at all. The run must be final-merge CI for a commit on main's first-parent line, or nothing is scanned. Neither narrows the scan |
+| `--since` | Default `v0.0.6`, where the window starts. Any other value is a dry run only: the writing commands refuse a plan whose window starts anywhere else |
+| `--repo-id`, `--main-ref`, `--path`, `--format`, `--summary` | As for `evaluate-build` |
+| `--outputs` | Appends `decision`, `eligible`, `blocked`, `recorded` and `main` |
+
+The checkout's tags must be GitHub's, or it stops with `tag_state_out_of_date` (exit 1). The window is
+main's first-parent line after the commit `v0.0.6` tags, oldest first. Each commit in it gets one
+decision:
+
+| Decision | Meaning |
+| --- | --- |
+| `recorded` | The commit's build tag exists and is verified: in full until a normal release contains the merge, then from Git. [Reconciliation and recovery](#reconciliation-and-recovery) says what each checks |
+| `eligible` | The commit's own evaluation, made exactly as `evaluate-build` makes it without a run id, is eligible. The tag name is provisional, and counts the names already offered to older eligible commits of the same target |
+| `pending`, `failed`, `refused` | Blocked. The evaluation's reasons are listed, with the gates of its newest final-merge CI run |
+| `not_applicable` | The commit is itself a normal release and has no build tag |
+
+The overall decision is `eligible` when any commit is (exit 0) and `nothing_to_publish` otherwise
+(exit 0). It is `refused` (exit 4), and nothing is scanned, when the window cannot be trusted:
+`unknown_main_ref`, `since_release_missing`, `since_release_not_annotated` or
+`since_release_off_first_parent`. The same happens when the trigger is `unknown_commit`,
+`not_on_main_first_parent` or `not_final_merge_ci`.
+
+### `publish-reconciled-builds`
+
+```bash
+node scripts/release/controller.mjs publish-reconciled-builds --repo freeventures-tz/free-oms-app --repo-id <id> --plan build-plan.json
+```
+
+The tag writer workflow runs this command. Given a plan, it:
+
+1. Refuses a plan that is not a `reconcile-builds` plan for this repository, main ref and the `v0.0.6`
+   window (`plan_invalid`), and a refused reconciliation (`plan_not_reconciled`), before reading anything.
+2. Reconciles again. The plan is not the ledger. A commit the plan found eligible is refused with
+   `plan_drift` if its target has changed. A commit that is eligible now is published, whatever the plan
+   said about it.
+3. Exits 0 with `nothing_to_publish` when nothing is eligible. Otherwise it writes nothing, and exits 6
+   with `publication_disabled`, unless `RELEASE_BUILD_PUBLICATION` is exactly `enabled`.
+4. Publishes each eligible commit, oldest first, through `publish-build`'s writer: evaluate again,
+   allocate, create the object and then the reference, and read both back. Each confirmed tag is read
+   from GitHub and counted by the next commit's evaluation, so ordinals are allocated one at a time.
+
+| Outcome | Decision | Exit |
+| --- | --- | --- |
+| Every eligible commit tagged, or found already tagged | `published` | 0 |
+| A commit refused, for example with `plan_drift` or a conflict its evaluation found. The others still publish | `refused` | 4 |
+| GitHub has given a name to something else (`build_tag_name_collision`). Later commits are `not_attempted` | `refused` | 4 |
+| A write or read failed. That commit is `interrupted` with the error's code, later commits are `not_attempted`, and the report is still printed | `interrupted` | 1 |
+
+The next run resumes from the tags GitHub holds. It ignores an unreferenced tag object and offers its
+name again, and finds a reference whose response was lost. It never renames or moves a tag.
+
+### `write-reconciled-statuses`
+
+```bash
+node scripts/release/controller.mjs write-reconciled-statuses --repo freeventures-tz/free-oms-app --repo-id <id> --plan build-plan.json --writer-result success --writer-decision published
+```
+
+The status job runs this under the tag writer's lock. It writes nothing unless publication is activated
+(exit 6). It evaluates each of these commits again, and decides its status as `write-build-status` does:
+
+- The trigger, with its run. A trigger outside the window gets no status (`outside_window`).
+- Every commit the plan found neither `recorded` nor `not_applicable`.
+- Every commit merged after the plan's `main`.
+
+A status is written only when its state or description differs from the latest `release/build-tag`
+status GitHub shows. A merge that stays unresolved stays visible, without a new status on every run.
+`--writer-decision` takes a `publish-reconciled-builds` decision, and `--target-url` must be a workflow
+run of this repository.
 
 ### `runtime-dependencies`
 
@@ -292,16 +381,59 @@ of these codes:
 | `malformed_build_tag` | A name like a build tag but not `vX.Y.Z-dev.N` with a positive ordinal |
 | `lightweight_build_tag` | A build tag that is not an annotated tag of a commit |
 
+### Reconciliation and recovery
+
+The ledger is durable: main's first-parent history, the tags GitHub holds, and each commit's own
+final-merge CI. Workflow events, their order, the runs a concurrency group keeps, caches and artifacts
+are not part of it. So every run reconciles the whole window.
+
+- **A dropped or replaced run** leaves its commit uncovered until the next run publishes it. That can be
+  any later CI completion on main, or a recovery dispatch.
+- **A duplicate or late run** finds the commit recorded and writes nothing.
+- **Completions that arrive out of order** are published oldest first within each run. Ordinals record
+  allocation order, so a merge that passes late holds a higher `N` than a later merge. Git records merge
+  order.
+- **A failed merge** stays blocked, with its reasons and gates, until its own gates pass, even after
+  later merges pass and later normal releases ship. Its target is still calculated from its own
+  ancestral release.
+- **A feature** raises the target for itself and for later merges. Earlier patch-target tags keep their
+  names, and the new target starts its own ordinals.
+
+**The window** starts after `v0.0.6` (`BUILD_TAGS_OWED_AFTER` in `lib/reconcile.mjs`). The merges before
+it are released, and none gets a build tag. The window never shrinks on its own. A merge that can never
+pass stays blocked, and is read from GitHub on every run, until an Owner decision resolves it. Moving
+the start is a reviewed code change.
+
+**What `recorded` checks.** Until a normal release contains a merge, its build tag is verified in full on
+every run, exactly as `evaluate-build` verifies it: provenance, target, notes digest, and a cited CI
+attempt that itself passed (`verification: "full"`). A tag that fails is refused with the codes above,
+whichever field is wrong. Once an annotated normal release on main's first-parent line contains the
+merge, its tag is checked from Git alone (`verification: "git"`). It must be the commit's only build
+reference: an annotated tag whose object names the commit, and whose provenance names this repository,
+the commit, the version in the tag's own name, the commit's own ancestral release and the CI workflow. A
+released merge that fails that check is evaluated in full and refused the same way.
+
+**Cost.** Each run reads the tag references and the trigger's run. For each merge since the last normal
+release, and each blocked merge before it, it reads that merge's final-merge CI and the pull requests in
+its range, each pull request once per run. A recorded merge that a normal release contains costs no
+GitHub request, so the cost of a run follows the merges since the last normal release, not the window.
+
+**Retained evidence.** Build tags and their annotations are the durable record, and the
+`release/build-tag` commit statuses sit beside them. Each run's job summaries, and the plan artifact kept
+for one day, show what that run found and did. None of them is the ledger: the next run derives
+everything again.
+
 ## Workflows and permissions
 
-`.github/workflows/release-build-tag.yml` runs on `workflow_run` when CI completes on `main`. GitHub
-runs this kind of workflow from the default branch only, so a pull request cannot change it.
+`.github/workflows/release-build-tag.yml` runs on `workflow_run` when CI completes on `main`, and on
+`workflow_dispatch`. GitHub runs a `workflow_run` workflow from the default branch only, so a pull
+request cannot change it.
 
 | Job | Permissions | Runs when | What it does |
 | --- | --- | --- | --- |
-| `evaluate` | `contents`, `actions`, `pull-requests`: read | The completed run was a push to main by this repository's CI | Installs the pinned dependencies with lifecycle scripts disabled, then runs `evaluate-build`. While publication is activated, it also bundles the plan and `runtime-dependencies` into an artifact and outputs its SHA-256 |
-| `publish` | Grants `contents: write` to the writer | The decision is `eligible` and publication is activated | Calls `release-tag-writer.yml` with operation `build` |
-| `status` | `statuses: write`; `contents`, `actions` and `pull-requests`: read, for the evaluation | Publication is activated | Waits on the tag writer's lock, checks the bundle digest, then runs `write-build-status` |
+| `evaluate` | `contents`, `actions`, `pull-requests`: read | The completed run was a push to main by this repository's CI, or a dispatch was started from `main` | Installs the pinned dependencies with lifecycle scripts disabled, then runs `reconcile-builds`, passing a CI completion's run and commit as the trigger. While publication is activated, it also bundles the plan and `runtime-dependencies` into an artifact and outputs its SHA-256 |
+| `publish` | Grants `contents: write` to the writer | The decision is `eligible` and publication is activated | Calls `release-tag-writer.yml` with operation `build`, which runs `publish-reconciled-builds` |
+| `status` | `statuses: write`; `contents`, `actions` and `pull-requests`: read, for the evaluation | Publication is activated | Waits on the tag writer's lock, checks the bundle digest, then runs `write-reconciled-statuses` |
 
 `.github/workflows/release-tag-writer.yml` is callable only. Its one job is the only job in the
 repository that can create tags. Later publishers call it instead of holding their own write permission.
@@ -310,8 +442,18 @@ repository that can create tags. Later publishers call it instead of holding the
   and `queue: max`. As GitHub documented on 14 September 2026, `queue: max` keeps up to 100 callers
   pending instead of replacing the one already queued, and cancels callers beyond that. The group
   serialises writers; it is not a record of merges. A caller that is cancelled, or an event that never
-  arrives, leaves its commit without a build tag until the next slice of #36 adds recovery. The
-  `status` job waits on the same group, so a status is never decided while a tag is being created.
+  arrives, leaves its commit without a build tag until the next run reconciles it. The `status` job
+  waits on the same group, so a status is never decided while a tag is being created.
+- **Recovery dispatch.** `workflow_dispatch` takes no input and runs the jobs only when started from
+  `main`. It runs exactly what a CI completion runs, without a trigger:
+
+  ```bash
+  gh workflow run release-build-tag.yml --repo freeventures-tz/free-oms-app --ref main
+  ```
+
+  While publication is off, it writes a job summary and nothing else. Started from another branch, no
+  job runs. That branch's own copy of the workflow could differ, but anyone allowed to dispatch can
+  already push a workflow, so the dispatch grants nothing new.
 - **No untrusted code beside the token.** Neither writing job checks out the evaluated commit, runs
   `npm`, restores a cache or runs application code. Both check the bundle's digest before running
   anything, and both run only `scripts/release/controller.mjs` from main. Event values reach scripts as
@@ -323,8 +465,9 @@ repository that can create tags. Later publishers call it instead of holding the
 - **Nothing else is added.** There is no secret, no deployment hook, no Vercel or Supabase credential,
   and nothing triggered by a tag or a release. CI's branch filters are unchanged.
 
-While publication is off, the `evaluate` job still runs after every CI completion on main. It writes a
-job summary and nothing else, which gives non-publishing evidence before any activation.
+While publication is off, the `evaluate` job still runs after every CI completion on main and every
+recovery dispatch. It writes a job summary and nothing else, which gives non-publishing evidence before
+any activation.
 
 ## Activation is a separate Owner decision
 
@@ -337,6 +480,11 @@ Never test that coupling by creating an OMS tag.
 Activation is the Owner setting the repository variable `RELEASE_BUILD_PUBLICATION` to `enabled`.
 Any other value, or no variable, keeps publication off, and the controller checks the value again
 before writing. A variable change is not recorded in Git history.
+
+Before activation, run `reconcile-builds` read-only against main and keep its report. The first
+activated run publishes the commits it lists as `eligible`, oldest first. It lists blocked commits with
+their reasons and publishes none of them. The window starts after `v0.0.6`. If a normal release ships
+before activation, moving that start is a reviewed decision, not a setting.
 
 ## What the tests prove, and what they do not
 
@@ -389,6 +537,34 @@ checkout.
 - The workflows' triggers, permissions, lock, activation conditions, digest check, pinned actions and
   the absence of installs, caches, secrets and deployment, checked as YAML
 
+**Proved by fixtures, for recovery:**
+
+- The backlog after `v0.0.6`, #32 and #33 included, listed as eligible, blocked and recorded. The blocked
+  commit shows its gate, nothing is written, and every ref is unchanged. A CI completion and a dispatch
+  reconcile the same window. A bad trigger or window start is refused before any scan
+- Three merges whose CI completes out of order, one completion delivered twice, and a workflow replaced
+  before its writer ran. Each merge ends with exactly one annotated tag, each ordinal is allocated once,
+  and six writes are made in all. A writer publishes a commit its own event did not name, and stale plans
+  write nothing
+- A failed merge blocked through later passing merges and a normal release, with one failure status and
+  no repeat. After its own retry, a dispatch tags it once from `v0.0.6`, and a second dispatch writes
+  nothing
+- A feature raising the target while patch-target tags keep their objects, with ordinals rising within
+  each target
+- An interrupted reference, a lost response and a failed read mid-scan. No false success is reported,
+  the report says what was confirmed, and the next run converges on one tag per merge
+- An untrusted tag refused while the other commits publish. A collision mid-run stops the run, and
+  `untrusted_build_tag` follows. A drifted planned target is refused for that commit only
+- A recorded tag verified in full while no normal release contains its merge, with a tag citing an
+  attempt that did not pass refused. After a release, a released tag is checked from Git with no CI or
+  pull-request read, and a hand-made tag on a released merge is still refused
+- Zero writes for every value of `RELEASE_BUILD_PUBLICATION` except `enabled`. Tampered, foreign,
+  single-commit and refused plans refused before any write
+- Statuses written only when they change. A late plan cannot replace confirmed success. A refused trigger
+  is reported on its commit, and a trigger outside the window gets no status
+- The dispatch trigger, its `main` condition, the trigger arguments and the absence of a window option,
+  checked as YAML. Reconciliation, publication and statuses running from the bundle alone
+
 **Not proved here:**
 
 - GitHub's real responses. The simulator reproduces the documented fields the controller reads,
@@ -398,5 +574,10 @@ checkout.
   reusable workflow's permissions and outputs, and the artifact transfer are not exercised.
 - Serialisation itself, which is GitHub's. The fixtures prove what happens when it is bypassed: the
   collision is refused.
-- Recovery of commits whose evaluation was lost. That is the next slice of #36.
+- GitHub dropping, repeating or replacing workflow runs. The fixtures run plans late, twice or never;
+  GitHub's scheduler is not simulated.
+- Reconciling a long window within GitHub's API rate limit. The requests are bounded as described
+  under Cost, but not measured.
+- A build tag added by hand to a merge that a normal release already contains, with every field Git can
+  check set correctly. It is checked from Git only, so it is reported as recorded.
 - Whether a tag push reaches a deployment integration. That is an activation hold, not a test.

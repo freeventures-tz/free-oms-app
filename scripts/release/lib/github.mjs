@@ -143,6 +143,12 @@ export function createGitHubReader(options) {
 
     /** One annotated tag object, or null. */
     tagObject: (sha) => api.getOne(`${repo}/git/tags/${segment(sha)}`),
+
+    /** The latest status on a commit in the `release/build-tag` context, from its combined status, or null. */
+    buildTagStatus: async (sha) =>
+      (await api.getAll(`${repo}/commits/${segment(sha)}/status`, {}, (body) => body?.statuses)).find(
+        (status) => status?.context === STATUS_CONTEXT,
+      ) ?? null,
   };
 }
 
