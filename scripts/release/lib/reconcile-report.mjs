@@ -51,7 +51,7 @@ export function renderReconciliationReport(report) {
     ...newestGates(c),
   ]);
   section("Recorded", having("recorded"), (c) => [
-    `- \`${c.sha}\`${pr(c)} · \`${c.recordedTag.name}\`${c.recordedTag.verification === "git" ? " · checked from Git: a normal release contains it" : ""}`,
+    `- \`${c.sha}\`${pr(c)} · \`${c.recordedTag.name}\`${c.recordedTag.verification === "git-and-ci" ? " · a normal release contains it: target from Git, CI attempt from GitHub" : ""}`,
   ]);
   section("Not applicable", having("not_applicable"), (c) => [
     `- \`${c.sha}\` · the normal release ${c.releasedAs.map((name) => `\`${name}\``).join(", ")}`,

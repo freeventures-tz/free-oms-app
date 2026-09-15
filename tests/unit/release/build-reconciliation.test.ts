@@ -8,6 +8,7 @@ import {
   REPOSITORY,
   TOKEN,
   useBuildFixture,
+  type AttemptSpec,
   type BuildReport,
   type ReconciliationReport,
 } from "./support/build-harness";
@@ -254,7 +255,7 @@ describe("reconcile-builds: the backlog from durable history", { timeout: 300_00
     expect(codes(open.json.commits[0].reasons)).toEqual(["conflicting_build_provenance"]);
     expect(open.json.commits[0].reasons[0].detail).toContain(`run ${run32} attempt 1 did not pass final-merge CI`);
 
-    // A normal release now contains both merges. A released merge's tag is checked from Git, and its CI is not read.
+    // A normal release now contains both merges. A released merge's target is checked from Git; its CI evidence is still read.
     repo.git("tag", "-d", "v0.0.7-dev.2");
     repo.tag("v0.0.7", pr33.mergeSha, "v0.0.7\n\nThe normal release.");
     repo.tag("v0.0.9-dev.1", pr32.mergeSha, "v0.0.9-dev.1\n\nMade by hand.");
@@ -266,16 +267,67 @@ describe("reconcile-builds: the backlog from durable history", { timeout: 300_00
 
     expect(released.json.commits.map((c) => [c.pr, c.decision, c.recordedTag?.verification ?? null])).toEqual([
       [32, "refused", null],
-      [33, "recorded", "git"],
+      [33, "recorded", "git-and-ci"],
       [34, "eligible", null],
     ]);
     expect(codes(released.json.commits[0].reasons)).toEqual(["conflicting_build_provenance"]);
+    // The release settles #33's target, so no pull request in its range is read. Its CI evidence still is.
     const reads = github.requests.slice(from).map((r) => r.path);
-    expect(
-      reads.filter((path) => path.includes(pr33.mergeSha) || path.includes(`/actions/runs/${run33}`) || /\/pulls\/33$/.test(path)),
-    ).toEqual([]);
+    expect(reads.filter((path) => /\/pulls\/33$/.test(path))).toEqual([]);
+    expect(reads.some((path) => path.includes(`head_sha=${pr33.mergeSha}`))).toBe(true);
+    expect(reads.some((path) => path.includes(`/actions/runs/${run33}/jobs`))).toBe(true);
     expect(github.writes()).toHaveLength(2);
   });
+
+  it.each<{ label: string; attempts: AttemptSpec[]; cited: "own" | "other"; attempt: number; detail: string }>([
+    {
+      label: "an attempt that failed",
+      attempts: [{ jobs: { [E2E_GATE]: "failure" } }],
+      cited: "own",
+      attempt: 1,
+      detail: `attempt 1 did not pass final-merge CI (concluded failure; ${E2E_GATE} failed)`,
+    },
+    {
+      label: "an attempt that has not finished",
+      attempts: [{}, { jobs: { [E2E_GATE]: "in_progress" } }],
+      cited: "own",
+      attempt: 2,
+      detail: `attempt 2 did not pass final-merge CI (is in_progress; ${E2E_GATE} incomplete)`,
+    },
+    { label: "an attempt the run never had", attempts: [{}], cited: "own", attempt: 3, detail: "CI-Attempt 3 is not an attempt of run" },
+    { label: "another commit's run", attempts: [{}], cited: "other", attempt: 1, detail: "is not a final-merge CI run of this commit" },
+  ])(
+    "keeps refusing a tag that cites $label after a later normal release contains its merge, exactly as evaluate-build does",
+    async ({ attempts, cited, attempt, detail }) => {
+      const { repo, github } = state;
+      const { pr32, pr33 } = fixture.releasedHistory();
+      const own = fixture.ci(pr32.mergeSha, { attempts });
+      const other = fixture.ci(pr33.mergeSha);
+      const evaluation = (await fixture.evaluate(pr32.mergeSha, own)).json;
+      expect(evaluation.target).not.toBeNull();
+      repo.tag("v0.0.7-dev.1", pr32.mergeSha, handWritten(evaluation, "v0.0.7-dev.1", cited === "own" ? own : other, attempt));
+
+      const before = await fixture.reconcile();
+      expect(before.json.commits[0]).toMatchObject({ pr: 32, decision: "refused", recordedTag: null });
+      expect(codes(before.json.commits[0].reasons)).toEqual(["conflicting_build_provenance"]);
+
+      // #33 ships as the normal release v0.0.7, so a release now contains #32.
+      repo.tag("v0.0.7", pr33.mergeSha, "v0.0.7\n\nThe normal release.");
+      const after = await fixture.reconcile();
+      const exact = await fixture.evaluate(pr32.mergeSha, own);
+
+      expect(after.json.commits.map((c) => [c.pr, c.decision])).toEqual([
+        [32, "refused"],
+        [null, "not_applicable"],
+      ]);
+      expect(after.json.commits[0]).toMatchObject({ tag: null, recordedTag: null });
+      expect(codes(after.json.commits[0].reasons)).toEqual(["conflicting_build_provenance"]);
+      expect(after.json.commits[0].reasons[0].detail).toContain(detail);
+      expect(exact.json.decision).toBe("refused");
+      expect(after.json.commits[0].reasons).toEqual(exact.json.reasons);
+      expect(github.writes()).toEqual([]);
+    },
+  );
 
   it("refuses usage it cannot act on", async () => {
     fixture.releasedHistory();

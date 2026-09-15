@@ -184,7 +184,7 @@ decision:
 
 | Decision | Meaning |
 | --- | --- |
-| `recorded` | The commit's build tag exists and is verified: in full until a normal release contains the merge, then from Git. [Reconciliation and recovery](#reconciliation-and-recovery) says what each checks |
+| `recorded` | The commit's build tag exists and is verified: in full until a normal release contains the merge, then its target from Git and its cited CI attempt from GitHub. [Reconciliation and recovery](#reconciliation-and-recovery) says what each checks |
 | `eligible` | The commit's own evaluation, made exactly as `evaluate-build` makes it without a run id, is eligible. The tag name is provisional, and counts the names already offered to older eligible commits of the same target |
 | `pending`, `failed`, `refused` | Blocked. The evaluation's reasons are listed, with the gates of its newest final-merge CI run |
 | `not_applicable` | The commit is itself a normal release and has no build tag |
@@ -235,6 +235,8 @@ The status job runs this under the tag writer's lock. It writes nothing unless p
 
 - The trigger, with its run. A trigger outside the window gets no status (`outside_window`).
 - Every commit the plan found neither `recorded` nor `not_applicable`.
+- Every commit the plan found `recorded` whose latest `release/build-tag` status is missing or does not
+  name its tag. That happens when the status job of the run that published the tag was skipped or lost.
 - Every commit merged after the plan's `main`.
 
 A status is written only when its state or description differs from the latest `release/build-tag`
@@ -408,15 +410,20 @@ the start is a reviewed code change.
 every run, exactly as `evaluate-build` verifies it: provenance, target, notes digest, and a cited CI
 attempt that itself passed (`verification: "full"`). A tag that fails is refused with the codes above,
 whichever field is wrong. Once an annotated normal release on main's first-parent line contains the
-merge, its tag is checked from Git alone (`verification: "git"`). It must be the commit's only build
-reference: an annotated tag whose object names the commit, and whose provenance names this repository,
-the commit, the version in the tag's own name, the commit's own ancestral release and the CI workflow. A
-released merge that fails that check is evaluated in full and refused the same way.
+merge, the release has settled its classification and notes digest, and only those two are left unread
+(`verification: "git-and-ci"`). Git checks the rest of the target: the tag must be the commit's only build
+reference, an annotated tag whose object names the commit, and whose provenance names this repository,
+the commit, the version in the tag's own name, the commit's own ancestral release and the CI workflow.
+GitHub is still asked whether the cited run is final-merge CI for the commit and whether the cited
+attempt itself passed. A released merge that fails either check is evaluated in full, and refused exactly
+as `evaluate-build` refuses it.
 
-**Cost.** Each run reads the tag references and the trigger's run. For each merge since the last normal
-release, and each blocked merge before it, it reads that merge's final-merge CI and the pull requests in
-its range, each pull request once per run. A recorded merge that a normal release contains costs no
-GitHub request, so the cost of a run follows the merges since the last normal release, not the window.
+**Cost.** Each run reads the tag references, the trigger's run, and every merge's final-merge CI: its
+runs, their jobs and any earlier attempts, usually two requests. For each merge that no normal release
+contains yet, and each blocked merge, it also reads the pull requests in its range, each once per run. The
+status job reads the combined status of each recorded merge once. So the cost of a run grows with the
+window. Moving the window's start forward, after a normal release and when nothing before it is blocked,
+is a reviewed code change.
 
 **Retained evidence.** Build tags and their annotations are the durable record, and the
 `release/build-tag` commit statuses sit beside them. Each run's job summaries, and the plan artifact kept
@@ -556,8 +563,13 @@ checkout.
 - An untrusted tag refused while the other commits publish. A collision mid-run stops the run, and
   `untrusted_build_tag` follows. A drifted planned target is refused for that commit only
 - A recorded tag verified in full while no normal release contains its merge, with a tag citing an
-  attempt that did not pass refused. After a release, a released tag is checked from Git with no CI or
-  pull-request read, and a hand-made tag on a released merge is still refused
+  attempt that did not pass refused. After a release, a released tag's target is checked from Git with no
+  pull-request read while its CI evidence is still read, and a hand-made tag on a released merge is still
+  refused
+- A tag citing a failed, unfinished, nonexistent or foreign CI attempt stays refused after a later normal
+  release contains its merge, with the same reasons `evaluate-build` gives
+- A tag published while its run's status job was lost. The next recovery run finds the stale failure,
+  evaluates the commit again, writes the tag's success, and leaves it alone after that
 - Zero writes for every value of `RELEASE_BUILD_PUBLICATION` except `enabled`. Tampered, foreign,
   single-commit and refused plans refused before any write
 - Statuses written only when they change. A late plan cannot replace confirmed success. A refused trigger
@@ -578,6 +590,7 @@ checkout.
   GitHub's scheduler is not simulated.
 - Reconciling a long window within GitHub's API rate limit. The requests are bounded as described
   under Cost, but not measured.
-- A build tag added by hand to a merge that a normal release already contains, with every field Git can
-  check set correctly. It is checked from Git only, so it is reported as recorded.
+- A build tag added by hand to a merge that a normal release already contains, citing a real passing CI
+  attempt, with every field Git can check set correctly but a wrong classification or notes digest. Those
+  two fields are not read again once a release contains the merge, so it is reported as recorded.
 - Whether a tag push reaches a deployment integration. That is an activation hold, not a test.

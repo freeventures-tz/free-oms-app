@@ -8,7 +8,8 @@
  * The window is main's first-parent line after the normal release BUILD_TAGS_OWED_AFTER. Each commit in it
  * is one of:
  *
- *   recorded                  its build tag is verified: in full, or from Git once a normal release contains it
+ *   recorded                  its build tag is verified in full, or, once a normal release contains it, its
+ *                             target from Git and its cited CI attempt from GitHub
  *   eligible                  its own evaluation, exactly as evaluate-build makes it, is eligible
  *   pending, failed, refused  blocked, with that evaluation's reasons and CI gates
  *   not_applicable            it is itself a normal release and has no build tag
@@ -21,7 +22,14 @@
  * ordinals are allocated one at a time from the tags GitHub holds.
  */
 
-import { ACTIVATED, assertCheckoutTagsCurrent, evaluateCommit, publishCommit, statusToWrite } from "./build.mjs";
+import {
+  ACTIVATED,
+  assertCheckoutTagsCurrent,
+  ciEvidenceDifferences,
+  evaluateCommit,
+  publishCommit,
+  statusToWrite,
+} from "./build.mjs";
 import {
   BUILD_TAG_LIKE,
   buildTagName,
@@ -31,7 +39,7 @@ import {
   provenanceDifferences,
   recordedPullRequest,
 } from "./build-tags.mjs";
-import { FINAL_MERGE_CI, verifyTriggerRun } from "./ci.mjs";
+import { evaluateFinalMergeCi, FINAL_MERGE_CI, verifyTriggerRun } from "./ci.mjs";
 import { FULL_SHA } from "./cli.mjs";
 import { ControllerError } from "./errors.mjs";
 import { releaseBaseFor } from "./history.mjs";
@@ -146,14 +154,15 @@ function windowStart({ tags, line, since }) {
 }
 
 /**
- * The build tag a commit already has, checked from Git alone, or null. It must be the commit's only build
- * reference: an annotated tag whose object names the commit, and whose provenance names this repository,
- * the commit, the version in the tag's own name, the commit's own ancestral release and the CI workflow.
- * When anything else is on the commit, it is evaluated in full and a conflict is refused there.
+ * The build tag a commit already has, with its target checked from Git alone, or null. It must be the
+ * commit's only build reference: an annotated tag whose object names the commit, and whose provenance names
+ * this repository, the commit, the version in the tag's own name, the commit's own ancestral release and the
+ * CI workflow. When anything else is on the commit, it is evaluated in full and a conflict is refused there.
  *
- * Only a merge that a normal release already contains is checked this way. Every other merge's tag is
- * verified in full by `evaluateCommit`, the cited CI attempt included, so a run's GitHub reads follow the
- * merges since the last normal release rather than the whole window.
+ * Only a merge that a normal release already contains is checked this way, and only its classification and
+ * notes digest are then left unread, because the release settled them. The caller still verifies the CI
+ * attempt the tag cites, from GitHub, as it does for every tag. Every other merge's tag is verified in full
+ * by `evaluateCommit`.
  */
 function recordedBuildTag({ git, tags, sha, line, repository }) {
   const references = tags.filter((tag) => BUILD_TAG_LIKE.test(tag.name) && peeledCommit(tag) === sha);
@@ -177,6 +186,7 @@ function recordedBuildTag({ git, tags, sha, line, repository }) {
   const fields = parseBuildProvenance(object.message);
   return {
     pr: recordedPullRequest(object.message, sha),
+    fields,
     tag: { name: tag.name, object: tag.objectName, ciRun: fields["CI-Run"], ciAttempt: fields["CI-Attempt"] },
   };
 }
@@ -194,15 +204,28 @@ async function reconcileCommit({ git, github, tags, sha, line, released, reposit
     reasons: [],
   };
 
-  // A normal release contains this merge, so its build tag, or its being that release, is settled from Git.
+  // A normal release contains this merge, so its build tag's target, or its being that release, is settled from
+  // Git. The CI attempt a tag cites is still read from GitHub: a tag whose cited attempt did not pass, or whose
+  // cited run is not this commit's final-merge CI, is evaluated in full below and refused as evaluate-build
+  // refuses it.
   if (released) {
     const recorded = recordedBuildTag({ git, tags, sha, line, repository });
     if (recorded) {
-      return { ...entry, pr: recorded.pr, decision: "recorded", recordedTag: { ...recorded.tag, verification: "git" } };
+      const ci = await evaluateFinalMergeCi({ github, repository, repositoryId, sha, runId: null });
+      if (ciEvidenceDifferences(recorded.fields, { ci }).length === 0) {
+        return {
+          ...entry,
+          pr: recorded.pr,
+          decision: "recorded",
+          recordedTag: { ...recorded.tag, verification: "git-and-ci" },
+          ci,
+        };
+      }
+    } else {
+      const releasedAs = tags.filter((tag) => NORMAL_TAG.test(tag.name) && peeledCommit(tag) === sha).map((tag) => tag.name);
+      const buildReferenced = tags.some((tag) => BUILD_TAG_LIKE.test(tag.name) && peeledCommit(tag) === sha);
+      if (releasedAs.length > 0 && !buildReferenced) return { ...entry, decision: "not_applicable", releasedAs };
     }
-    const releasedAs = tags.filter((tag) => NORMAL_TAG.test(tag.name) && peeledCommit(tag) === sha).map((tag) => tag.name);
-    const buildReferenced = tags.some((tag) => BUILD_TAG_LIKE.test(tag.name) && peeledCommit(tag) === sha);
-    if (releasedAs.length > 0 && !buildReferenced) return { ...entry, decision: "not_applicable", releasedAs };
   }
 
   const evaluation = await evaluateCommit({ git, github, repository, repositoryId, sha, runId: null, mainRef, serverUrl });
@@ -349,10 +372,11 @@ export function reconciliationPlanProblems(plan, { repository, repositoryId, mai
         !commit ||
         !FULL_SHA.test(String(commit.sha ?? "")) ||
         typeof commit.decision !== "string" ||
-        (commit.decision === "eligible" && (!commit.target || typeof commit.target !== "object")),
+        (commit.decision === "eligible" && (!commit.target || typeof commit.target !== "object")) ||
+        (commit.decision === "recorded" && typeof commit.recordedTag?.name !== "string"),
     )
   ) {
-    problems.push("a commit it lists is not a commit sha with a decision and, when eligible, a target");
+    problems.push("a commit it lists is not a commit sha with a decision and, when eligible or recorded, its target or tag");
   }
   return problems;
 }
@@ -499,8 +523,9 @@ export async function publishReconciledBuilds({ git, github, makeTagWriter, repo
 
 /**
  * Writes the `release/build-tag` status of each commit a reconciliation's run is answerable for: the commit
- * whose CI completion started it, every commit the plan did not find recorded, and any commit merged since
- * the plan was made. Each is evaluated again when this runs — under the writer lock in the workflow — and a
+ * whose CI completion started it, every commit the plan did not find recorded, every recorded commit whose
+ * status does not name its build tag, and any commit merged since the plan was made. Each is evaluated again
+ * when this runs — under the writer lock in the workflow — and a
  * status is written only when it differs from the one GitHub shows, so an unresolved merge stays visible
  * without a new status on every run. A trigger outside the window gets none.
  */
@@ -535,6 +560,17 @@ export async function writeReconciledStatuses({
   if (plan.trigger) subjects.set(plan.trigger.sha, true);
   for (const commit of plan.commits) {
     if (commit.decision !== "recorded" && commit.decision !== "not_applicable" && !subjects.has(commit.sha)) {
+      subjects.set(commit.sha, false);
+    }
+  }
+  // A recorded commit is answerable too while the status GitHub shows does not name its build tag: the status
+  // job of the run that published the tag may have been skipped or lost.
+  const shown = new Map();
+  for (const commit of plan.commits) {
+    if (commit.decision !== "recorded" || subjects.has(commit.sha)) continue;
+    shown.set(commit.sha, await github.buildTagStatus(commit.sha));
+    const current = shown.get(commit.sha);
+    if (current?.state !== "success" || current?.description !== `Build tag ${commit.recordedTag.name}`) {
       subjects.set(commit.sha, false);
     }
   }
@@ -577,8 +613,8 @@ export async function writeReconciledStatuses({
     }
     entry.status = status;
 
-    const shown = await github.buildTagStatus(sha);
-    if (shown?.state === status.state && shown?.description === status.description) {
+    const current = shown.has(sha) ? shown.get(sha) : await github.buildTagStatus(sha);
+    if (current?.state === status.state && current?.description === status.description) {
       entry.result = "unchanged";
       continue;
     }

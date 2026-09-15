@@ -109,7 +109,7 @@ function finish(report, decision, reasons = []) {
  * passing one cannot prove an attempt that did not. An attempt that has not finished, or that GitHub
  * cannot describe, proves nothing.
  */
-function ciEvidenceDifferences(fields, report) {
+export function ciEvidenceDifferences(fields, report) {
   if (!fields) return [];
   const run = report.ci.runs.find((candidate) => String(candidate.runId) === fields["CI-Run"]);
   if (!run) return [`CI-Run ${fields["CI-Run"]} is not a final-merge CI run of this commit`];

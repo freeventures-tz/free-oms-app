@@ -92,6 +92,44 @@ describe("write-reconciled-statuses", { timeout: 300_000 }, () => {
     ]);
   });
 
+  it("writes a recorded tag's success over the failure its lost status job left, on the next recovery run", async () => {
+    const { github } = state;
+    const { pr32, pr33 } = fixture.releasedHistory();
+    const run32 = fixture.ci(pr32.mergeSha, { attempts: [{ jobs: { [E2E_GATE]: "failure" } }] });
+    const shownOn32 = () => github.statuses.filter((s) => s.sha === pr32.mergeSha).map((s) => `${s.state}: ${s.description}`);
+    const failure = "failure: No build tag, a required CI gate is unsatisfied: required_gate_failed";
+
+    await fixture.workflowRun({ sha: pr32.mergeSha, runId: run32 });
+    expect(shownOn32()).toEqual([failure]);
+
+    // The same run is retried and passes. Its writer tags #32, but its status job never runs.
+    fixture.retry(run32);
+    const plan = await fixture.reconcile({ sha: pr32.mergeSha, runId: run32 });
+    const publication = await fixture.publishReconciled(plan.json);
+    expect(publication.json.commits.map((c) => [c.pr, c.decision, c.tag?.name])).toEqual([[32, "tagged", "v0.0.7-dev.1"]]);
+    expect(shownOn32()).toEqual([failure]);
+
+    // A recovery run finds #32 recorded beside a status that does not name its tag, evaluates it again and corrects it.
+    const recovery = await fixture.workflowRun(null);
+    expect(recovery.plan.json.commits.map((c) => [c.pr, c.decision])).toEqual([
+      [32, "recorded"],
+      [33, "pending"],
+    ]);
+    expect(recovery.publication).toBeNull();
+    expect(results(recovery.statuses.json)).toEqual([
+      [pr32.mergeSha, false, "written", "success"],
+      [pr33.mergeSha, false, "unchanged", "pending"],
+    ]);
+    expect(recovery.statuses.json.commits[0].evaluation).toMatchObject({ decision: "already_tagged", tag: "v0.0.7-dev.1" });
+    expect(shownOn32()).toEqual([failure, "success: Build tag v0.0.7-dev.1"]);
+
+    // Once its status names the tag, later runs neither evaluate nor write it again.
+    const writes = github.writes().length;
+    const settled = await fixture.workflowRun(null);
+    expect(results(settled.statuses.json)).toEqual([[pr33.mergeSha, false, "unchanged", "pending"]]);
+    expect(github.writes()).toHaveLength(writes);
+  });
+
   it("keeps confirmed success when an older plan's status job runs late, and leaves commits recorded at planning alone", async () => {
     const { github } = state;
     const { pr32, pr33 } = fixture.releasedHistory();
