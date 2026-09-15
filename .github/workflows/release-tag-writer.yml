@@ -1,0 +1,98 @@
+name: Release tag writer
+
+# The one job in this repository that can create tags. Every publisher calls this workflow instead of
+# holding its own write permission: build tags now, and in a later slice of issue #36 the Owner-approved
+# normal release. So they all wait on one concurrency group, and none of them can race another.
+#
+# The group never cancels the writer that is running, and `queue: max` keeps up to 100 callers pending
+# rather than replacing the one already queued. GitHub cancels a caller beyond that. A cancelled or
+# replaced caller loses nothing: the writer that runs next reconciles every commit that is owed a build
+# tag, whichever event started it. The build workflow's status job waits on the same group, so a commit
+# status is never decided while a tag is being created.
+#
+# The job installs nothing and runs no application code. It checks the digest of the bundle the
+# calling run's read-only job prepared, and runs main's controller with it. The controller reconciles
+# again from Git and the API, refuses a plan that no longer matches, and publishes each eligible commit
+# in turn, oldest first: it allocates the ordinal, creates the tag object and then a reference that is
+# never forced, and reads both back. It writes nothing unless RELEASE_BUILD_PUBLICATION is exactly
+# `enabled`.
+#
+# `contents: write` is GitHub's narrowest permission that can create a tag, and it is broader than
+# that: the same token could push a branch or change a file. The boundary is what this job runs — one
+# controller command, whose writer can only create a build-tag object and a new `refs/tags/` reference.
+on:
+  workflow_call:
+    inputs:
+      operation:
+        description: What to write. `build`, the reconciled build tags, is the only operation so far.
+        required: true
+        type: string
+      bundle-digest:
+        description: SHA-256 of the release-controller-bundle artifact from the calling run.
+        required: true
+        type: string
+    outputs:
+      decision:
+        description: The controller's decision.
+        value: ${{ jobs.write.outputs.decision }}
+      tags:
+        description: The build tags created, separated by spaces.
+        value: ${{ jobs.write.outputs.tags }}
+
+permissions: {}
+
+jobs:
+  write:
+    name: Write under the repository tag lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-tag-writer
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    outputs:
+      decision: ${{ steps.write.outputs.decision }}
+      tags: ${{ steps.write.outputs.tags }}
+    steps:
+      # The checkout runs after the lock is held, so the tags it fetches are the state to write against.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-controller-bundle
+          path: ${{ runner.temp }}/bundle
+      - name: Check the bundle digest, then unpack it
+        env:
+          BUNDLE_DIGEST: ${{ inputs.bundle-digest }}
+        run: |
+          echo "$BUNDLE_DIGEST  $RUNNER_TEMP/bundle/release-controller-bundle.tar" | sha256sum --check --strict
+          tar -xf "$RUNNER_TEMP/bundle/release-controller-bundle.tar" -C "$RUNNER_TEMP/bundle"
+          mv "$RUNNER_TEMP/bundle/node_modules" node_modules
+      - name: Write
+        id: write
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_BUILD_PUBLICATION: ${{ vars.RELEASE_BUILD_PUBLICATION }}
+        run: |
+          case "$OPERATION" in
+            build)
+              node scripts/release/controller.mjs publish-reconciled-builds \
+                --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
+                --plan "$RUNNER_TEMP/bundle/build-plan.json" --main-ref origin/main \
+                --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "release-tag-writer: unknown operation" >&2
+              exit 2
+              ;;
+          esac
