@@ -98,9 +98,12 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
     const referenceAt = sequence.indexOf(`POST /repos/${REPOSITORY}/git/refs`);
     expect(sequence[objectAt - 1]).toBe(`GET /repos/${REPOSITORY}/git/ref/heads/main`);
     expect(sequence.slice(objectAt + 1, referenceAt)).toEqual([`GET /repos/${REPOSITORY}/git/ref/heads/main`]);
+    // The read-back reads the reference, the object, and the dispatch run and attempt the annotation cites.
     expect(sequence.slice(referenceAt + 1)).toEqual([
       `GET /repos/${REPOSITORY}/git/ref/tags/v0.0.7`,
       `GET /repos/${REPOSITORY}/git/tags/${published.json.tag!.object}`,
+      `GET /repos/${REPOSITORY}/actions/runs/${dispatch.runId}`,
+      `GET /repos/${REPOSITORY}/actions/runs/${dispatch.runId}/attempts/1`,
     ]);
     expect(github.requests.every((r) => r.authorization === `Bearer ${TOKEN}`)).toBe(true);
 

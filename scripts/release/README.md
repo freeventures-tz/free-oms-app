@@ -385,7 +385,7 @@ the evidence calls for.
 | Decision | Exit | Meaning |
 | --- | --- | --- |
 | `eligible` | 0 | Every gate is satisfied. The tag name is provisional until the writer confirms it |
-| `already_published` | 0 | `vX.Y.Z` exists at the commit with this release's provenance, and its evidence still verifies. Main may have moved on since |
+| `already_published` | 0 | `vX.Y.Z` exists at the commit with this release's provenance, its cited dispatch is the Owner's dispatch of the commit, and its evidence still verifies. Main may have moved on since |
 | `pending` | 3 | CI or the deployment has not finished, or history awaits an Owner decision |
 | `refused` | 4 | A gate is refused. Each reason names its gate and code |
 | `failed` | 5 | A required final-merge CI gate is unsatisfied |
@@ -425,7 +425,13 @@ The annotation begins `Release vX.Y.Z of <repository>`. Its fields are `Release-
 `Release-Kind`, `Repository`, `Commit`, `Version`, `Classification`, `Release-Base`, `Notes-Digest`,
 `Preparation-PR`, `Reviewed-Head`, `Release-Date`, `Schema-Boundary`, `Deployment`, the four record
 references, `Authorized-Actions`, `Owner` and `CI-Workflow`, which a retry must reproduce exactly, then
-`CI-Run`, `CI-Attempt` and `Dispatch-Run`. The cited CI attempt must itself have passed. The annotation
+`CI-Run`, `CI-Attempt` and `Dispatch-Run`. The cited CI attempt must itself have passed. The cited
+dispatch is read from GitHub, for an existing tag and for one read back after a write: it must be a run of
+`release-normal-tag.yml` in this repository, dispatched on `main` for the tag's commit and started by the
+Owner, and its cited attempt must exist and have been started by the Owner. Unlike the current dispatch, it
+may have finished, failed after writing, or been re-run since, so a legitimate retry still finds its
+release. A tag whose cited dispatch is missing or is anyone else's is `normal_tag_conflict`, or
+`normal_tag_name_collision` when it took the name during a write. The annotation
 lists the CI evidence and every accepted merge by number, sha, type and change, the preparation's own merge
 included. It leaves out pull-request titles, which the notes digest binds.
 
@@ -847,7 +853,7 @@ again immediately before it creates the tag object and again before the referenc
 | `policy` | Git at `sha` | A reviewed merge | `scripts/release/release-evidence-policy.json` | Schema 1, this repository, a complete owner and Vercel entry | Read again on every run | `release_policy_missing`, `release_policy_invalid` |
 | `history` | Git, and GitHub's pull-request associations | GitHub | `sha` on main's first-parent line | As `preview`, from `sha`'s own ancestral release. A normal tag at `sha` itself is not a base | The checkout's tags must be GitHub's | `tag_state_out_of_date` (exit 1), and the `preview` codes |
 | `main` | GitHub's `refs/heads/main`, and `--main-ref` | GitHub | `refs/heads/main` | Both equal `sha`. A newer main never stands in for the approved `sha` | Checked again under the lock, before the object and before the reference | `main_moved` |
-| `version` | The calculation from history, and the tags GitHub holds | — | `version` and the tag `vX.Y.Z` | `version` is the calculated version. During 0.x, `1.0.0` is refused. No other normal tag names `sha`, and no normal tag is at or above `version` | An existing `vX.Y.Z` that matches in full is `already_published` | `version_mismatch`, `stable_contract_acceptance_undecided`, `target_already_released`, `normal_version_not_newest`, `normal_tag_conflict` |
+| `version` | The calculation from history, and the tags GitHub holds | — | `version` and the tag `vX.Y.Z` | `version` is the calculated version. During 0.x, `1.0.0` is refused. No other normal tag names `sha`, and no normal tag is at or above `version` | An existing `vX.Y.Z` that matches in full, the Owner's dispatch it cites included, is `already_published` | `version_mismatch`, `stable_contract_acceptance_undecided`, `target_already_released`, `normal_version_not_newest`, `normal_tag_conflict` |
 | `preparation` | Git objects at `sha`, and the preparation's pull-request association | A reviewed merge | `preparation-pr`, its merge `sha` and its reviewed head | The preparation is the last accepted merge and is `sha`. Its merge's second parent is the head GitHub records. The package version, both lockfile fields, the changelog heading and generated block, and the retained title all agree, exactly as `prepare-release` checks a merged preparation. The final notes list every accepted merge once, the preparation included | A preparation made stale by a later merge is refused | `preparation_not_at_target`, `preparation_pr_mismatch`, and the `prepare-release` codes |
 | `schema-boundary` | Git trees | — | The `supabase/migrations` tree at the base release's commit and at `sha` | Equal trees are `unchanged`, proved from Git. Different trees need a `hosted-migration` record | — | `hosted_migration_record_required`, `hosted_migration_record_unexpected` |
 | `hosted-migration` | The comment GitHub holds | `issuers.hosted-migration` | Comment id and body digest | The kind's keys. Its boundary is the computed one | Created before every accepted merge in the range that changed the tree was merged. So all of a release's migrations reach hosted Supabase before the first of them merges | The `evidence_` codes below |
@@ -1123,6 +1129,12 @@ own policy, standing in for the Owner's future decision. It also runs main's pol
   attempt recorded
 - Interruption: an unreferenced object, a lost reference response and a failed read-back, each without a
   success, then one tag after a retry. A name taken by another tag refused without moving it
+- The dispatch an existing tag cites. Refused when the run does not exist, when the attempt does not exist,
+  or when it was started by someone else. Also refused when an attempt was re-run by someone else, or the
+  run is for another commit, event, branch or workflow, or is a CI run. The writer's retry refuses the same
+  tag and writes nothing. Accepted when the writing attempt lost its response and then failed, through the
+  Owner's re-run and a later dispatch. A racing tag that cites someone else's dispatch is a collision; one
+  citing the Owner's earlier, finished dispatch of the release is `already_published`
 - `main` moving between the object and the reference, and before the writer starts: refused, the object
   left unreferenced, and neither the approved nor the newer commit tagged
 - Two writers with the same plan racing past the lock: one tag. The loser reads it back or stops on its
@@ -1201,9 +1213,9 @@ own policy, standing in for the Owner's future decision. It also runs main's pol
   repository, never with an OMS tag.
 - A release that changes migrations, on this repository. The controller has no view of hosted Supabase;
   it trusts a record from the named issuer, and main names none.
-- An existing `vX.Y.Z` made by hand with every stable field of a valid release. It is reported
-  `already_published`. Its evidence is verified as for any request, but the `Dispatch-Run` it cites is
-  checked only for its form.
+- An existing `vX.Y.Z` made by hand as a copy of a genuine release's annotation, citing the Owner's real
+  dispatch of that commit. Every field and the cited run check out, so it is reported `already_published`,
+  and nothing tells it from the tag that dispatch wrote.
 - A dispatch from another branch. That branch's copy of the workflow runs, and it can differ, but anyone
   who can push that branch can already push a workflow. The controller refuses a run that is not on `main`,
   which a changed copy could also change.

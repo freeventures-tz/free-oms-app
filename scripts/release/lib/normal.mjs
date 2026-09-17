@@ -205,8 +205,11 @@ export function parseReleaseProvenance(message) {
   return PROVENANCE_FIELDS.every((field) => Object.hasOwn(fields, field)) ? fields : null;
 }
 
-/** How an annotation differs from this release's provenance, its cited CI attempt included. Empty is a match. */
-function releaseProvenanceDifferences(message, report) {
+/**
+ * How an annotation differs from this release's provenance, read against Git and GitHub: its stable fields, the
+ * CI attempt it cites, and the dispatch it cites. Empty is a match.
+ */
+async function releaseProvenanceDifferences(github, message, report) {
   const expected = expectedReleaseProvenance(report);
   const differences = [];
   const firstLine = String(message).split("\n")[0];
@@ -218,7 +221,11 @@ function releaseProvenanceDifferences(message, report) {
       differences.push(`${field} is ${JSON.stringify(fields[field])}, not ${JSON.stringify(expected.fields[field])}`);
     }
   }
-  if (!/^[1-9]\d* [1-9]\d*$/.test(fields["Dispatch-Run"])) differences.push("its Dispatch-Run is not a run id and an attempt");
+  if (!/^[1-9]\d* [1-9]\d*$/.test(fields["Dispatch-Run"])) {
+    differences.push("its Dispatch-Run is not a run id and an attempt");
+  } else {
+    differences.push(...(await citedDispatchDifferences(github, fields["Dispatch-Run"], report)));
+  }
   if (!/^[1-9]\d*$/.test(fields["CI-Run"]) || !/^[1-9]\d*$/.test(fields["CI-Attempt"])) {
     differences.push("its CI run or attempt is not a positive integer");
   } else {
@@ -250,6 +257,65 @@ export function renderReleaseAnnotation(report) {
   return `${lines.join("\n")}\n`;
 }
 
+/** Every way a run differs from a run of the normal-release workflow, dispatched on main for `sha`. */
+function dispatchIdentityMismatches(run, { repository, repositoryId, workflowId, sha }) {
+  const mismatches = [];
+  const expect = (label, actual, expected) => {
+    if (actual !== expected) mismatches.push(`its ${label} is ${JSON.stringify(actual ?? null)}, not ${JSON.stringify(expected)}`);
+  };
+  expect("repository", run.repository?.full_name, repository);
+  if (repositoryId !== null) expect("repository id", run.repository?.id, repositoryId);
+  expect("head repository", run.head_repository?.full_name, repository);
+  expect("workflow id", run.workflow_id, workflowId);
+  expect("workflow path", run.path, NORMAL_RELEASE_WORKFLOW.path);
+  expect("event", run.event, NORMAL_RELEASE_WORKFLOW.event);
+  expect("branch", run.head_branch, NORMAL_RELEASE_WORKFLOW.branch);
+  expect("head commit", run.head_sha, sha);
+  return mismatches;
+}
+
+/**
+ * Why the dispatch an existing tag cites, `Dispatch-Run: <run> <attempt>`, is not the Owner's dispatch of this
+ * release, read from GitHub. Empty when it is.
+ *
+ * The cited run must be this repository's normal-release workflow, dispatched on main for the tag's commit, and
+ * started by the Owner, and the cited attempt must exist and have been started by the Owner. Unlike the current
+ * invocation's dispatch, it need not be running or be the run's latest attempt: the run that wrote a tag may
+ * have finished, failed after writing, or been re-run since, and none of that unmakes its tag.
+ */
+async function citedDispatchDifferences(github, cited, report) {
+  const [runId, attempt] = cited.split(" ").map(Number);
+  const owner = report.owner;
+  const sha = report.request.sha;
+  const unverified = (detail) => [`its Dispatch-Run ${cited} is not the Owner's dispatch of ${sha}: ${detail}`];
+  if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(attempt)) return unverified("it is not a run id and an attempt");
+
+  const workflow = await github.workflow(NORMAL_RELEASE_WORKFLOW.file);
+  if (!workflow || workflow.path !== NORMAL_RELEASE_WORKFLOW.path || !Number.isSafeInteger(workflow.id)) {
+    return unverified(`${NORMAL_RELEASE_WORKFLOW.path} is not a workflow of ${report.repository}`);
+  }
+  const run = await github.workflowRun(runId);
+  if (!run) return unverified(`${report.repository} has no workflow run ${runId}`);
+  const mismatches = dispatchIdentityMismatches(run, {
+    repository: report.repository,
+    repositoryId: report.repositoryId,
+    workflowId: workflow.id,
+    sha,
+  });
+  if (!same(run.actor, owner)) mismatches.push(`it was started by ${JSON.stringify(run.actor?.login ?? null)}, not the Owner ${owner.login}`);
+  if (!Number.isSafeInteger(run.run_attempt) || attempt > run.run_attempt) {
+    mismatches.push(`the run has no attempt ${attempt}`);
+  } else {
+    const view = await github.workflowRunAttempt(runId, attempt);
+    if (!view || view.id !== runId || view.run_attempt !== attempt) {
+      mismatches.push(`GitHub has no attempt ${attempt} of run ${runId}`);
+    } else if (!same(view.triggering_actor, owner)) {
+      mismatches.push(`attempt ${attempt} was started by ${JSON.stringify(view.triggering_actor?.login ?? null)}, not the Owner ${owner.login}`);
+    }
+  }
+  return mismatches.length > 0 ? unverified(mismatches.join("; ")) : [];
+}
+
 async function checkDispatch({ github, repository, repositoryId, sha, dispatch, owner }) {
   const reasons = [];
   const summary = { runId: dispatch.runId, attempt: dispatch.attempt, actor: null, triggeringActor: null };
@@ -265,18 +331,10 @@ async function checkDispatch({ github, repository, repositoryId, sha, dispatch, 
     invalid(`${repository} has no workflow run ${dispatch.runId}`);
     return { summary, reasons };
   }
-  const mismatches = [];
+  const mismatches = dispatchIdentityMismatches(run, { repository, repositoryId, workflowId: workflow.id, sha });
   const expect = (label, actual, expected) => {
     if (actual !== expected) mismatches.push(`its ${label} is ${JSON.stringify(actual ?? null)}, not ${JSON.stringify(expected)}`);
   };
-  expect("repository", run.repository?.full_name, repository);
-  if (repositoryId !== null) expect("repository id", run.repository?.id, repositoryId);
-  expect("head repository", run.head_repository?.full_name, repository);
-  expect("workflow id", run.workflow_id, workflow.id);
-  expect("workflow path", run.path, NORMAL_RELEASE_WORKFLOW.path);
-  expect("event", run.event, NORMAL_RELEASE_WORKFLOW.event);
-  expect("branch", run.head_branch, NORMAL_RELEASE_WORKFLOW.branch);
-  expect("head commit", run.head_sha, sha);
   expect("latest attempt", run.run_attempt, dispatch.attempt);
   // A dispatch authorises only the run it started, while that run is running.
   expect("status", run.status, "in_progress");
@@ -564,7 +622,7 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
       const object = git.tagObject(existing.objectName);
       if (object.tag !== tagName) differences.push(`its tag object is named ${JSON.stringify(object.tag)}`);
       if (object.type !== "commit" || object.object !== sha) differences.push(`its tag object tags ${object.type} ${object.object}`);
-      differences.push(...releaseProvenanceDifferences(object.message, report));
+      differences.push(...(await releaseProvenanceDifferences(github, object.message, report)));
     }
     if (differences.length > 0) {
       versionReasons.push(refusal("version", "normal_tag_conflict", `${tagName} tags ${sha}, but ${differences.join("; ")}`, sha));
@@ -726,7 +784,7 @@ async function readBackRelease(github, { name, report }) {
   if (object.object?.type !== "commit" || object.object?.sha !== report.request.sha) {
     differences.push(`it peels to ${object.object?.type ?? "nothing"} ${object.object?.sha ?? ""}, not commit ${report.request.sha}`);
   }
-  differences.push(...releaseProvenanceDifferences(object.message ?? "", report));
+  differences.push(...(await releaseProvenanceDifferences(github, object.message ?? "", report)));
   const fields = parseReleaseProvenance(object.message ?? "");
   return {
     state: differences.length === 0 ? "matches" : "conflict",
