@@ -10,13 +10,16 @@
  *   reconcile-builds      Find every accepted merge after v0.0.6 that is owed a build tag. Reads only.
  *   publish-reconciled-builds  Tag each merge that is eligible now, through publish-build's writer.
  *   write-reconciled-statuses  Report those merges as commit statuses, when publication is activated.
+ *   prepare-release       Write the next normal version into package.json, the lockfile and the
+ *                         changelog of a preparation branch's working tree, or check a merged preparation.
  *   runtime-dependencies  List the lockfile paths the writing jobs receive instead of installing.
  *
- * Only publish-build, write-build-status and their two reconciled forms can write, each through a client
- * that makes exactly one kind of write, and none writes anything unless RELEASE_BUILD_PUBLICATION is
- * exactly `enabled`.
+ * Only publish-build, write-build-status and their two reconciled forms can write to GitHub, each through
+ * a client that makes exactly one kind of write, and none writes anything unless
+ * RELEASE_BUILD_PUBLICATION is exactly `enabled`.
  * Every other command's GitHub client can only send GET requests, and the Git client only reads the
- * local clone it is pointed at. Nothing pushes, and nothing writes a package version.
+ * local clone it is pointed at. Nothing pushes or commits. prepare-release is the only command that
+ * writes a file: the three release-metadata files of the working tree it is given.
  *
  * Exit status is part of the interface:
  *
@@ -48,7 +51,9 @@ import { createGitReader } from "./lib/git.mjs";
 import { createGitHubReader } from "./lib/github.mjs";
 import { readAcceptedRange } from "./lib/history.mjs";
 import { escapeMarkdown, listParagraphs } from "./lib/markdown.mjs";
+import { describeMetadata, readCommitMetadata } from "./lib/metadata.mjs";
 import { renderPreviewReport, renderReleaseNotes } from "./lib/notes.mjs";
+import { prepareReleaseCommand } from "./lib/preparation-commands.mjs";
 import {
   publishReconciledBuildsCommand,
   reconcileBuildsCommand,
@@ -225,6 +230,7 @@ async function preview(args, env) {
     sha,
     mainRef,
     base: range.base,
+    candidateMetadata: range.base ? describeMetadata(readCommitMetadata(git, sha), range.base.version) : null,
     policy: range.base ? policyFor(range.base.version) : null,
     highestChange: null,
     version: null,
@@ -292,6 +298,7 @@ const COMMANDS = {
   "reconcile-builds": reconcileBuildsCommand,
   "publish-reconciled-builds": publishReconciledBuildsCommand,
   "write-reconciled-statuses": writeReconciledStatusesCommand,
+  "prepare-release": prepareReleaseCommand,
   "runtime-dependencies": runtimeDependenciesCommand,
 };
 

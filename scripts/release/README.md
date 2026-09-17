@@ -1,7 +1,7 @@
 # Release controller
 
 This is the release automation from
-[issue #36](https://github.com/freeventures-tz/free-oms-app/issues/36). So far it has three parts:
+[issue #36](https://github.com/freeventures-tz/free-oms-app/issues/36). So far it has four parts:
 
 - **Preview** ([#37](https://github.com/freeventures-tz/free-oms-app/issues/37)). It classifies
   pull-request titles and, for one exact accepted merge, previews the next version and the complete
@@ -13,10 +13,15 @@ This is the release automation from
   build-tag workflow, whether a CI completion or a recovery dispatch started it, reconciles every accepted
   merge after `v0.0.6` with its build tag from durable history. A dropped, duplicated, late or replaced
   event cannot strand an eligible build.
+- **Preparation** ([#40](https://github.com/freeventures-tz/free-oms-app/issues/40)). It writes the next
+  normal version into `package.json`, the lockfile and `CHANGELOG.md` on a preparation branch, for a
+  reviewed pull request, and checks that preparation once it has merged. It commits, pushes and
+  publishes nothing.
 
-**Build-tag publication is off.** Nothing is written unless the repository variable
-`RELEASE_BUILD_PUBLICATION` is exactly `enabled`, and this change does not set it. Release preparation
-and normal-release publication belong to later slices of #36. Neither exists yet.
+**Build-tag publication is off.** Nothing is written to GitHub unless the repository variable
+`RELEASE_BUILD_PUBLICATION` is exactly `enabled`, and this change does not set it. Normal-release
+publication belongs to a later slice of #36
+([#41](https://github.com/freeventures-tz/free-oms-app/issues/41)) and does not exist yet.
 
 Issue #36 owns the policy: the compatibility contract, the version table, the accepted-merge rules and
 the publication contract. This file covers running the commands and what their tests prove.
@@ -51,6 +56,10 @@ GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs preview --repo f
 | `--accept-stable-contract` | A reference to the Owner's stable-contract acceptance. During 0.x it makes the target `1.0.0`. The preview records the reference but does not validate it |
 | `--path` | The clone to read. Default: the current directory |
 | `--format` | `markdown` (default) or `json` |
+
+The notes show the package version the merge carries beside the release they are calculated from. A
+package version ahead of the last normal tag is a merged preparation that has not been released. The
+preview labels it and never calculates from it.
 
 Environment variables: `GITHUB_TOKEN` or `GH_TOKEN` supplies the read token.
 `GITHUB_API_URL` defaults to `https://api.github.com`; it must use https, except that plain http is
@@ -244,6 +253,104 @@ status GitHub shows. A merge that stays unresolved stays visible, without a new 
 `--writer-decision` takes a `publish-reconciled-builds` decision, and `--target-url` must be a workflow
 run of this repository.
 
+### `prepare-release`
+
+It writes three files in the working tree it is given, and nothing else anywhere. It never commits,
+stages, pushes, tags or writes to GitHub, and its GitHub client sends only GET requests.
+[Preparing a normal release](#preparing-a-normal-release) gives the procedure around it.
+
+```bash
+git fetch origin --tags --prune
+```
+
+```bash
+GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs prepare-release --repo freeventures-tz/free-oms-app --sha <main's full sha> --pr <preparation pull request> --date <YYYY-MM-DD>
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--sha` | The release candidate, as a full sha. For a new preparation it must be the tip of `--main-ref`, and GitHub's `main` must agree |
+| `--pr` | The preparation's pull request. Required unless `--dry-run` is given |
+| `--date` | The planned release date, `YYYY-MM-DD`. It goes into the changelog heading and is part of what the Owner reviews |
+| `--dry-run` | Shows everything, writes nothing, and may run on `main` without `--pr` |
+| `--main-ref`, `--path`, `--format` | As for `preview`. `--path` must be the top of the working tree |
+
+The command calculates the version exactly as `preview` does, from the last normal tag and the accepted
+merges after it. It then writes that version to three places:
+
+- `version` in `package.json`.
+- `version` and `packages[""].version` in `package-lock.json`.
+- A section headed `## [X.Y.Z] — <date>` in `CHANGELOG.md`.
+
+The command finds each field in the file's text and replaces only the version string. Formatting, key
+order, line endings and every other value stay as they were, and it parses each result again to check.
+A dependency that happens to carry the same version string is not touched.
+
+The changelog section holds a generated block between two markers:
+
+```markdown
+<!-- release-controller:begin version=0.0.7 base=v0.0.6 preparation=43 -->
+…
+<!-- release-controller:end -->
+```
+
+The block lists every accepted merge after the last normal release once, with its pull request, merge
+and change, then breaking changes and deprecations, then the preparation's own pull request last. Write
+the plain-language summary above or below the markers. A later preparation replaces the heading and the
+block, and keeps everything else in the file byte for byte.
+
+The preparation cannot list its own merge commit, because that commit does not exist until it merges.
+The block names its pull request instead. Once merged, the preparation is an accepted merge like any
+other. The final notes read its sha from history, and a run at the merge checks the metadata. No second
+commit records the merge.
+
+| Status | Exit | Meaning |
+| --- | --- | --- |
+| `prepared` | 0 | The files hold this preparation. Each file reports `changed` and `written`. A repeated run that has nothing to change writes nothing |
+| `would_prepare` | 0 | A dry run. The report shows the same files, section and notes, and nothing was written |
+| `already_prepared` | 0 | The candidate is the merge of the preparation its changelog names, and everything agrees. `final` holds the release notes with that merge included |
+| `nothing_to_prepare` | 0 | Nothing merged after the last normal release. That includes a candidate that is itself released |
+| `pending_decision` | 3 | A merge in the range needs an Owner decision, as in `preview` |
+| `refused` | 4 | See below. Nothing was written |
+
+A run that cannot finish exits 1, prints nothing on standard output, and leaves the three files as they
+were. The one exception is a failed write whose restore also fails, and its error names the files:
+
+| Code | Why |
+| --- | --- |
+| `tag_state_out_of_date` | The checkout's tags are not GitHub's. Fetch every tag and run it again |
+| `main_out_of_date` | GitHub's `main` is not `--main-ref`. Fetch and run it again |
+| `working_file_unreadable` | One of the three is not a regular file, or not UTF-8 text |
+| `working_tree_changed` | One of the three changed while the command ran |
+| `preparation_unverified`, `metadata_edit_unverified` | The prepared files would not read back as one version, or an edit would change more than a version |
+| `preparation_not_written` | A write failed |
+
+The command writes each new file beside its target first, as `<file>.release-preparation.tmp`, and
+replaces the targets only when every changed file is written. A file already at one of those paths stops
+the write, and the command leaves that file alone. If replacing a target fails, the command writes back
+the files it has already replaced, and the error says whether that worked.
+
+Refusals name what to fix:
+
+| Code | Refused because |
+| --- | --- |
+| `target_already_released` | A `vX.Y.Z` tag for the calculated version exists anywhere |
+| `candidate_metadata_unreadable`, `candidate_metadata_inconsistent` | At the candidate, a file is missing or not JSON, the three versions disagree, or the version is neither the last normal release nor an unreleased preparation from it no higher than the calculated version. The changelog's newest release must match the package version, and a pending one must be a generated section from the same base. Releases must run newest first |
+| `candidate_version_not_normal` | The candidate's package version has a prerelease or build part. Build-tag ordinals never enter package metadata |
+| `candidate_not_main_tip` | The candidate is behind main |
+| `working_tree_required` | `--path` is not the top of a working tree |
+| `preparation_on_main`, `preparation_branch_required` | Without `--dry-run`, the checkout is on `main` or has a detached HEAD |
+| `branch_not_based_on_candidate` | The branch does not contain the candidate. Merge `origin/main` into it first |
+| `branch_has_other_changes` | The branch changes a file other than the three |
+| `preparation_pr_missing`, `preparation_pr_merged`, `preparation_pr_mismatch` | The pull request does not exist, has already merged in the range, is not open, does not target this repository's `main`, or comes from a fork or another branch |
+| `preparation_title_mismatch` | The pull request's title, or at the merge its retained title, is not `chore(release): prepare X.Y.Z`. Retitle it before preparing again |
+| `working_metadata_unreadable`, `working_metadata_inconsistent` | The working tree's files are not the candidate's, or a preparation this branch already made, as one version |
+| `preparation_without_changes` | At a merged preparation, the preparation is the only merge since the last normal release |
+| `prepared_version_stale`, `prepared_changelog_stale`, `prepared_changelog_mismatch` | At a merged preparation, the package version, the generated block or the heading is not what the history now gives. Something merged while it was in review. Prepare again in a new pull request |
+
+The command does not take `--accept-stable-contract`. Preparing `1.0.0` needs its own Owner decision on
+how that acceptance is recorded and checked.
+
 ### `runtime-dependencies`
 
 ```bash
@@ -257,7 +364,7 @@ evaluation job bundles exactly these, so the writing jobs never install anything
 
 | Status | Meaning |
 | --- | --- |
-| 0 | Valid, calculated, eligible, tagged, already tagged, or nothing to do |
+| 0 | Valid, calculated, eligible, tagged, already tagged, prepared, already prepared, or nothing to do |
 | 1 | Git or GitHub failed, or a write was not confirmed. Nothing was guessed |
 | 2 | Usage error |
 | 3 | Pending: an Owner decision, or final-merge CI that has not finished |
@@ -430,6 +537,104 @@ is a reviewed code change.
 for one day, show what that run found and did. None of them is the ledger: the next run derives
 everything again.
 
+## Preparing a normal release
+
+This is the procedure for a future release. Nobody has run it on this repository yet. Each merge,
+release and production step keeps its own Owner approval, as issue #36 sets out, and a Reviewer's READY
+or green CI grants none of them.
+
+A preparation changes only `package.json`, `package-lock.json` and `CHANGELOG.md`. Build tags never
+write a version into them. The version in them is the next normal release, and it stays ahead of the
+last normal tag from the preparation's merge until the normal release is published. `preview` and
+`prepare-release` label that gap and always calculate from the tag.
+
+1. Fetch, then run a dry run from main. Read the calculated version, the pull-request title it gives,
+   and the changelog section.
+
+   ```bash
+   git fetch origin --tags --prune
+   ```
+
+   ```bash
+   GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs prepare-release --repo freeventures-tz/free-oms-app --sha "$(git rev-parse origin/main)" --date <YYYY-MM-DD> --dry-run
+   ```
+
+2. Create the preparation branch from main.
+
+   ```bash
+   git switch -c release/vX.Y.Z origin/main
+   ```
+
+3. Open the pull request first, as a draft, because the changelog names it. GitHub needs a commit to
+   open it, so start with an empty one, titled as the dry run said.
+
+   ```bash
+   git commit --allow-empty -m "chore(release): prepare X.Y.Z"
+   ```
+
+   ```bash
+   git push -u origin release/vX.Y.Z
+   ```
+
+   ```bash
+   gh pr create --repo freeventures-tz/free-oms-app --base main --draft --title "chore(release): prepare X.Y.Z" --body "Release preparation for X.Y.Z. Generated by prepare-release; see scripts/release/README.md."
+   ```
+
+4. Prepare with that pull request's number, on the branch.
+
+   ```bash
+   GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs prepare-release --repo freeventures-tz/free-oms-app --sha "$(git rev-parse origin/main)" --pr <number> --date <YYYY-MM-DD>
+   ```
+
+5. Check that `git status` shows only the three files. Write the plain-language summary above the
+   generated block if the release needs one. Stage the three files by name, commit, push, and mark the
+   pull request ready for review.
+
+   ```bash
+   git add package.json package-lock.json CHANGELOG.md
+   ```
+
+   ```bash
+   git commit -m "chore(release): prepare X.Y.Z"
+   ```
+
+6. If main moves before the merge, merge it into the branch and prepare again with the new main sha. A
+   feature or a breaking change can raise the version. In that case the command refuses with
+   `preparation_title_mismatch` until you retitle the pull request, and then replaces the section. Commit
+   and push the result. The Reviewer reviews the new exact head.
+
+   ```bash
+   git fetch origin --tags --prune
+   ```
+
+   ```bash
+   git merge origin/main
+   ```
+
+7. Merge only on the Owner's instruction, for the exact reviewed head, keeping the title in the merge
+   body as every merge here does.
+
+   ```bash
+   gh pr merge <number> --repo freeventures-tz/free-oms-app --merge --match-head-commit <reviewed head> --body "chore(release): prepare X.Y.Z"
+   ```
+
+8. Check the merge. The report says `already_prepared` and gives the final release notes. They list
+   every accepted merge since the last normal release once, the preparation's own merge included, with
+   its sha. No further commit is needed.
+
+   ```bash
+   GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs prepare-release --repo freeventures-tz/free-oms-app --sha <merge sha> --pr <number> --date <YYYY-MM-DD> --dry-run
+   ```
+
+   If it reports `prepared_changelog_stale`, `prepared_version_stale` or `prepared_changelog_mismatch`,
+   something merged while the preparation was in review, or the date changed. Do not publish. Prepare
+   again from step 2 with a new pull request. That pull request lists the first preparation as an
+   accepted merge.
+
+The preparation's merge is an accepted merge like any other, so it gets its own build tag once
+publication is activated. Publishing the normal tag `vX.Y.Z` is issue #41's, and the Owner's decision.
+This slice does not publish it.
+
 ## Workflows and permissions
 
 `.github/workflows/release-build-tag.yml` runs on `workflow_run` when CI completes on `main`, and on
@@ -475,6 +680,9 @@ repository that can create tags. Later publishers call it instead of holding the
 While publication is off, the `evaluate` job still runs after every CI completion on main and every
 recovery dispatch. It writes a job summary and nothing else, which gives non-publishing evidence before
 any activation.
+
+No workflow runs `prepare-release`. An Implementer runs it in their own checkout with a read token, and
+the reviewed pull request carries its result.
 
 ## Activation is a separate Owner decision
 
@@ -577,6 +785,41 @@ checkout.
 - The dispatch trigger, its `main` condition, the trigger arguments and the absence of a window option,
   checked as YAML. Reconciliation, publication and statuses running from the bundle alone
 
+**Proved by fixtures, for preparation.** A checkout of the disposable repository stands in for the
+Implementer's. Each test reads the files it writes and every ref on both sides, and asserts zero GitHub
+writes.
+
+- 0.0.6 to 0.0.7 over #32, #33 and #42 with preparation #43. The package version, both lockfile fields,
+  the changelog heading and block, and the notes all say 0.0.7. The rest of each file is byte for byte
+  unchanged, a dependency with the same version string included. Only the three files are modified, and
+  nothing is staged, committed or tagged
+- A dry run on `main` with no pull request, which writes nothing, and the usage errors
+- A repeated preparation that changes nothing. After main moves, the branch is refused until it contains
+  the new main, and then the block is replaced in place, with prose kept and every merge listed once. A
+  title that looks like a marker or a heading stays data
+- A feature and a breaking change raising a pending 0.0.7 to 0.1.0, after the pull request is retitled.
+  Deprecation and breaking sections appear, no 0.0.7 section is left, and prose is kept
+- The merged preparation checked at its merge. The final notes list #43 once with its merge sha, and no
+  further commit is needed. The preview labels package version 0.1.0 as ahead of `v0.0.6` and still
+  calculates 0.1.0 from the tag. The merge's build tag is `v0.1.0-dev.1`, and its package version has no
+  `-dev`. A different date is refused
+- A merged preparation that missed a later merge refused as stale, then a new preparation pull request
+  listing that merge and the first preparation once each, and checked after its own merge
+- A merged preparation refused when a feature merged during its review (title, version, heading and
+  block), when its merge kept another title, and when it is the only change since the last release
+- A patch after an intervening `v0.0.7`: 0.0.8 from `v0.0.7`, with only its own merge. The released
+  section stays byte for byte, every merge sits in exactly one release's section, and every tag,
+  `v0.0.8-dev.1` included, keeps its object
+- Eleven kinds of candidate metadata that history cannot explain, each refused with nothing written: the
+  three versions disagreeing, a version out of range, a prerelease version, a changelog that does not
+  match, a generated section from another base, releases out of order, and a file that is not JSON.
+  In the working tree, the same, plus three files that agree on a version history does not explain
+- CRLF files, an uncommitted field and an untracked file kept exactly
+- Every precondition refusal, a stale tag or `main`, a version already released elsewhere, a direct push
+  left for the Owner, a file in the way of the write, bytes that are not UTF-8, and a directory where a
+  file belongs. None of them changes a file, a ref, the index
+  or GitHub, and a file in the way is left where it was
+
 **Not proved here:**
 
 - GitHub's real responses. The simulator reproduces the documented fields the controller reads,
@@ -594,3 +837,8 @@ checkout.
   attempt, with every field Git can check set correctly but a wrong classification or notes digest. Those
   two fields are not read again once a release contains the merge, so it is reported as recorded.
 - Whether a tag push reaches a deployment integration. That is an activation hold, not a test.
+- A preparation failing after all three temporary files are written, while it replaces the targets. The
+  fixtures inject the failure while the temporary files are created. The restore path is not exercised.
+- A file changing while `prepare-release` runs (`working_tree_changed`).
+- The preparation procedure on GitHub. No real preparation pull request has been opened, and this
+  repository's version has not changed.

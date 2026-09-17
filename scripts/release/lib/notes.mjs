@@ -16,17 +16,48 @@ const POLICY = {
 
 const short = (sha) => sha.slice(0, 7);
 
+/**
+ * What the package version at a commit claims, beside the release the calculation starts from. A version
+ * ahead of the last normal release is a preparation that has merged and not been released; it is shown,
+ * and never calculated from.
+ */
+export function describePackageVersion(metadata, base) {
+  const version = metadata.packageVersion === null ? null : `\`${escapeMarkdown(metadata.packageVersion)}\``;
+  switch (metadata.relation) {
+    case "last_normal_release":
+      return `${version}, the last normal release`;
+    case "ahead_of_last_normal_release":
+      return `${version}, ahead of the last normal release \`${base.tag}\`: prepared and not yet released. The version above is calculated from \`${base.tag}\``;
+    case "behind_last_normal_release":
+      return `${version}, behind the last normal release \`${base.tag}\``;
+    case "not_a_normal_version":
+      return `${version}, which is not a normal version`;
+    case "inconsistent":
+      return `${version} in package.json, which package-lock.json does not repeat`;
+    case "unreadable":
+      return "package.json cannot be read";
+    default:
+      return "none: this commit has no package.json";
+  }
+}
+
 export function renderReleaseNotes(preview) {
+  const preparation = preview.preparation ?? null;
   const lines = [
     `## ${preview.version} — release notes preview`,
     "",
-    "Calculated from accepted merges. Not reserved and not published.",
+    preparation
+      ? "Calculated from accepted merges and this release's preparation. Not reserved and not published."
+      : "Calculated from accepted merges. Not reserved and not published.",
     "",
     "| | |",
     "| --- | --- |",
     `| Repository | ${escapeMarkdown(preview.repository)} |`,
     `| Exact merge | \`${preview.sha}\` |`,
     `| Normal-release base | \`${preview.base.tag}\` at \`${preview.base.commit}\` |`,
+    ...(preview.candidateMetadata
+      ? [`| Package version at this merge | ${describePackageVersion(preview.candidateMetadata, preview.base)} |`]
+      : []),
     `| Version policy | ${POLICY[preview.policy]} |`,
     `| Highest change | ${preview.highestChange} |`,
     `| Stable-contract acceptance | ${
@@ -52,7 +83,7 @@ export function renderReleaseNotes(preview) {
     lines.push(`- **${escapeMarkdown(m.title)}** ([#${m.pr}](${m.url})): ${listParagraphs(m.deprecation)}`);
   }
 
-  lines.push("", `### Accepted merges (${preview.merges.length})`, "");
+  lines.push("", `### Accepted merges (${preview.merges.length + (preparation ? 1 : 0)})`, "");
   preview.merges.forEach((m, index) => {
     lines.push(
       `${index + 1}. **${escapeMarkdown(m.title)}** — [#${m.pr}](${m.url}) · merge [\`${m.mergeSha}\`](${m.mergeUrl}) · \`${m.type}\` → ${m.change}`,
@@ -66,6 +97,12 @@ export function renderReleaseNotes(preview) {
         .join("; ")}`,
     );
   });
+  if (preparation) {
+    const link = preparation.pr === null ? "pull request not named yet" : `[#${preparation.pr}](${preparation.url})`;
+    lines.push(
+      `${preview.merges.length + 1}. **${escapeMarkdown(preparation.title)}** — ${link} · this release's preparation; history records its merge when it merges · \`chore\` → patch`,
+    );
+  }
 
   lines.push(...proposedSection(preview));
 

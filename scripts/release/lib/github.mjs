@@ -138,6 +138,9 @@ export function createGitHubReader(options) {
         String(ref?.ref ?? "").startsWith("refs/tags/"),
       ),
 
+    /** One branch reference, or null. */
+    branchReference: (name) => api.getOne(`${repo}/git/ref/heads/${segment(name)}`),
+
     /** One tag reference, or null. */
     tagReference: (name) => api.getOne(`${repo}/git/ref/tags/${segment(name)}`),
 

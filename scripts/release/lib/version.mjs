@@ -17,6 +17,9 @@ import semver from "semver";
 /** An annotated normal release tag: `vMAJOR.MINOR.PATCH`, no prerelease, no build metadata. */
 export const NORMAL_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
+/** A normal version, as package metadata and the changelog carry it: `NORMAL_TAG` without the `v`. */
+export const NORMAL_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
 /**
  * A build tag: `vMAJOR.MINOR.PATCH-dev.N`, where MAJOR.MINOR.PATCH is the target normal version and N
  * is a positive integer with no leading zero. The only kind of tag the tag writer can create.

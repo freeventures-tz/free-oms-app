@@ -11,7 +11,7 @@ export type SimulatedPull = {
   title: string;
   body: string | null;
   labels: Array<{ name: string }>;
-  head: { sha: string; ref: string };
+  head: { sha: string; ref: string; repo?: { full_name: string } | null };
   base: { ref: string; repo: { full_name: string } };
 };
 
@@ -247,6 +247,17 @@ export async function startGitHubSimulator(repository: string) {
         const ref = `refs/tags/${decodeURIComponent(match[1])}`;
         const found = tagReferences().find((candidate) => candidate.ref === ref);
         return found ? { status: 200, body: found } : { status: 404, body: { message: "Not Found" } };
+      }
+      match = route("/git/ref/heads/(.+)", pathname);
+      if (match) {
+        const ref = `refs/heads/${decodeURIComponent(match[1])}`;
+        const found = requireGit()(["for-each-ref", "--format=%(refname)%09%(objectname)", ref])
+          .split("\n")
+          .map((line) => line.split("\t"))
+          .find(([name]) => name === ref);
+        return found
+          ? { status: 200, body: { ref, object: { sha: found[1], type: "commit" } } }
+          : { status: 404, body: { message: "Not Found" } };
       }
       match = route("/git/tags/([0-9a-f]{40})", pathname);
       if (match) {
