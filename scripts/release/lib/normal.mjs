@@ -737,7 +737,14 @@ async function readBackRelease(github, { name, report }) {
   };
 }
 
+/** The report of a publication stopped by `reasons`, each also shown on its gate when it has one. */
 function refusedPublication(report, reasons) {
+  for (const reason of reasons) {
+    const entry = report.gates.find((candidate) => candidate.gate === reason.gate);
+    if (!entry) continue;
+    entry.reasons.push(reason);
+    entry.state = "refused";
+  }
   report.decision = "refused";
   report.reasons = [...report.reasons, ...reasons];
   return report;

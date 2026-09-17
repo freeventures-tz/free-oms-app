@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { REPOSITORY, REPOSITORY_ID, TOKEN } from "./support/build-harness";
@@ -143,6 +145,23 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
       expect(lines, line).toContain(line);
     }
     expect(raw).not.toContain("walk-in sale");
+
+    // The Markdown the writer appends to its job summary.
+    const summary = release.fixture.writePlan("");
+    state.checkout.sync();
+    const markdown = await runController(
+      ["evaluate-release", "--repo", REPOSITORY, "--repo-id", String(REPOSITORY_ID), "--main-ref", "origin/main", "--path", state.checkout.dir,
+        "--sha", evidence.request.sha, "--version", "0.0.7", "--preparation-pr", "43", "--deployment", String(evidence.deployment),
+        "--review", evidence.review.reference, "--production-acceptance", evidence.acceptance.reference,
+        "--owner-approval", evidence.approval.reference, "--summary", summary],
+      { env: release.fixture.environment(null) },
+    );
+    expect(markdown.code, markdown.stderr).toBe(0);
+    expect(markdown.stdout).toContain("## Normal release `v0.0.7`: already published");
+    expect(markdown.stdout).toContain("| owner-approval | satisfied |");
+    expect(markdown.stdout).toContain("### Final release notes");
+    expect(markdown.stdout).toContain("### The Owner's approval");
+    expect(readFileSync(summary, "utf8")).toBe(markdown.stdout);
 
     // Nothing else moved: every other ref is as it was.
     const after = repo.refs().split("\n").filter((line) => !line.startsWith("refs/tags/v0.0.7 "));
@@ -370,6 +389,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
     expect(run.code).toBe(4);
     expect(run.json.decision).toBe("refused");
     expect(run.json.publication).toBe("none");
+    expect(release.gate(run.json, "main")).toMatchObject({ state: "refused", reasons: [expect.objectContaining({ code: "main_moved" })] });
     const reason = run.json.reasons.find((r) => r.code === "main_moved")!;
     expect(reason.detail).toContain(`GitHub's main is ${later}`);
     expect(reason.detail).toContain("is unreferenced and nothing is published");

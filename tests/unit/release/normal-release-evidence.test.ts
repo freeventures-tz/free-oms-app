@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { E2E_GATE, STATIC_GATE } from "./support/build-harness";
 import {
+  digestOf,
   INTRUDER,
   MAIN_POLICY,
   OWNER,
@@ -17,6 +18,7 @@ import {
   type PreparedRelease,
   type ReleaseRequest,
 } from "./support/release-harness";
+import { runController } from "./support/run-controller";
 
 /**
  * `evaluate-release` refusing what it cannot verify. Every case starts from complete, valid evidence and
@@ -66,11 +68,22 @@ describe("evaluate-release: every gate names what is missing", { timeout: 300_00
     const at = (user = REVIEWER, body = release.reviewBody(prepared), options: { pr?: number; time?: string } = {}) =>
       release.comment(options.pr ?? prepared.pr, user, body, options.time ?? TIMES.review);
 
-    const edited = at();
-    release.editComment(edited.id, release.reviewBody(prepared, { verdict: "READY" }).replace("Release evidence", "Edited evidence"));
-    const cases: Array<[string, string]> = [
+    // Edited after its reference was taken; edited before, so the reference has the new digest; and a
+    // reference whose digest was never this body's.
+    const editedAfter = at();
+    const changed = release.reviewBody(prepared).replace("Release evidence", "Edited evidence");
+    release.editComment(editedAfter.id, changed);
+    const editedBefore = at();
+    release.editComment(editedBefore.id, changed);
+    const unedited = at();
+    const wrongDigest = unedited.reference.replace(/[0-9a-f]{64}$/, "f".repeat(64));
+    const hidden = `Looks fine to me.\r\n<!--\r\n${release.reviewBody(prepared)}-->\r\n`;
+    const cases: Array<[string | string[], string]> = [
       ["evidence_wrong_issuer", at(OWNER).reference],
-      ["evidence_digest_mismatch", edited.reference],
+      [["evidence_digest_mismatch", "evidence_record_edited"], editedAfter.reference],
+      ["evidence_record_edited", `comment:${editedBefore.id}@${digestOf(changed)}`],
+      ["evidence_digest_mismatch", wrongDigest],
+      ["evidence_block_invalid", at(REVIEWER, hidden).reference],
       ["evidence_wrong_location", at(REVIEWER, release.reviewBody(prepared), { pr: 42 }).reference],
       ["evidence_field_mismatch", at(REVIEWER, release.reviewBody(prepared, { "reviewed-head": history.pr42.headSha })).reference],
       ["evidence_field_mismatch", at(REVIEWER, release.reviewBody(prepared, { "pull-request": 40 })).reference],
@@ -83,11 +96,16 @@ describe("evaluate-release: every gate names what is missing", { timeout: 300_00
       ["evidence_block_invalid", at(REVIEWER, "READY for #43, no block").reference],
       ["evidence_record_missing", `comment:5799999999@sha256:${"a".repeat(64)}`],
     ];
-    for (const [code, review] of cases) {
+    for (const [codes, review] of cases) {
+      const expected = (Array.isArray(codes) ? codes : [codes]).map((code) => `review:${code}`);
       const run = await release.evaluate(approved(prepared, evidence.request, { review }), { dispatch });
-      expect(run.code, `${code} ${run.stderr}`).toBe(4);
-      expect(release.unsatisfied(run.json), code).toEqual([`review:${code}`]);
+      expect(run.code, `${expected} ${run.stderr}`).toBe(4);
+      expect(release.unsatisfied(run.json), expected.join()).toEqual(expected);
     }
+    // An id beyond JavaScript's safe integers would be read as another comment; it is a usage error.
+    const unsafe = await release.evaluate({ ...evidence.request, review: `comment:12345678901234567@sha256:${"a".repeat(64)}` }, { dispatch });
+    expect(unsafe.code).toBe(2);
+    expect(unsafe.stderr).toContain("--review must be a record reference");
     expect(state.github.writes()).toEqual([]);
   });
 
@@ -394,6 +412,43 @@ describe("evaluate-release: every gate names what is missing", { timeout: 300_00
     expect(run.code).toBe(4);
     expect(release.unsatisfied(run.json)).toEqual(["main:main_moved"]);
     expect(state.github.writes()).toEqual([]);
+
+    // The Markdown report names the gate and its code, and prints no approval block while a gate is refused.
+    const markdown = await runController(
+      [
+        "evaluate-release",
+        "--repo",
+        "freeventures-tz/free-oms-app",
+        "--repo-id",
+        "1329892477",
+        "--main-ref",
+        "origin/main",
+        "--path",
+        state.checkout.dir,
+        "--sha",
+        evidence.request.sha,
+        "--version",
+        evidence.request.version,
+        "--preparation-pr",
+        String(evidence.request.preparationPr),
+        "--deployment",
+        String(evidence.request.deployment),
+        "--review",
+        evidence.request.review,
+        "--production-acceptance",
+        evidence.request.productionAcceptance,
+        "--owner-approval",
+        evidence.request.ownerApproval,
+      ],
+      { env: release.fixture.environment(null) },
+    );
+    expect(markdown.code).toBe(4);
+    expect(markdown.stdout).toContain("## Normal release `v0.0.7`: refused");
+    expect(markdown.stdout).toContain("| main | refused |");
+    expect(markdown.stdout).toContain("| dispatch | not checked |");
+    expect(markdown.stdout).toContain("- main · `main_moved` (refusal): ");
+    expect(markdown.stdout).not.toContain("### The Owner's approval");
+    expect(markdown.stdout).not.toContain("### Final release notes");
   });
 
   it("requires every final-merge CI gate of the exact commit: failed, skipped, unfinished and missing runs hold the release", async () => {

@@ -23,7 +23,7 @@ export const RECORD_SCHEMA = "1";
 export const AUTHORIZED_ACTIONS = "publish-normal-tag";
 
 /** `comment:<id>@sha256:<hex>`: a comment of this repository and the digest of its body. */
-export const RECORD_REFERENCE = /^comment:([1-9]\d{0,17})@(sha256:[0-9a-f]{64})$/;
+export const RECORD_REFERENCE = /^comment:([1-9]\d{0,15})@(sha256:[0-9a-f]{64})$/;
 
 /** The kinds a policy issuer is named for. The first two must not be the Owner's account. */
 export const ISSUED_KINDS = Object.freeze(["independent-review", "production-acceptance", "hosted-migration"]);
@@ -133,7 +133,8 @@ export function readPolicy(text, repository) {
 /** A record reference, as `{ id, digest }`, or null when the text is not one. */
 export function readReference(text) {
   const match = RECORD_REFERENCE.exec(String(text ?? ""));
-  return match ? { id: Number(match[1]), digest: match[2], text: match[0] } : null;
+  // An id past JavaScript's safe integers would be read as another comment than the one named.
+  return match && Number.isSafeInteger(Number(match[1])) ? { id: Number(match[1]), digest: match[2], text: match[0] } : null;
 }
 
 export function bodyDigest(body) {
@@ -145,8 +146,12 @@ export function formatBoundary({ before, after }) {
   return before === after ? `unchanged ${before ?? "absent"}` : `changed ${before ?? "absent"} ${after ?? "absent"}`;
 }
 
-/** The one `release-evidence` block in a body, as `{ fields }`, or `{ problem }`. */
+/**
+ * The one `release-evidence` block in a body, as `{ fields }`, or `{ problem }`. A body with an HTML comment
+ * is refused: GitHub does not show what is inside one, so a block there would count without being seen.
+ */
 export function readBlock(body) {
+  if (String(body).includes("<!--")) return { problem: "it contains an HTML comment, which GitHub does not show" };
   const lines = String(body).replace(/\r\n?/g, "\n").split("\n");
   const opens = lines.flatMap((line, index) => (line.trimEnd() === BLOCK_OPEN ? [index] : []));
   if (opens.length !== 1) {
@@ -250,6 +255,11 @@ export async function readRecord({ github, gate, kind, reference, issuer, owner,
 
   if (record.digest !== reference.digest) {
     refuse("evidence_digest_mismatch", `its body's digest is ${record.digest}; it was edited, or the reference names another comment`);
+  }
+  // GitHub keeps a comment's author when anyone with write access edits it, so only an unedited comment is
+  // its author's statement.
+  if (record.updatedAt !== record.createdAt) {
+    refuse("evidence_record_edited", `it was created at ${record.createdAt} and edited at ${record.updatedAt}; post a new record instead`);
   }
   if (issuer !== null && (record.author.id !== issuer.id || record.author.login !== issuer.login)) {
     refuse(

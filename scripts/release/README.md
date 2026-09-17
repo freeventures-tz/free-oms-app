@@ -863,11 +863,12 @@ The record codes:
 | --- | --- |
 | `evidence_record_missing` | No such comment exists in this repository |
 | `evidence_digest_mismatch` | The body's digest is not the reference's. The comment was edited, or the reference is wrong |
+| `evidence_record_edited` | The comment was edited after it was created. GitHub keeps the author when anyone with write access edits a comment, so an edited record is refused. Post a new one |
 | `evidence_issuer_unconfigured` | The policy names no issuer for this kind |
 | `evidence_issuer_not_independent` | The policy names the Owner's account as an independent issuer |
 | `evidence_wrong_issuer` | The comment's author is not the issuer, by login or id |
 | `evidence_wrong_location` | The comment is not on the preparation pull request |
-| `evidence_block_invalid` | The body has no single well-formed block of this kind |
+| `evidence_block_invalid` | The body has no single well-formed block of this kind, or it holds an HTML comment, which GitHub does not show |
 | `evidence_field_mismatch` | A value differs from the authoritative one. The detail names the key, the value and the expected value |
 | `evidence_verdict_not_accepted` | The verdict is not `READY` or `ACCEPTED` |
 | `evidence_out_of_order` | The record was created before what it depends on, or after what depends on it |
@@ -1200,3 +1201,9 @@ own policy, standing in for the Owner's future decision. It also runs main's pol
   repository, never with an OMS tag.
 - A release that changes migrations, on this repository. The controller has no view of hosted Supabase;
   it trusts a record from the named issuer, and main names none.
+- An existing `vX.Y.Z` made by hand with every stable field of a valid release. It is reported
+  `already_published`. Its evidence is verified as for any request, but the `Dispatch-Run` it cites is
+  checked only for its form.
+- A dispatch from another branch. That branch's copy of the workflow runs, and it can differ, but anyone
+  who can push that branch can already push a workflow. The controller refuses a run that is not on `main`,
+  which a changed copy could also change.
