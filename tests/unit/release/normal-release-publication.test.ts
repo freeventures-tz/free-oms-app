@@ -333,12 +333,17 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
     const { github, repo } = state;
     const { history, evidence, dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
-    // Between the reference's creation and its read-back, the name comes to point at something else.
+    // Between the reference's creation and its read-back, the name comes to point at another object: the same
+    // annotation, provenance and all, on another commit. Only the object and what it tags differ.
     github.faults.push({
       method: "GET",
       path: /\/git\/ref\/tags\/v0\.0\.7$/,
       when: "before",
-      effect: () => repo.git("tag", "-f", "-a", "v0.0.7", "-m", "Replaced.", history.pr42.mergeSha),
+      effect: () => {
+        const raw = repo.git("cat-file", "tag", "v0.0.7");
+        const annotation = raw.slice(raw.indexOf("\n\n") + 2);
+        repo.git("tag", "-f", "-a", "v0.0.7", "-m", annotation, history.pr42.mergeSha);
+      },
     });
     const run = await release.publish(plan, dispatch);
     expect(run.code).toBe(1);
