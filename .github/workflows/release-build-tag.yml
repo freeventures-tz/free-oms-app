@@ -114,10 +114,13 @@ jobs:
     name: Create the build tags that are owed
     needs: evaluate
     if: needs.evaluate.outputs.decision == 'eligible' && vars.RELEASE_BUILD_PUBLICATION == 'enabled'
+    # A caller grants at least what the shared writer's job asks for. Deployments are read only by the
+    # writer's normal operation.
     permissions:
       contents: write
       actions: read
       pull-requests: read
+      deployments: read
     uses: ./.github/workflows/release-tag-writer.yml
     with:
       operation: build

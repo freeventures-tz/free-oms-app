@@ -21,8 +21,8 @@
  * the ordinal from the tags as they stand, creates the annotated object and then a reference that is
  * never forced, and reports success only after reading both back from GitHub. A name GitHub refuses is
  * read back too: this commit's matching build tag is a no-op, anything else is a refusal, and no other
- * name is ever tried. Later publishers are meant to reach GitHub through this module, from inside the
- * one workflow job that holds the writer lock.
+ * name is ever tried. The write sequence itself is lib/tag-write.mjs's, which the normal-release publisher
+ * shares, from inside the same workflow job that holds the writer lock.
  */
 
 import {
@@ -40,9 +40,12 @@ import { FULL_SHA } from "./cli.mjs";
 import { ControllerError } from "./errors.mjs";
 import { STATUS_CONTEXT } from "./github.mjs";
 import { readAcceptedRange } from "./history.mjs";
+import { createAnnotatedTag } from "./tag-write.mjs";
 import { NORMAL_TAG, nextVersion, policyFor } from "./version.mjs";
 
 export const PLAN_SCHEMA = 1;
+
+const BUILD_TAG_WRITE = Object.freeze({ noun: "build tag", publication: "a published build" });
 
 /** The only value of RELEASE_BUILD_PUBLICATION that lets anything be written. */
 export const ACTIVATED = "enabled";
@@ -435,43 +438,16 @@ export async function publishCommit({ git, github, makeTagWriter, repository, re
   const { name, ordinal } = report.tag;
   const message = renderBuildAnnotation({ tag: name, repository, sha, target: report.target, ci: report.ci });
 
-  let object;
-  try {
-    object = await writer.createTagObject({ tag: name, message, commit: sha });
-  } catch (error) {
-    if (!(error instanceof ControllerError)) throw error;
-    throw new ControllerError("tag_object_not_created", `no build tag was published for ${sha}: ${error.message}`);
-  }
+  const { created, object, confirmed } = await createAnnotatedTag({
+    writer,
+    name,
+    message,
+    sha,
+    readBack: (tag) => readBack(github, { name: tag, report }),
+    what: BUILD_TAG_WRITE,
+  });
 
-  let reference;
-  try {
-    reference = await writer.createTagReference({ tag: name, object: object.sha });
-  } catch (error) {
-    if (!(error instanceof ControllerError)) throw error;
-    throw new ControllerError(
-      "tag_reference_unconfirmed",
-      `tag object ${object.sha} for ${name} exists, but its reference was not confirmed (${error.message}). An unreferenced tag object is not a published build; a retry reads the references again`,
-    );
-  }
-
-  let confirmed;
-  try {
-    confirmed = await readBack(github, { name, report });
-  } catch (error) {
-    if (!(error instanceof ControllerError)) throw error;
-    throw new ControllerError(
-      "tag_readback_failed",
-      `${name} could not be read back (${error.message}); nothing is reported as published, and a retry confirms it from GitHub`,
-    );
-  }
-
-  if (!reference.created) {
-    if (confirmed.state === "missing") {
-      throw new ControllerError(
-        "tag_reference_unconfirmed",
-        `GitHub refused refs/tags/${name} and no such reference exists; tag object ${object.sha} is unreferenced and nothing is published`,
-      );
-    }
+  if (!created) {
     if (confirmed.state === "matches") {
       report.tag = null;
       report.existingTag = { name, object: confirmed.object, ciRun: confirmed.ciRun, ciAttempt: confirmed.ciAttempt };

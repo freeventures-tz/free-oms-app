@@ -266,6 +266,83 @@ export async function prepareRelease({ git, github, readWorkingFile, repository,
   return finish(dryRun ? "would_prepare" : "prepared");
 }
 
+const RELEASE_HEADING = /^## \[([^\]]*)\] — (\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * Checks that `sha` is the merge of preparation `pr` and that what it merged agrees with history, exactly as
+ * `prepare-release` checks a merged preparation: the package version, both lockfile fields, the changelog
+ * heading and generated block, and the retained title. `base` and `merges` are the accepted range ending at
+ * `sha`. A normal release uses this before its tag is published; the release date is read from the heading.
+ *
+ * Returns the refusals, and when there are none the version, the release date and the final notes, which list
+ * every accepted merge once, the preparation's own merge included.
+ */
+export function verifyMergedPreparation({ git, repository, sha, base, merges, pr }) {
+  const result = { reasons: [], version: null, policy: null, highestChange: null, releaseDate: null, candidateMetadata: null, notes: null, preparation: null };
+  const at = { commit: sha, pr };
+  const candidate = readCommitMetadata(git, sha);
+  result.candidateMetadata = describeMetadata(candidate, base.version);
+  if (merges.length === 0) {
+    result.reasons.push(refusal("preparation_not_at_target", `nothing merged after ${base.tag}, so ${sha} carries no preparation`, at));
+    return result;
+  }
+  const highest = highestChange(merges.map((merge) => merge.change));
+  const { version } = nextVersion({ baseVersion: base.version, highest, stableContractAcceptance: null });
+  Object.assign(result, { version, policy: policyFor(base.version), highestChange: highest });
+
+  const last = merges[merges.length - 1];
+  result.preparation = { pr: last.pr, reviewedHead: last.headSha, mergeSha: last.mergeSha, title: last.title };
+  if (last.mergeSha !== sha) {
+    result.reasons.push(refusal("preparation_not_at_target", `${sha} is not the merge of a pull request; its last accepted merge is #${last.pr}`, at));
+    return result;
+  }
+  if (last.pr !== pr) {
+    result.reasons.push(refusal("preparation_pr_mismatch", `${sha} is the merge of #${last.pr}, not of preparation #${pr}`, at));
+    return result;
+  }
+  const problems = candidateProblems(candidate, { base, version, sha });
+  if (problems.length > 0) {
+    result.reasons.push(...problems);
+    return result;
+  }
+  const newest = candidate.changelog.sections[0];
+  if (candidate.packageVersion === base.version || newest.marker?.preparation !== pr) {
+    result.reasons.push(
+      refusal(
+        "preparation_not_at_target",
+        `${sha} merged #${pr}, but its metadata carries no preparation of it: the package version is ${candidate.packageVersion} and the newest changelog section names preparation ${newest.marker?.preparation ?? "none"}`,
+        at,
+      ),
+    );
+    return result;
+  }
+  const heading = RELEASE_HEADING.exec(newest.heading);
+  if (!heading) {
+    result.reasons.push(refusal("prepared_changelog_mismatch", `its changelog heading ${JSON.stringify(newest.heading)} is not "## [X.Y.Z] — YYYY-MM-DD"`, at));
+    return result;
+  }
+  result.releaseDate = heading[2];
+  const range = { merges };
+  result.reasons.push(...preparedProblems({ candidate, range, base, version, policy: result.policy, highest, date: result.releaseDate, sha }));
+  if (result.reasons.length > 0) return result;
+
+  result.notes = renderReleaseNotes({
+    status: "calculated",
+    repository,
+    sha,
+    base,
+    policy: result.policy,
+    highestChange: highest,
+    version,
+    stableContractAcceptance: null,
+    candidateMetadata: result.candidateMetadata,
+    merges,
+    proposed: [],
+    preparation: null,
+  });
+  return result;
+}
+
 /** Why the candidate's committed metadata cannot be a starting point for this target. */
 function candidateProblems(candidate, { base, version, sha }) {
   const at = { commit: sha };

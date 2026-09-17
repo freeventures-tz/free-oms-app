@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { GitHubSimulator, SimulatedPull } from "./github-simulator";
 
@@ -85,6 +85,7 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
 
     /** Commits one file with exact contents. */
     commitFile(name: string, contents: string, message: string) {
+      mkdirSync(dirname(join(dir, name)), { recursive: true });
       writeFileSync(join(dir, name), contents);
       git("add", "--", name);
       git("commit", "-q", "-m", message);
@@ -93,7 +94,10 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
 
     /** Commits several files with exact contents, in one commit. */
     commitFiles(contents: Record<string, string>, message: string) {
-      for (const [name, text] of Object.entries(contents)) writeFileSync(join(dir, name), text);
+      for (const [name, text] of Object.entries(contents)) {
+        mkdirSync(dirname(join(dir, name)), { recursive: true });
+        writeFileSync(join(dir, name), text);
+      }
       git("add", "--", ...Object.keys(contents));
       git("commit", "-q", "-m", message);
       return git("rev-parse", "HEAD");

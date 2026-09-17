@@ -1,7 +1,7 @@
 name: Release tag writer
 
 # The one job in this repository that can create tags. Every publisher calls this workflow instead of
-# holding its own write permission: build tags now, and in a later slice of issue #36 the Owner-approved
+# holding its own write permission: `build`, the reconciled build tags, and `normal`, the Owner-approved
 # normal release. So they all wait on one concurrency group, and none of them can race another.
 #
 # The group never cancels the writer that is running, and `queue: max` keeps up to 100 callers pending
@@ -11,20 +11,23 @@ name: Release tag writer
 # status is never decided while a tag is being created.
 #
 # The job installs nothing and runs no application code. It checks the digest of the bundle the
-# calling run's read-only job prepared, and runs main's controller with it. The controller reconciles
-# again from Git and the API, refuses a plan that no longer matches, and publishes each eligible commit
-# in turn, oldest first: it allocates the ordinal, creates the tag object and then a reference that is
-# never forced, and reads both back. It writes nothing unless RELEASE_BUILD_PUBLICATION is exactly
-# `enabled`.
+# calling run's read-only job prepared, and runs main's controller with it. For `build`, the controller
+# reconciles again from Git and the API, refuses a plan that no longer matches, and publishes each eligible
+# commit in turn, oldest first: it allocates the ordinal, creates the tag object and then a reference that
+# is never forced, and reads both back. It writes nothing unless RELEASE_BUILD_PUBLICATION is exactly
+# `enabled`. For `normal`, it evaluates every gate of the release again, checks that main is still the
+# approved commit before the object and before the reference, creates both the same way and reads them
+# back. It writes nothing unless RELEASE_NORMAL_PUBLICATION is exactly `enabled`.
 #
 # `contents: write` is GitHub's narrowest permission that can create a tag, and it is broader than
 # that: the same token could push a branch or change a file. The boundary is what this job runs — one
-# controller command, whose writer can only create a build-tag object and a new `refs/tags/` reference.
+# controller command, whose writer can only create a tag object and a new `refs/tags/` reference, of the
+# one kind of tag its operation names.
 on:
   workflow_call:
     inputs:
       operation:
-        description: What to write. `build`, the reconciled build tags, is the only operation so far.
+        description: What to write. `build`, the reconciled build tags, or `normal`, the Owner-approved normal release.
         required: true
         type: string
       bundle-digest:
@@ -38,6 +41,9 @@ on:
       tags:
         description: The build tags created, separated by spaces.
         value: ${{ jobs.write.outputs.tags }}
+      tag:
+        description: The normal tag published, or found already published.
+        value: ${{ jobs.write.outputs.tag }}
 
 permissions: {}
 
@@ -50,13 +56,16 @@ jobs:
       group: release-tag-writer
       cancel-in-progress: false
       queue: max
+    # Deployments are read to check a normal release's production deployment.
     permissions:
       contents: write
       actions: read
       pull-requests: read
+      deployments: read
     outputs:
       decision: ${{ steps.write.outputs.decision }}
       tags: ${{ steps.write.outputs.tags }}
+      tag: ${{ steps.write.outputs.tag }}
     steps:
       # The checkout runs after the lock is held, so the tags it fetches are the state to write against.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -83,12 +92,20 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           OPERATION: ${{ inputs.operation }}
           RELEASE_BUILD_PUBLICATION: ${{ vars.RELEASE_BUILD_PUBLICATION }}
+          RELEASE_NORMAL_PUBLICATION: ${{ vars.RELEASE_NORMAL_PUBLICATION }}
         run: |
           case "$OPERATION" in
             build)
               node scripts/release/controller.mjs publish-reconciled-builds \
                 --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
                 --plan "$RUNNER_TEMP/bundle/build-plan.json" --main-ref origin/main \
+                --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+              ;;
+            normal)
+              node scripts/release/controller.mjs publish-release \
+                --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" \
+                --plan "$RUNNER_TEMP/bundle/release-plan.json" --main-ref origin/main \
+                --dispatch-run-id "$GITHUB_RUN_ID" --dispatch-run-attempt "$GITHUB_RUN_ATTEMPT" \
                 --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
               ;;
             *)

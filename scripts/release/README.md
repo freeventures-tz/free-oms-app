@@ -1,7 +1,7 @@
 # Release controller
 
 This is the release automation from
-[issue #36](https://github.com/freeventures-tz/free-oms-app/issues/36). So far it has four parts:
+[issue #36](https://github.com/freeventures-tz/free-oms-app/issues/36). It has five parts:
 
 - **Preview** ([#37](https://github.com/freeventures-tz/free-oms-app/issues/37)). It classifies
   pull-request titles and, for one exact accepted merge, previews the next version and the complete
@@ -17,11 +17,15 @@ This is the release automation from
   normal version into `package.json`, the lockfile and `CHANGELOG.md` on a preparation branch, for a
   reviewed pull request, and checks that preparation once it has merged. It commits, pushes and
   publishes nothing.
+- **Normal release** ([#41](https://github.com/freeventures-tz/free-oms-app/issues/41)). When the Owner
+  dispatches it, it checks the approval and production evidence for one exact preparation merge against
+  GitHub, then publishes one immutable annotated tag `vX.Y.Z` through the same writer as build tags.
 
-**Build-tag publication is off.** Nothing is written to GitHub unless the repository variable
-`RELEASE_BUILD_PUBLICATION` is exactly `enabled`, and this change does not set it. Normal-release
-publication belongs to a later slice of #36
-([#41](https://github.com/freeventures-tz/free-oms-app/issues/41)) and does not exist yet.
+**Both publishers are off.** Build tags are written only when the repository variable
+`RELEASE_BUILD_PUBLICATION` is exactly `enabled`, and normal tags only when `RELEASE_NORMAL_PUBLICATION`
+is. Neither variable exists. On `main`, normal publication is also held by its own evidence policy, which
+names no independent issuer yet: see
+[Decisions the contract still needs](#decisions-the-contract-still-needs).
 
 Issue #36 owns the policy: the compatibility contract, the version table, the accepted-merge rules and
 the publication contract. This file covers running the commands and what their tests prove.
@@ -351,6 +355,80 @@ Refusals name what to fix:
 The command does not take `--accept-stable-contract`. Preparing `1.0.0` needs its own Owner decision on
 how that acceptance is recorded and checked.
 
+### `evaluate-release`
+
+Read-only. It checks every gate of a normal-release request and reports each one. Its JSON is the plan the
+tag writer receives. [Normal-release evidence contract](#normal-release-evidence-contract) defines the
+gates and the records.
+
+```bash
+git fetch origin --tags --prune
+```
+
+```bash
+GITHUB_TOKEN="<read token>" node scripts/release/controller.mjs evaluate-release --repo freeventures-tz/free-oms-app --sha <preparation merge> --version <X.Y.Z> --preparation-pr <number> --deployment <deployment id> --review <record> --production-acceptance <record> --owner-approval <record> --hosted-migration none
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--sha`, `--version`, `--preparation-pr`, `--deployment` | The request. A malformed value is a usage error |
+| `--review`, `--production-acceptance`, `--owner-approval` | Record references, `comment:<id>@sha256:<hex>` |
+| `--hosted-migration` | A record reference, or `none` (the default) when the migration tree is unchanged |
+| `--dispatch-run-id`, `--dispatch-run-attempt` | The Owner's dispatch, given together. Without them the `dispatch` gate is `not_checked`, which only a local evaluation may leave |
+| `--repo-id`, `--main-ref`, `--path`, `--format`, `--outputs`, `--summary` | As for `evaluate-build`. `--outputs` appends `decision`, `sha` and `tag` |
+
+The report lists each gate as `satisfied`, `not_required`, `not_checked`, `pending`, `failed` or
+`refused`, with the reasons, the records it read with their authors and digests, the deployment, CI and
+the final release notes. When every gate but the approval is satisfied, it also prints the approval block
+the evidence calls for.
+
+| Decision | Exit | Meaning |
+| --- | --- | --- |
+| `eligible` | 0 | Every gate is satisfied. The tag name is provisional until the writer confirms it |
+| `already_published` | 0 | `vX.Y.Z` exists at the commit with this release's provenance, and its evidence still verifies. Main may have moved on since |
+| `pending` | 3 | CI or the deployment has not finished, or history awaits an Owner decision |
+| `refused` | 4 | A gate is refused. Each reason names its gate and code |
+| `failed` | 5 | A required final-merge CI gate is unsatisfied |
+
+### `publish-release`
+
+```bash
+node scripts/release/controller.mjs publish-release --repo freeventures-tz/free-oms-app --repo-id <id> --plan release-plan.json --dispatch-run-id <run> --dispatch-run-attempt <attempt>
+```
+
+The tag writer runs this for operation `normal`, with the run and attempt from the runner. Do not run it
+against this repository with a token that can write. It:
+
+1. Refuses a plan that is not an `evaluate-release` plan for this repository or for this run
+   (`plan_invalid`), and a plan that is not eligible (`plan_not_eligible`), before reading anything.
+2. Evaluates the request again, with the current attempt as the dispatch. A tag that already is this
+   release is read back from GitHub and reported `already_published`, with no write. Any other decision
+   than `eligible` is reported as it stands.
+3. Refuses `plan_drift` if the version, classification, base, notes digest, reviewed head, release date,
+   schema boundary or any record digest differs from the plan.
+4. Stops with exit 6, `publication_disabled`, unless `RELEASE_NORMAL_PUBLICATION` is exactly `enabled`.
+   No writer client exists before this point, and `RELEASE_BUILD_PUBLICATION` does not count.
+5. Reads GitHub's `main` again. It creates the annotated tag object, reads `main` again, and only then
+   creates `refs/tags/vX.Y.Z` without force. If `main` moved at either point, it refuses `main_moved`.
+   An object without a reference is not a publication, and a newer `main` is never tagged.
+6. Reads the reference and the object back. It reports `published` only when the tag peels to the
+   commit and carries this release's provenance, CI attempt and dispatch run.
+
+| Situation | Result |
+| --- | --- |
+| The object is created but the reference is not confirmed | Exit 1, `tag_reference_unconfirmed`. A retry offers the name again |
+| The reference is created but the response or the read-back is lost | Exit 1. A retry finds the tag and reports `already_published` |
+| GitHub already holds `vX.Y.Z` | Read back. This release is `already_published`. Anything else is `normal_tag_name_collision` (exit 4), and nothing moves |
+| `main` moved | `main_moved` (exit 4). Nothing is referenced |
+
+The annotation begins `Release vX.Y.Z of <repository>`. Its fields are `Release-Controller-Schema`,
+`Release-Kind`, `Repository`, `Commit`, `Version`, `Classification`, `Release-Base`, `Notes-Digest`,
+`Preparation-PR`, `Reviewed-Head`, `Release-Date`, `Schema-Boundary`, `Deployment`, the four record
+references, `Authorized-Actions`, `Owner` and `CI-Workflow`, which a retry must reproduce exactly, then
+`CI-Run`, `CI-Attempt` and `Dispatch-Run`. The cited CI attempt must itself have passed. The annotation
+lists the CI evidence and every accepted merge by number, sha, type and change, the preparation's own merge
+included. It leaves out pull-request titles, which the notes digest binds.
+
 ### `runtime-dependencies`
 
 ```bash
@@ -364,7 +442,7 @@ evaluation job bundles exactly these, so the writing jobs never install anything
 
 | Status | Meaning |
 | --- | --- |
-| 0 | Valid, calculated, eligible, tagged, already tagged, prepared, already prepared, or nothing to do |
+| 0 | Valid, calculated, eligible, tagged, already tagged, published, already published, prepared, already prepared, or nothing to do |
 | 1 | Git or GitHub failed, or a write was not confirmed. Nothing was guessed |
 | 2 | Usage error |
 | 3 | Pending: an Owner decision, or final-merge CI that has not finished |
@@ -631,9 +709,198 @@ last normal tag from the preparation's merge until the normal release is publish
    again from step 2 with a new pull request. That pull request lists the first preparation as an
    accepted merge.
 
-The preparation's merge is an accepted merge like any other, so it gets its own build tag once
-publication is activated. Publishing the normal tag `vX.Y.Z` is issue #41's, and the Owner's decision.
-This slice does not publish it.
+The preparation's merge is an accepted merge like any other, so it gets its own build tag once build
+publication is activated. Publish that build tag before the normal tag: a commit that already is a normal
+release is `not_applicable` and never gets one afterwards.
+
+## Publishing a normal release
+
+This is the procedure for a future release, after the preparation has merged. Nobody has run it on this
+repository, and on `main` it stops at the `review` and `production-acceptance` gates until the Owner
+names their issuers. Each step keeps its own approval: a READY, green CI or an eligible evaluation grants
+none.
+
+1. **Before the merge.** The independent reviewer posts the `independent-review` record on the
+   preparation pull request for its exact head. If the release changes `supabase/migrations`, the reviewed
+   migrations reach hosted Supabase first, and the hosted-migration issuer posts its record before the
+   first migration merges.
+2. **The merge.** The Owner authorises the exact merge. Final-merge CI runs on it, and Vercel deploys it to
+   production.
+3. **Production verification.** The production-acceptance issuer verifies Vercel's production deployment
+   of the merge and posts the `production-acceptance` record on the preparation pull request, naming the
+   deployment's GitHub id. The id is on the merge commit's deployments:
+
+   ```bash
+   gh api "repos/freeventures-tz/free-oms-app/deployments?sha=<merge sha>&environment=Production" --jq '.[] | {id, sha, created_at, creator: .creator.login}'
+   ```
+
+4. **The approval.** Anyone may run `evaluate-release` read-only with the three references and a
+   placeholder approval. With every other gate satisfied, it prints the approval block and each record's
+   digest. The Owner reads that block, and if the Owner approves, posts it personally on the preparation
+   pull request, with any prose above it. To learn the new comment's digest, evaluate again naming the
+   comment with any digest: the report refuses `evidence_digest_mismatch` and shows the digest GitHub's
+   body has. Read the body before copying that digest; the digest binds exactly those bytes.
+
+5. **The dispatch.** The Owner starts it personally from `main`, with the same values:
+
+   ```bash
+   gh workflow run release-normal-tag.yml --repo freeventures-tz/free-oms-app --ref main -f sha=<merge sha> -f version=<X.Y.Z> -f preparation-pr=<number> -f deployment=<id> -f review=<record> -f production-acceptance=<record> -f owner-approval=<record> -f hosted-migration=none
+   ```
+
+   The job summary names every gate. While `RELEASE_NORMAL_PUBLICATION` is not `enabled`, the run ends
+   there. A re-run must be started by the Owner too.
+6. **Afterwards.** The tag is `vX.Y.Z`. Main may move on; a later evaluation of the same request reports
+   `already_published`. The next preparation calculates from the new tag.
+
+## Normal-release evidence contract
+
+A normal tag `vX.Y.Z` is published only by `publish-release`, inside the tag writer's locked job, for a
+request the Owner started. This section is the contract that command enforces. Issue #36 owns the policy
+behind it.
+
+Four rules apply to every gate:
+
+- **Authority comes from a source the controller reads, never from the request.** The request names what
+  to check. A green check, a label, a URL, a calculated version or a `true` proves nothing on its own.
+- **A digest proves which bytes were supplied, not that they are true.** A record also needs the right
+  issuer, the right place, the right fields and the right order in time.
+- **Every record binds its subject exactly**: the repository, the version, the commit or reviewed head,
+  and whatever else it approves.
+- **An unavailable gate refuses.** There is no override. The refusal names the gate and what is missing.
+
+### The request
+
+The Owner dispatches `release-normal-tag.yml` from `main` with these inputs. Each reaches the controller
+as an environment variable.
+
+| Input | Value |
+| --- | --- |
+| `sha` | The exact merge to tag: the merge of the preparation pull request |
+| `version` | The normal version, `X.Y.Z` |
+| `preparation-pr` | The preparation pull request's number |
+| `deployment` | The GitHub deployment id of the Vercel production deployment of `sha` |
+| `review` | The independent READY record |
+| `production-acceptance` | The production-verification acceptance record |
+| `owner-approval` | The Owner's release approval record |
+| `hosted-migration` | The hosted migration record, or `none` when the migration tree is unchanged |
+
+A record reference is `comment:<id>@sha256:<hex>`: an issue or pull-request comment in this repository,
+and the SHA-256 of its body exactly as GitHub's REST API returns it, line endings included.
+`evaluate-release` prints the digest of every record it reads.
+
+### Evidence records
+
+A record is a comment whose body holds exactly one fenced block with the info string `release-evidence`.
+Prose outside the block is ignored. Inside it, each line is `key: value`. Every key the kind requires
+appears once, and no other key appears.
+
+````markdown
+```release-evidence
+schema: 1
+kind: independent-review
+repository: freeventures-tz/free-oms-app
+pull-request: 43
+reviewed-head: <40-character sha>
+version: 0.0.7
+verdict: READY
+```
+````
+
+| Kind | Keys besides `schema`, `kind` and `repository` | Where |
+| --- | --- | --- |
+| `independent-review` | `pull-request`, `reviewed-head`, `version`, `verdict: READY` | The preparation pull request |
+| `production-acceptance` | `version`, `commit`, `deployment`, `verdict: ACCEPTED` | The preparation pull request |
+| `hosted-migration` | `schema-boundary: changed <before> <after>`, `migration-first: applied-before-merge`, `hosted-preservation: verified` | Any issue or pull request of this repository |
+| `owner-release-approval` | `version`, `tag`, `commit`, `pull-request`, `reviewed-head`, `release-date`, `schema-boundary`, `deployment`, `review`, `production-acceptance`, `hosted-migration`, `authorized-actions: publish-normal-tag` | The preparation pull request |
+
+A schema boundary is `unchanged <tree>` or `changed <before> <after>`. Each tree is the Git tree id of
+`supabase/migrations`, or `absent`. The approval's `review`, `production-acceptance` and
+`hosted-migration` values are record references, or `none` for an unchanged boundary. When every other gate
+passes, `evaluate-release` prints the approval block the evidence calls for. The Owner reads it and posts it.
+
+### The release-evidence policy
+
+`scripts/release/release-evidence-policy.json` names who may issue each record. The controller reads it
+from Git at the requested `sha`, so the policy that governs a release is the one that release carries.
+The writer also requires `main` to be `sha`, so that policy is the running controller's own.
+Changing the policy is a reviewed merge.
+
+| Key | Meaning |
+| --- | --- |
+| `owner` | The Owner's GitHub login and numeric id. Only this account may dispatch, re-run or approve |
+| `issuers.independent-review`, `issuers.production-acceptance` | The account that issues each record, as login and id, or `null`. It must not be the Owner's account |
+| `issuers.hosted-migration` | The account that attests hosted migration evidence, or `null` |
+| `vercel` | The Vercel GitHub App's bot login and id, the production environment name, and the Vercel project and team that production deployment URLs name |
+
+A `null` issuer refuses its gate with `evidence_issuer_unconfigured`. That is the state on `main` for all
+three issuers. See [Decisions the contract still needs](#decisions-the-contract-still-needs).
+
+### Gate by gate
+
+`evaluate-release` checks every gate and reports each as `satisfied`, `refused`, `pending` or
+`not_checked`. `publish-release` evaluates everything again under the writer lock, and checks `main`
+again immediately before it creates the tag object and again before the reference.
+
+| Gate | Authoritative source | Trusted identity | Subject and reference | Validation | Freshness and replay | Refusals |
+| --- | --- | --- | --- | --- | --- | --- |
+| `dispatch` | GitHub's record of the running workflow run and its current attempt | The policy's `owner`, by login and id | Run id and attempt, from the runner | `release-normal-tag.yml` of this repository, `workflow_dispatch`, branch `main`, head `sha`. The run's `actor` and the attempt's `triggering_actor` are the Owner | The attempt is the run's latest. A re-run by anyone else is refused | `dispatch_run_invalid`, `dispatch_actor_not_owner`, `dispatch_triggering_actor_not_owner` |
+| `policy` | Git at `sha` | A reviewed merge | `scripts/release/release-evidence-policy.json` | Schema 1, this repository, a complete owner and Vercel entry | Read again on every run | `release_policy_missing`, `release_policy_invalid` |
+| `history` | Git, and GitHub's pull-request associations | GitHub | `sha` on main's first-parent line | As `preview`, from `sha`'s own ancestral release. A normal tag at `sha` itself is not a base | The checkout's tags must be GitHub's | `tag_state_out_of_date` (exit 1), and the `preview` codes |
+| `main` | GitHub's `refs/heads/main`, and `--main-ref` | GitHub | `refs/heads/main` | Both equal `sha`. A newer main never stands in for the approved `sha` | Checked again under the lock, before the object and before the reference | `main_moved` |
+| `version` | The calculation from history, and the tags GitHub holds | — | `version` and the tag `vX.Y.Z` | `version` is the calculated version. During 0.x, `1.0.0` is refused. No other normal tag names `sha`, and no normal tag is at or above `version` | An existing `vX.Y.Z` that matches in full is `already_published` | `version_mismatch`, `stable_contract_acceptance_undecided`, `target_already_released`, `normal_version_not_newest`, `normal_tag_conflict` |
+| `preparation` | Git objects at `sha`, and the preparation's pull-request association | A reviewed merge | `preparation-pr`, its merge `sha` and its reviewed head | The preparation is the last accepted merge and is `sha`. Its merge's second parent is the head GitHub records. The package version, both lockfile fields, the changelog heading and generated block, and the retained title all agree, exactly as `prepare-release` checks a merged preparation. The final notes list every accepted merge once, the preparation included | A preparation made stale by a later merge is refused | `preparation_not_at_target`, `preparation_pr_mismatch`, and the `prepare-release` codes |
+| `schema-boundary` | Git trees | — | The `supabase/migrations` tree at the base release's commit and at `sha` | Equal trees are `unchanged`, proved from Git. Different trees need a `hosted-migration` record | — | `hosted_migration_record_required`, `hosted_migration_record_unexpected` |
+| `hosted-migration` | The comment GitHub holds | `issuers.hosted-migration` | Comment id and body digest | The kind's keys. Its boundary is the computed one | Created before every accepted merge in the range that changed the tree was merged. So all of a release's migrations reach hosted Supabase before the first of them merges | The `evidence_` codes below |
+| `ci` | The Actions API | This repository's `ci.yml` | Every final-merge CI run of `sha` | The four required gates, under the rules in [Final-merge CI](#final-merge-ci) | The latest attempt decides | The final-merge CI codes. `ci_incomplete` is pending, a failed gate exits 5 |
+| `deployment` | The Deployments API | The policy's Vercel bot, by login and id | `deployment` | The policy's environment, `sha`, and a URL of the policy's Vercel project and team. It is the newest deployment that bot made in that environment, and its latest status is `success` | A newer production deployment supersedes it | `deployment_missing`, `deployment_wrong_creator`, `deployment_wrong_environment`, `deployment_wrong_commit`, `deployment_wrong_project`, `deployment_superseded`, `deployment_not_successful`; `deployment_in_progress` is pending |
+| `review` | The comment GitHub holds | `issuers.independent-review` | Comment id and body digest | The kind's keys. The pull request is `preparation-pr`, the head is its reviewed head, and the version is `version` | Created no later than the preparation merged. It names a head that did not exist earlier. A READY for any other head or pull request, #40's included, is refused | The `evidence_` codes |
+| `production-acceptance` | The comment GitHub holds | `issuers.production-acceptance` | Comment id and body digest | The kind's keys. The commit is `sha` and the deployment is `deployment` | Created after the deployment's `success` status | The `evidence_` codes |
+| `owner-approval` | The comment GitHub holds | The policy's `owner` | Comment id and body digest | The kind's keys, each equal to the request and to the computed release. It names the other records by the same references as the request | Created after the production acceptance. It names records and a merge that did not exist earlier, so it cannot approve an earlier or later release | The `evidence_` codes |
+
+The record codes:
+
+| Code | Refused because |
+| --- | --- |
+| `evidence_record_missing` | No such comment exists in this repository |
+| `evidence_digest_mismatch` | The body's digest is not the reference's. The comment was edited, or the reference is wrong |
+| `evidence_issuer_unconfigured` | The policy names no issuer for this kind |
+| `evidence_issuer_not_independent` | The policy names the Owner's account as an independent issuer |
+| `evidence_wrong_issuer` | The comment's author is not the issuer, by login or id |
+| `evidence_wrong_location` | The comment is not on the preparation pull request |
+| `evidence_block_invalid` | The body has no single well-formed block of this kind |
+| `evidence_field_mismatch` | A value differs from the authoritative one. The detail names the key, the value and the expected value |
+| `evidence_verdict_not_accepted` | The verdict is not `READY` or `ACCEPTED` |
+| `evidence_out_of_order` | The record was created before what it depends on, or after what depends on it |
+
+### The shared Owner login
+
+GitHub cannot tell a person from an agent that uses the same credentials. Claude Code works through the
+Owner's `freeventures-tz` login, and ChatGPT has posted through it too. So a dispatch, a re-run or an
+approval from that account proves only that the account acted. The written human approval remains
+mandatory: the Owner reads the approval block, posts it, and starts the dispatch personally. No agent posts
+an approval or dispatches a release. `evaluate-release` reports `performed_via_github_app` for each record,
+but a record without it can still come from an agent.
+
+### Decisions the contract still needs
+
+Until the Owner decides these, normal publication in this repository refuses at the named gates. The
+fixtures prove the mechanism with issuers they configure themselves.
+
+1. **The independent issuer of READY and of production acceptance.** Reviews live in the local workspace,
+   and ChatGPT has no GitHub identity apart from the Owner's. Independence cannot be shown by the account
+   that posts. The Owner must name a distinct account or GitHub App, or decide some other verifiable
+   mechanism, such as a signing key. Gates: `review`, `production-acceptance`.
+2. **Evidence for a release that changes migrations.** Nothing on GitHub attests what hosted Supabase
+   holds, and the controller has no production credential and gets none. The Owner must name an issuer for
+   `hosted-migration` records. Until then a release whose migration tree changed is refused. A release with
+   an unchanged tree is proved from Git alone. Gate: `hosted-migration`.
+3. **Stable-contract acceptance.** Neither `prepare-release` nor `publish-release` accepts
+   `--accept-stable-contract`. A request for `1.0.0` during 0.x is refused with
+   `stable_contract_acceptance_undecided`.
+4. **The configured identities.** The policy names `freeventures-tz` (313431047) as the Owner, and
+   `vercel[bot]` (35613825), environment `Production`, project `free-oms`, team `freeventures-tz` for
+   Vercel. These were read from this repository's own records on 17 September 2026. The Reviewer confirms
+   them.
 
 ## Workflows and permissions
 
@@ -648,7 +915,16 @@ request cannot change it.
 | `status` | `statuses: write`; `contents`, `actions` and `pull-requests`: read, for the evaluation | Publication is activated | Waits on the tag writer's lock, checks the bundle digest, then runs `write-reconciled-statuses` |
 
 `.github/workflows/release-tag-writer.yml` is callable only. Its one job is the only job in the
-repository that can create tags. Later publishers call it instead of holding their own write permission.
+repository that can create tags. Operation `build` runs `publish-reconciled-builds`, and operation
+`normal` runs `publish-release`. Its job reads deployments for the normal operation, so both callers grant
+`deployments: read`.
+
+`.github/workflows/release-normal-tag.yml` runs only on `workflow_dispatch`, and only from `main`.
+
+| Job | Permissions | Runs when | What it does |
+| --- | --- | --- | --- |
+| `evaluate` | `contents`, `actions`, `pull-requests`, `deployments`: read | Dispatched from `main` | Installs the pinned dependencies with lifecycle scripts disabled, then runs `evaluate-release` with the inputs as environment variables and the runner's run id and attempt as the dispatch. A decision other than `eligible` or `already_published` fails the job. While publication is activated and the plan is eligible, it bundles the plan and `runtime-dependencies` and outputs the digest |
+| `publish` | Grants `contents: write` to the writer | The plan is `eligible` and `RELEASE_NORMAL_PUBLICATION` is `enabled` | Calls `release-tag-writer.yml` with operation `normal` |
 
 - **One lock.** The job's concurrency group is `release-tag-writer`, with `cancel-in-progress: false`
   and `queue: max`. As GitHub documented on 14 September 2026, `queue: max` keeps up to 100 callers
@@ -672,8 +948,11 @@ repository that can create tags. Later publishers call it instead of holding the
   environment variables, never as `${{ }}` expressions.
 - **What `contents: write` allows.** It is GitHub's narrowest permission that can create a tag, and it
   is broader than that: the same token could push a branch or change a file. The boundary is what the
-  job runs. The controller's tag writer can create a build-tag object and a new `refs/tags/` reference
-  that matches `vX.Y.Z-dev.N`, and nothing else.
+  job runs. The controller's tag writer is made for one kind of tag. For `build` it can create a tag object
+  and a new `refs/tags/` reference that matches `vX.Y.Z-dev.N`, and for `normal` one that matches
+  `vX.Y.Z`. It can do nothing else.
+- **What `deployments: read` allows.** Reading deployments and their statuses. The normal gate reads
+  Vercel's production deployment; nothing here creates one.
 - **Nothing else is added.** There is no secret, no deployment hook, no Vercel or Supabase credential,
   and nothing triggered by a tag or a release. CI's branch filters are unchanged.
 
@@ -692,9 +971,14 @@ integrations and hooks, and a check of tag routing in an explicitly authorised d
 non-production repository. Any unresolved coupling between a tag and a deployment holds activation.
 Never test that coupling by creating an OMS tag.
 
-Activation is the Owner setting the repository variable `RELEASE_BUILD_PUBLICATION` to `enabled`.
-Any other value, or no variable, keeps publication off, and the controller checks the value again
-before writing. A variable change is not recorded in Git history.
+Activation is the Owner setting a repository variable to `enabled`: `RELEASE_BUILD_PUBLICATION` for
+build tags, and `RELEASE_NORMAL_PUBLICATION` for normal tags. Each is separate. Any other value, or no
+variable, keeps that publisher off, and the controller checks the value again before writing. A variable
+change is not recorded in Git history.
+
+Normal publication also needs the Owner's decisions in
+[Decisions the contract still needs](#decisions-the-contract-still-needs), recorded as a reviewed change to
+the release-evidence policy. Until then, an activated normal publisher still refuses every request.
 
 Before activation, run `reconcile-builds` read-only against main and keep its report. The first
 activated run publishes the commits it lists as `eligible`, oldest first. It lists blocked commits with
@@ -820,6 +1104,68 @@ writes.
   file belongs. None of them changes a file, a ref, the index
   or GitHub, and a file in the way is left where it was
 
+**Proved by fixtures, for normal releases.** The fixture configures its own independent issuers in its
+own policy, standing in for the Owner's future decision. It also runs main's policy.
+
+- One valid request: every gate satisfied, the dispatch read from GitHub's run, exactly two writes, a real
+  annotated `v0.0.7` that peels to the preparation's merge with every provenance field, the CI evidence and
+  #32, #33, #42 and #43 listed, and every other ref unchanged. Package, lockfile, changelog, notes and tag
+  agree. The final notes list each merge once. The same plan re-run by the Owner, and a new dispatch, report
+  `already_published` and write nothing
+- Main's own policy: a complete request refused at `review` and `production-acceptance` with
+  `evidence_issuer_unconfigured`, and nothing written
+- Zero writes for every value of `RELEASE_NORMAL_PUBLICATION` except `enabled`. Build activation does not
+  activate normal publication, and normal activation does not activate the build writer
+- Tampered, foreign, other-run, refused and drifted plans refused before any write; a missing dispatch is a
+  usage error
+- A re-run by someone else refused, the stale attempt refused, and the Owner's re-run published with its
+  attempt recorded
+- Interruption: an unreferenced object, a lost reference response and a failed read-back, each without a
+  success, then one tag after a retry. A name taken by another tag refused without moving it
+- `main` moving between the object and the reference, and before the writer starts: refused, the object
+  left unreferenced, and neither the approved nor the newer commit tagged
+- Two writers with the same plan racing past the lock: one tag. The loser reads it back or stops on its
+  out-of-date checkout
+- Records: a READY from the Owner, edited, on another pull request, for another head, pull request or
+  version, with another verdict, after the merge, malformed, of another kind, missing a block, or missing
+  altogether. An acceptance from the wrong account, for another commit or deployment, rejected, or before
+  the deployment succeeded. An approval from another account or id, for another version, tag, commit, head,
+  action set, review, boundary, date or hosted record, or before the acceptance. A policy naming the
+  Owner as an independent issuer. Each refused at its own gate alone
+- The approval block the report prints is exactly the one that satisfies the gate, and a record posted
+  through an integration is reported as such
+- Dispatch: another actor, another event, branch, head, workflow or workflow id, an unknown run, a
+  finished run, a re-run by someone else, and an earlier attempt
+- Deployment: another creator or status creator, another environment or commit, a failed or inactive
+  deployment, another Vercel project or team, plain http, a missing id, a newer production deployment,
+  and one still running, which is pending
+- Version and tags: another version, `1.0.0` during 0.x, another preparation, a merge that is not the
+  preparation, a newer normal release elsewhere, another normal tag on the commit, and `vX.Y.Z` already
+  taken by a lightweight or hand-made tag
+- A preparation made stale by a merge during review, and `main` moved past the approved commit
+- CI: a failed, skipped or unfinished gate, and only a pull-request run. A failed attempt retried on the
+  same run publishes, with the failure and the accepted flaky retry in the annotation
+- No policy, and seven kinds of unusable policy
+- Schema boundary: an unchanged tree proved from Git, a history with no migrations, and a stray hosted
+  record refused. A changed tree refused without a record and when the policy names no issuer, and refused
+  for a record made at or after the migration's merge, by the wrong account, or with another boundary or
+  statement. A record made before the merge publishes, and the annotation carries the boundary and record
+- Build and normal tags together: three build tags, then `v0.0.7` beside them with nothing moved,
+  reconciliation reading the released merges from Git and CI, a failed older merge tagged
+  `v0.0.7-dev.4` from `v0.0.6` after the release, and the next fix tagged `v0.0.8-dev.1`. A request for
+  0.0.8 cannot reuse the 0.0.7 evidence
+- A build writer and the normal writer racing: whatever raced, the next runs converge with each tag once.
+  A merge whose normal tag landed first is `not_applicable` for a build tag
+- A feature raising the target: a request for 0.0.7 refused, and 0.1.0 published as `minor`
+- The normal-release workflow's trigger, inputs, main-only condition, read-only evaluation, environment-only
+  inputs, dispatch arguments, bundle conditions, writer call, lock, activation and pinned actions, checked
+  as YAML. The writer's normal operation, and the controller evaluating and publishing from the bundle alone
+- What a tag can start: under GitHub's documented filter rules, a tag push, a tag creation or a release
+  starts no workflow here. A push to `main` starts only CI, and CI's completion only the build-tag
+  workflow. No job any of these can reach, the tag writer included, runs a deployment, a hosted database
+  command, a secret or an action outside the pinned set, and CI's database commands start, reset and test
+  its own local stack
+
 **Not proved here:**
 
 - GitHub's real responses. The simulator reproduces the documented fields the controller reads,
@@ -842,3 +1188,15 @@ writes.
 - A file changing while `prepare-release` runs (`working_tree_changed`).
 - The preparation procedure on GitHub. No real preparation pull request has been opened, and this
   repository's version has not changed.
+- Normal publication on GitHub. The normal-release workflow has never run: GitHub's evaluation of its
+  condition and inputs, the reusable writer's permissions, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT` inside
+  the called workflow, and the fields of a real dispatch run and its attempts are not exercised. The
+  simulator reproduces the documented comment, deployment and run fields, cross-checked against read-only
+  responses for this repository on 17 September 2026.
+- Who wrote a record. GitHub reports the account, and the fixtures prove that only the configured account
+  counts. They cannot prove a person wrote it: see [The shared Owner login](#the-shared-owner-login).
+- The Vercel and Supabase integrations. Whether either reacts to a tag is outside this repository, so it
+  is inspected live before activation, and tested only in an explicitly authorised disposable
+  repository, never with an OMS tag.
+- A release that changes migrations, on this repository. The controller has no view of hosted Supabase;
+  it trusts a record from the named issuer, and main names none.

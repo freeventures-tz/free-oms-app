@@ -2,8 +2,9 @@
  * The GitHub REST API, split by what a caller is allowed to do with it.
  *
  *   createGitHubReader   GET only. Every decision the controller makes is read through this.
- *   createTagWriter      Creates a build-tag object and its `refs/tags/` reference. Nothing else: it
- *                        cannot update, force or delete a reference, and it cannot name a branch.
+ *   createTagWriter      Creates a tag object and its `refs/tags/` reference, for one kind of tag: a build
+ *                        tag, or for the normal-release writer a normal release tag. Nothing else: it cannot
+ *                        update, force or delete a reference, and it cannot name a branch.
  *   createStatusWriter   Creates one commit status in the `release/build-tag` context.
  *
  * None of them follows a redirect, and none sends a request — a pagination link included — to any
@@ -12,7 +13,7 @@
 
 import { FULL_SHA } from "./cli.mjs";
 import { ControllerError } from "./errors.mjs";
-import { BUILD_TAG } from "./version.mjs";
+import { BUILD_TAG, NORMAL_TAG } from "./version.mjs";
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const MAX_PAGES = 100;
@@ -147,6 +148,18 @@ export function createGitHubReader(options) {
     /** One annotated tag object, or null. */
     tagObject: (sha) => api.getOne(`${repo}/git/tags/${segment(sha)}`),
 
+    /** One issue or pull-request comment of this repository, or null. */
+    issueComment: (id) => api.getOne(`${repo}/issues/comments/${segment(id)}`),
+
+    /** One deployment, or null. */
+    deployment: (id) => api.getOne(`${repo}/deployments/${segment(id)}`),
+
+    /** Every status of a deployment, across all pages. */
+    deploymentStatuses: (id) => api.getAll(`${repo}/deployments/${segment(id)}/statuses`, {}, (body) => body),
+
+    /** Every deployment to an environment, newest first, across all pages. */
+    deploymentsFor: (environment) => api.getAll(`${repo}/deployments`, { environment }, (body) => body),
+
     /** The latest status on a commit in the `release/build-tag` context, from its combined status, or null. */
     buildTagStatus: async (sha) =>
       (await api.getAll(`${repo}/commits/${segment(sha)}/status`, {}, (body) => body?.statuses)).find(
@@ -155,13 +168,21 @@ export function createGitHubReader(options) {
   };
 }
 
-export function createTagWriter(options) {
+const TAG_KINDS = Object.freeze({
+  build: { pattern: BUILD_TAG, refusal: "the tag writer creates build tags only" },
+  normal: { pattern: NORMAL_TAG, refusal: "the normal-release writer creates normal release tags only" },
+});
+
+/** `kind` is `build` (the default) or `normal`: the one kind of tag name this writer may create. */
+export function createTagWriter({ kind = "build", ...options }) {
   const api = connect(options);
   const repo = api.repositoryPath;
+  const allowed = Object.hasOwn(TAG_KINDS, kind) ? TAG_KINDS[kind] : null;
+  if (!allowed) throw new ControllerError("tag_writer_refused", `unknown kind of tag writer ${JSON.stringify(kind)}`);
 
   const requireBuildTag = (name) => {
-    if (!BUILD_TAG.test(name)) {
-      throw new ControllerError("tag_writer_refused", `the tag writer creates build tags only, not ${JSON.stringify(name)}`);
+    if (!allowed.pattern.test(name)) {
+      throw new ControllerError("tag_writer_refused", `${allowed.refusal}, not ${JSON.stringify(name)}`);
     }
   };
 
@@ -169,7 +190,7 @@ export function createTagWriter(options) {
     /** Creates an annotated tag object for a commit. It is not a tag until a reference names it. */
     async createTagObject({ tag, message, commit }) {
       requireBuildTag(tag);
-      if (!FULL_SHA.test(commit)) throw new ControllerError("tag_writer_refused", "a build tag must name a full commit sha");
+      if (!FULL_SHA.test(commit)) throw new ControllerError("tag_writer_refused", "a tag must name a full commit sha");
       const path = `${repo}/git/tags`;
       const response = await api.send("POST", `${api.root}${path}`, { tag, message, object: commit, type: "commit" });
       if (response.status !== 201) {

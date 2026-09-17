@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "repository": "freeventures-tz/free-oms-app",
+  "owner": { "login": "freeventures-tz", "id": 313431047 },
+  "issuers": {
+    "independent-review": null,
+    "production-acceptance": null,
+    "hosted-migration": null
+  },
+  "vercel": {
+    "creator": { "login": "vercel[bot]", "id": 35613825 },
+    "environment": "Production",
+    "project": "free-oms",
+    "team": "freeventures-tz"
+  }
+}

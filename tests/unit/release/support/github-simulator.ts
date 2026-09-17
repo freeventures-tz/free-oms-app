@@ -32,7 +32,15 @@ export type SimulatedJob = {
   run_id?: number;
 };
 
-export type SimulatedAttempt = { status: string; conclusion: string | null; jobs: SimulatedJob[] };
+export type SimulatedAccount = { login: string; id: number };
+
+export type SimulatedAttempt = {
+  status: string;
+  conclusion: string | null;
+  jobs: SimulatedJob[];
+  /** Who started this attempt. Defaults to the run's actor. */
+  triggering_actor?: SimulatedAccount;
+};
 
 /** A workflow run with every attempt it has had. The last attempt is the run as it stands now. */
 export type SimulatedRun = {
@@ -45,7 +53,41 @@ export type SimulatedRun = {
   head_sha: string;
   repository: { id: number; full_name: string };
   head_repository: { full_name: string };
+  /** Who started the run. */
+  actor?: SimulatedAccount;
   attempts: SimulatedAttempt[];
+};
+
+/** An issue or pull-request comment, as the REST API returns it. */
+export type SimulatedComment = {
+  id: number;
+  body: string;
+  user: SimulatedAccount;
+  /** The issue or pull request it is on. */
+  issue: number;
+  created_at: string;
+  updated_at?: string;
+  /** The slug of the GitHub App it was posted through, if any. */
+  via?: string | null;
+};
+
+export type SimulatedDeploymentStatus = {
+  id: number;
+  state: string;
+  environment_url: string | null;
+  creator: SimulatedAccount;
+  created_at: string;
+};
+
+/** A deployment and its statuses, as the REST API returns them. */
+export type SimulatedDeployment = {
+  id: number;
+  sha: string;
+  ref: string;
+  environment: string;
+  creator: SimulatedAccount;
+  created_at: string;
+  statuses: SimulatedDeploymentStatus[];
 };
 
 export type SimulatedWorkflow = { id: number; name: string; path: string; state: string };
@@ -85,6 +127,8 @@ export async function startGitHubSimulator(repository: string) {
   const failures = new Map<string, number>();
   const workflows = new Map<string, SimulatedWorkflow>();
   const runs = new Map<number, SimulatedRun>();
+  const comments = new Map<number, SimulatedComment>();
+  const deployments = new Map<number, SimulatedDeployment>();
   const statuses: Array<Record<string, unknown>> = [];
   const faults: Fault[] = [];
   const requests: RecordedRequest[] = [];
@@ -109,10 +153,41 @@ export async function startGitHubSimulator(repository: string) {
 
   const runUrl = (id: number) => `https://github.com/${repository}/actions/runs/${id}`;
   const runView = (run: SimulatedRun, attempt = run.attempts.length) => {
-    const { attempts, ...meta } = run;
+    const { attempts, actor, ...meta } = run;
     const at = attempts[attempt - 1];
-    return { ...meta, run_attempt: attempt, status: at.status, conclusion: at.conclusion, html_url: runUrl(run.id) };
+    const person = (account: SimulatedAccount | undefined) => (account ? { ...account, type: "User" } : null);
+    return {
+      ...meta,
+      run_attempt: attempt,
+      status: at.status,
+      conclusion: at.conclusion,
+      html_url: runUrl(run.id),
+      actor: person(actor),
+      triggering_actor: person(at.triggering_actor ?? actor),
+    };
   };
+  const account = (who: SimulatedAccount) => ({ ...who, type: who.login.endsWith("[bot]") ? "Bot" : "User" });
+  const commentView = (comment: SimulatedComment) => ({
+    id: comment.id,
+    body: comment.body,
+    user: account(comment.user),
+    created_at: comment.created_at,
+    updated_at: comment.updated_at ?? comment.created_at,
+    issue_url: `https://api.github.com/repos/${repository}/issues/${comment.issue}`,
+    html_url: `https://github.com/${repository}/pull/${comment.issue}#issuecomment-${comment.id}`,
+    author_association: "OWNER",
+    performed_via_github_app: comment.via ? { slug: comment.via } : null,
+  });
+  const deploymentView = (deployment: SimulatedDeployment) => ({
+    id: deployment.id,
+    sha: deployment.sha,
+    ref: deployment.ref,
+    environment: deployment.environment,
+    created_at: deployment.created_at,
+    task: "deploy",
+    creator: account(deployment.creator),
+    payload: {},
+  });
   const jobsOf = (run: SimulatedRun) =>
     run.attempts.flatMap((attempt, index) =>
       attempt.jobs.map((job, position) => ({
@@ -179,6 +254,33 @@ export async function startGitHubSimulator(repository: string) {
       if (match) {
         const found = pulls.get(Number(match[1]));
         return found ? { status: 200, body: found } : { status: 404, body: { message: "Not Found" } };
+      }
+      match = route("/issues/comments/(\\d+)", pathname);
+      if (match) {
+        const found = comments.get(Number(match[1]));
+        return found ? { status: 200, body: commentView(found) } : { status: 404, body: { message: "Not Found" } };
+      }
+      match = route("/deployments/(\\d+)/statuses", pathname);
+      if (match) {
+        const found = deployments.get(Number(match[1]));
+        if (!found) return { status: 404, body: { message: "Not Found" } };
+        const all = [...found.statuses].sort((a, b) => b.id - a.id).map((status) => ({ ...status, creator: account(status.creator) }));
+        const { slice, headers } = paged(all, url, host);
+        return { status: 200, body: slice, headers };
+      }
+      match = route("/deployments/(\\d+)", pathname);
+      if (match) {
+        const found = deployments.get(Number(match[1]));
+        return found ? { status: 200, body: deploymentView(found) } : { status: 404, body: { message: "Not Found" } };
+      }
+      if (route("/deployments", pathname)) {
+        const environment = url.searchParams.get("environment");
+        const all = [...deployments.values()]
+          .filter((deployment) => !environment || deployment.environment === environment)
+          .sort((a, b) => b.id - a.id)
+          .map(deploymentView);
+        const { slice, headers } = paged(all, url, host);
+        return { status: 200, body: slice, headers };
       }
       match = route("/commits/([0-9a-f]{40})/status", pathname);
       if (match) {
@@ -388,6 +490,8 @@ export async function startGitHubSimulator(repository: string) {
     failures,
     workflows,
     runs,
+    comments,
+    deployments,
     statuses,
     faults,
     requests,

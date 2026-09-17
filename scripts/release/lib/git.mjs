@@ -81,6 +81,13 @@ export function createGitReader(cwd) {
       return run(["cat-file", "blob", object]);
     },
 
+    /** The object a path names in a commit — for a directory, its tree id — or null when there is none. */
+    objectAt(commit, path) {
+      const entry = run(["ls-tree", "-z", "--full-tree", "--end-of-options", commit, path]).split("\u0000")[0];
+      if (!entry) return null;
+      return entry.slice(0, entry.indexOf("\t")).split(" ")[2] ?? null;
+    },
+
     /** Paths whose contents differ between two commits. */
     changedPaths(from, to) {
       return run(["diff", "--name-only", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", "--end-of-options", from, to, "--"])
