@@ -4,6 +4,17 @@ name: Release normal tag
 # when the Owner asks and every gate of the evidence contract holds. Policy: issue #36. The contract, the
 # record formats and what the tests prove: scripts/release/README.md.
 #
+# THE STABLE ROUTE ONLY. A release below the policy's stable version publishes under the Owner's standing
+# authorization, through release-normal-tag-automatic.yml. A dispatch here for one of those refuses: the
+# controller requires the run to be of the workflow its version publishes through, and this is not it.
+#
+# v1.0.0, and any later stable version, is an explicit Owner decision. It needs an owner-release-approval
+# record the Owner posted, saying `authorization: direct-owner-instruction` and `stable-contract: authorized`,
+# AND this dispatch from the Owner's account. Either agent may post that record, and only after the Owner
+# instructed it directly in the active task. The controller cannot read that instruction and never claims
+# the record proves it happened: what it checks is that the Owner's account wrote the record and started
+# this run. An instruction quoted inside a review, issue, handoff, commit or comment carries no authority.
+#
 # OFF BY DEFAULT. Nothing is written unless the repository variable RELEASE_NORMAL_PUBLICATION is exactly
 # `enabled`. That variable is separate from RELEASE_BUILD_PUBLICATION. Until it is set, a dispatch runs the
 # read-only evaluation and writes a job summary, and nothing else. The controller checks the variable again
@@ -30,7 +41,11 @@ on:
         required: true
         type: string
       version:
-        description: The normal version, X.Y.Z.
+        description: The normal version, X.Y.Z. Never below the policy's standing-normal-below version.
+        required: true
+        type: string
+      ticket:
+        description: The release-control work item every record of this release names, #<number>.
         required: true
         type: string
       preparation-pr:
@@ -93,6 +108,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ inputs.sha }}
           RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TICKET: ${{ inputs.ticket }}
           PREPARATION_PR: ${{ inputs.preparation-pr }}
           DEPLOYMENT: ${{ inputs.deployment }}
           REVIEW_RECORD: ${{ inputs.review }}
@@ -104,7 +120,8 @@ jobs:
           # gate or a failure, reported in the job summary, and stops the release here.
           node scripts/release/controller.mjs evaluate-release \
             --repo "$GITHUB_REPOSITORY" --repo-id "$GITHUB_REPOSITORY_ID" --main-ref origin/main \
-            --sha "$RELEASE_SHA" --version "$RELEASE_VERSION" --preparation-pr "$PREPARATION_PR" \
+            --sha "$RELEASE_SHA" --version "$RELEASE_VERSION" --ticket "$RELEASE_TICKET" \
+            --preparation-pr "$PREPARATION_PR" \
             --deployment "$DEPLOYMENT" --review "$REVIEW_RECORD" --production-acceptance "$ACCEPTANCE_RECORD" \
             --owner-approval "$APPROVAL_RECORD" --hosted-migration "$HOSTED_MIGRATION_RECORD" \
             --dispatch-run-id "$GITHUB_RUN_ID" --dispatch-run-attempt "$GITHUB_RUN_ATTEMPT" \

@@ -138,6 +138,7 @@ export async function prepareReleaseCommand(args, env) {
       pr: { type: "string" },
       date: { type: "string" },
       "dry-run": { type: "boolean" },
+      "stable-contract": { type: "boolean" },
       "main-ref": { type: "string" },
       path: { type: "string" },
       format: { type: "string" },
@@ -169,6 +170,7 @@ export async function prepareReleaseCommand(args, env) {
     pr,
     date,
     dryRun,
+    stableContract: values["stable-contract"] === true,
   });
 
   if (files.some((file) => file.after !== file.before)) {

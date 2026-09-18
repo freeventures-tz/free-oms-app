@@ -49,7 +49,8 @@ type Event =
   | { name: "release"; action: string }
   | { name: "pull_request" }
   | { name: "workflow_run"; workflow: string; branch: string }
-  | { name: "workflow_dispatch" };
+  | { name: "workflow_dispatch" }
+  | { name: "issue_comment"; action: string };
 
 /**
  * Whether a workflow's `on` starts a run for an event, under GitHub's rules: a push filter that names only
@@ -106,6 +107,7 @@ describe("the normal-release workflow", () => {
     expect(Object.keys(inputs)).toEqual([
       "sha",
       "version",
+      "ticket",
       "preparation-pr",
       "deployment",
       "review",
@@ -133,6 +135,7 @@ describe("the normal-release workflow", () => {
       GITHUB_TOKEN: "${{ github.token }}",
       RELEASE_SHA: "${{ inputs.sha }}",
       RELEASE_VERSION: "${{ inputs.version }}",
+      RELEASE_TICKET: "${{ inputs.ticket }}",
       PREPARATION_PR: "${{ inputs.preparation-pr }}",
       DEPLOYMENT: "${{ inputs.deployment }}",
       REVIEW_RECORD: "${{ inputs.review }}",
@@ -145,6 +148,7 @@ describe("the normal-release workflow", () => {
     for (const argument of [
       '--sha "$RELEASE_SHA"',
       '--version "$RELEASE_VERSION"',
+      '--ticket "$RELEASE_TICKET"',
       '--preparation-pr "$PREPARATION_PR"',
       '--deployment "$DEPLOYMENT"',
       '--review "$REVIEW_RECORD"',
@@ -234,6 +238,7 @@ describe("what a tag can start", () => {
     expect(started({ name: "workflow_run", workflow: "CI", branch: "main" })).toEqual(["release-build-tag.yml"]);
     expect(started({ name: "workflow_dispatch" })).toEqual(["release-build-tag.yml", "release-normal-tag.yml"]);
     expect(started({ name: "pull_request" })).toEqual(["ci.yml", "release-classification.yml"]);
+    expect(started({ name: "issue_comment", action: "created" })).toEqual(["release-normal-tag-automatic.yml"]);
 
     // The evaluator is not vacuous: a workflow that did listen for tags would be found.
     expect(triggers({ push: { tags: ["v*"] } }, { name: "push", ref: "refs/tags/v0.0.7" })).toBe(true);
@@ -253,9 +258,16 @@ describe("what a tag can start", () => {
       { name: "workflow_run", workflow: "CI", branch: "main" },
       { name: "workflow_dispatch" },
       { name: "pull_request" },
+      { name: "issue_comment", action: "created" },
     ];
     const files = [...new Set(events.flatMap(started))].sort();
-    expect(files).toEqual(["ci.yml", "release-build-tag.yml", "release-classification.yml", "release-normal-tag.yml"]);
+    expect(files).toEqual([
+      "ci.yml",
+      "release-build-tag.yml",
+      "release-classification.yml",
+      "release-normal-tag-automatic.yml",
+      "release-normal-tag.yml",
+    ]);
     const jobs = files.flatMap(reachableJobs);
     expect(jobs.map(({ file, id }) => `${file}#${id}`)).toContain("release-tag-writer.yml#write");
     for (const { file, id, job } of jobs) {

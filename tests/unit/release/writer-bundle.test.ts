@@ -156,7 +156,7 @@ describe("the writer bundle", { timeout: 180_000 }, () => {
     it("evaluates and publishes with nothing but main's controller and the listed packages", async () => {
       const bundle = await makeBundle();
       try {
-        const { release: prepared, evidence, dispatch } = await release.validRelease();
+        const { release: prepared, evidence, run: dispatch } = await release.validRelease();
         const options = { bundle: { cwd: bundle.dir, controller: bundle.controller } };
         const plan = await release.evaluate(evidence.request, { dispatch, ...options });
         expect(plan.code, plan.stderr).toBe(0);

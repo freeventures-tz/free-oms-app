@@ -62,10 +62,12 @@ describe("the build-tag workflows", () => {
 
     for (const { file, workflow } of workflows) {
       for (const [event, filter] of Object.entries(workflow.on)) {
-        expect(["push", "pull_request", "workflow_run", "workflow_call", "workflow_dispatch"], `${file} ${event}`).toContain(event);
+        expect(["push", "pull_request", "issue_comment", "workflow_run", "workflow_call", "workflow_dispatch"], `${file} ${event}`).toContain(event);
         if (event === "push") expect((filter as Record<string, unknown>)?.tags, file).toBeUndefined();
         // The recovery dispatch, and the Owner's normal-release dispatch (release-normal-workflow.test.ts).
         if (event === "workflow_dispatch") expect(["release-build-tag.yml", "release-normal-tag.yml"]).toContain(file);
+        // The standing route, guarded by the Owner id inside it (release-standing-workflow.test.ts).
+        if (event === "issue_comment") expect([file, filter]).toEqual(["release-normal-tag-automatic.yml", { types: ["created"] }]);
       }
     }
     const ci = load("ci.yml").workflow;
@@ -106,6 +108,7 @@ describe("the build-tag workflows", () => {
     const writing = everyJob().filter(({ job }) => typeof job.permissions === "object" && job.permissions.contents === "write");
     expect(writing.map(({ file, id }) => `${file}#${id}`).sort()).toEqual([
       "release-build-tag.yml#publish",
+      "release-normal-tag-automatic.yml#publish",
       "release-normal-tag.yml#publish",
       "release-tag-writer.yml#write",
     ]);

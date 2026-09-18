@@ -12,7 +12,10 @@
  *   write-reconciled-statuses  Report those merges as commit statuses, when publication is activated.
  *   prepare-release       Write the next normal version into package.json, the lockfile and the
  *                         changelog of a preparation branch's working tree, or check a merged preparation.
- *   evaluate-release      Check every gate of an Owner's request to publish a normal tag. Reads only.
+ *   evaluate-release      Check every gate of the Owner's explicit request to publish a stable normal tag.
+ *                         Reads only.
+ *   evaluate-standing-release  The same check for a release below the policy's stable version, derived from
+ *                         the Owner's production-acceptance comment. Reads only.
  *   publish-release       Publish that normal tag, when normal publication is activated.
  *   runtime-dependencies  List the lockfile paths the writing jobs receive instead of installing.
  *
@@ -56,7 +59,7 @@ import { readAcceptedRange } from "./lib/history.mjs";
 import { escapeMarkdown, listParagraphs } from "./lib/markdown.mjs";
 import { describeMetadata, readCommitMetadata } from "./lib/metadata.mjs";
 import { renderPreviewReport, renderReleaseNotes } from "./lib/notes.mjs";
-import { evaluateReleaseCommand, publishReleaseCommand } from "./lib/normal-commands.mjs";
+import { evaluateReleaseCommand, evaluateStandingReleaseCommand, publishReleaseCommand } from "./lib/normal-commands.mjs";
 import { prepareReleaseCommand } from "./lib/preparation-commands.mjs";
 import {
   publishReconciledBuildsCommand,
@@ -304,6 +307,7 @@ const COMMANDS = {
   "write-reconciled-statuses": writeReconciledStatusesCommand,
   "prepare-release": prepareReleaseCommand,
   "evaluate-release": evaluateReleaseCommand,
+  "evaluate-standing-release": evaluateStandingReleaseCommand,
   "publish-release": publishReleaseCommand,
   "runtime-dependencies": runtimeDependenciesCommand,
 };

@@ -17,9 +17,9 @@ import { runController, type ControllerRun } from "./run-controller";
 
 export { DATE, REPOSITORY };
 
-/** The Owner, as the release-evidence policy on main names the account. */
+/** The Owner, as the release-evidence policy on main names the account. Every evidence record is theirs. */
 export const OWNER: SimulatedAccount = { login: "freeventures-tz", id: 313431047 };
-/** Fixture-only issuers. Main's policy names none; these stand in for a future Owner decision. */
+/** Accounts that are not the Owner. A record by any of them is refused, however well formed it is. */
 export const REVIEWER: SimulatedAccount = { login: "fixture-reviewer", id: 9001 };
 export const VERIFIER: SimulatedAccount = { login: "fixture-verifier", id: 9002 };
 export const MIGRATOR: SimulatedAccount = { login: "fixture-migrator", id: 9003 };
@@ -27,10 +27,20 @@ export const INTRUDER: SimulatedAccount = { login: "fixture-intruder", id: 9666 
 /** Vercel's GitHub App, as this repository's production deployments name it. */
 export const VERCEL: SimulatedAccount = { login: "vercel[bot]", id: 35613825 };
 
+/** The agents a record may attest, and the work item every record of one release names. */
+export const CHATGPT = "ChatGPT";
+export const CLAUDE_CODE = "Claude Code";
+export const TICKET = "#36";
+
 export const POLICY_PATH = "scripts/release/release-evidence-policy.json";
 /** The policy committed on main, byte for byte. */
 export const MAIN_POLICY = readFileSync(POLICY_PATH, "utf8");
 export const NORMAL_WORKFLOW_ID = 333762999;
+export const AUTOMATIC_WORKFLOW_ID = 333763777;
+export const NORMAL_WORKFLOW_FILE = "release-normal-tag.yml";
+export const AUTOMATIC_WORKFLOW_FILE = "release-normal-tag-automatic.yml";
+export const NORMAL_WORKFLOW_PATH = `.github/workflows/${NORMAL_WORKFLOW_FILE}`;
+export const AUTOMATIC_WORKFLOW_PATH = `.github/workflows/${AUTOMATIC_WORKFLOW_FILE}`;
 export const MIGRATIONS = "supabase/migrations";
 export const PRODUCTION_URL = "https://free-oms-k3x9q2w7r-freeventures-tz.vercel.app";
 
@@ -47,21 +57,37 @@ export const TIMES = {
 
 export const preparationTitle = (version: string) => `chore(release): prepare ${version}`;
 
-type Issuers = Partial<Record<"independent-review" | "production-acceptance" | "hosted-migration", SimulatedAccount | null>>;
+type Kind = "independent-review" | "production-acceptance" | "hosted-migration";
+type Attestations = Partial<Record<Kind, { agent?: string; role?: string } | null>>;
 
 /** A release-evidence policy, written out by hand from the README's contract. */
-export function policyText(options: { issuers?: Issuers; owner?: SimulatedAccount; extra?: Record<string, unknown> } = {}) {
+export function policyText(
+  options: {
+    attestations?: Attestations;
+    owner?: SimulatedAccount;
+    author?: string;
+    standingBelow?: string;
+    extra?: Record<string, unknown>;
+  } = {},
+) {
+  const attest = (kind: Kind) =>
+    options.attestations && Object.hasOwn(options.attestations, kind)
+      ? options.attestations[kind]
+      : { agent: CHATGPT, role: kind };
   return `${JSON.stringify(
     {
-      schema: 1,
+      schema: 2,
       repository: REPOSITORY,
       owner: options.owner ?? OWNER,
-      issuers: {
-        "independent-review": REVIEWER,
-        "production-acceptance": VERIFIER,
-        "hosted-migration": MIGRATOR,
-        ...options.issuers,
+      evidence: {
+        author: options.author ?? "owner",
+        attestations: {
+          "independent-review": attest("independent-review"),
+          "production-acceptance": attest("production-acceptance"),
+          "hosted-migration": attest("hosted-migration"),
+        },
       },
+      authorization: { "standing-normal-below": options.standingBelow ?? "1.0.0" },
       vercel: { creator: VERCEL, environment: "Production", project: "free-oms", team: "freeventures-tz" },
       ...options.extra,
     },
@@ -79,7 +105,7 @@ export function recordBody(kind: string, fields: Record<string, string | number>
     options.prose ?? `Release evidence: ${kind}.`,
     "",
     "```release-evidence",
-    "schema: 1",
+    "schema: 2",
     `kind: ${kind}`,
     `repository: ${REPOSITORY}`,
     ...Object.entries(fields).map(([key, value]) => `${key}: ${value}`),
@@ -91,12 +117,14 @@ export function recordBody(kind: string, fields: Record<string, string | number>
 export type Reference = { id: number; body: string; reference: string };
 
 export type ReleaseRequest = {
+  ticket: string;
   sha: string;
   version: string;
   preparationPr: number;
   deployment: number;
   review: string;
   productionAcceptance: string;
+  /** `none` under standing authorization, where the Owner approves no release one by one. */
   ownerApproval: string;
   hostedMigration: string;
 };
@@ -115,6 +143,9 @@ export type ReleaseRecord = {
   createdAt: string | null;
   issue: number | null;
   fields: Record<string, string> | null;
+  agent: string | null;
+  role: string | null;
+  ticket: string | null;
   satisfied: boolean;
 };
 
@@ -124,7 +155,9 @@ export type ReleaseReport = {
   decision: string;
   publication: string;
   repository: string;
-  request: ReleaseRequest & { dispatch: Dispatch | null };
+  request: (ReleaseRequest & { mode: string; dispatch: Dispatch | null }) | null;
+  mode: string | null;
+  acceptanceComment?: number;
   owner: SimulatedAccount | null;
   main: string | null;
   tag: { name: string; provisional: boolean; object?: string; commit?: string } | null;
@@ -163,7 +196,10 @@ export type Evidence = {
   review: Reference;
   acceptance: Reference;
   approval: Reference;
+  /** The standing release: no approval record. */
   request: ReleaseRequest;
+  /** The same release with the Owner's own approval, for the explicit route. */
+  explicitRequest: ReleaseRequest;
 };
 
 /** Successive ids, from `start + 1`. */
@@ -223,6 +259,8 @@ export function useReleaseFixture() {
     request.sha,
     "--version",
     request.version,
+    "--ticket",
+    request.ticket,
     "--preparation-pr",
     String(request.preparationPr),
     "--deployment",
@@ -269,10 +307,16 @@ export function useReleaseFixture() {
         number: 42,
         title: "ci(release): preview releases, tag exact merges and recover missed build tags",
       });
-      github.workflows.set("release-normal-tag.yml", {
+      github.workflows.set(NORMAL_WORKFLOW_FILE, {
         id: NORMAL_WORKFLOW_ID,
         name: "Release normal tag",
-        path: ".github/workflows/release-normal-tag.yml",
+        path: NORMAL_WORKFLOW_PATH,
+        state: "active",
+      });
+      github.workflows.set(AUTOMATIC_WORKFLOW_FILE, {
+        id: AUTOMATIC_WORKFLOW_ID,
+        name: "Release normal tag (standing)",
+        path: AUTOMATIC_WORKFLOW_PATH,
         state: "active",
       });
       return { released, pr32, pr33, pr42 };
@@ -282,14 +326,24 @@ export function useReleaseFixture() {
     mergeFiles: prep.mergeFileChange,
 
     /** Prepares `version` from main on a branch, as the README's procedure does, and merges the preparation. */
-    async prepareAndMerge(options: { pr?: number; version?: string; branch?: string; date?: string } = {}): Promise<PreparedRelease> {
+    async prepareAndMerge(
+      options: { pr?: number; version?: string; branch?: string; date?: string; stableContract?: boolean } = {},
+    ): Promise<PreparedRelease> {
       const pr = options.pr ?? 43;
-      const version = options.version ?? "0.0.7";
+      const version = options.version ?? (options.stableContract ? "1.0.0" : "0.0.7");
       const branch = options.branch ?? BRANCH;
       prep.startBranch(branch);
       prep.openPullRequest(pr, preparationTitle(version), branch);
       const main = state.repo.git("rev-parse", "main");
-      const prepared = await prep.prepare(["--sha", main, "--pr", String(pr), "--date", options.date ?? DATE]);
+      const prepared = await prep.prepare([
+        "--sha",
+        main,
+        "--pr",
+        String(pr),
+        "--date",
+        options.date ?? DATE,
+        ...(options.stableContract ? ["--stable-contract"] : []),
+      ]);
       if (prepared.json?.status !== "prepared") {
         throw new Error(`the fixture's preparation did not prepare: ${prepared.stdout}${prepared.stderr}`);
       }
@@ -364,7 +418,7 @@ export function useReleaseFixture() {
       return id;
     },
 
-    /** The Owner's dispatch of the normal-release workflow, as GitHub records the run. */
+    /** The Owner's manual dispatch of the stable-release workflow, as GitHub records the run. */
     dispatch(
       sha: string,
       options: { actor?: SimulatedAccount; event?: string; branch?: string; path?: string; workflowId?: number; headSha?: string } = {},
@@ -373,7 +427,7 @@ export function useReleaseFixture() {
       state.github.runs.set(runId, {
         id: runId,
         name: "Release normal tag",
-        path: options.path ?? ".github/workflows/release-normal-tag.yml",
+        path: options.path ?? NORMAL_WORKFLOW_PATH,
         workflow_id: options.workflowId ?? NORMAL_WORKFLOW_ID,
         event: options.event ?? "workflow_dispatch",
         head_branch: options.branch ?? "main",
@@ -386,6 +440,22 @@ export function useReleaseFixture() {
       return { runId, attempt: 1 };
     },
 
+    /**
+     * The run the Owner's own production-acceptance comment starts, as GitHub records an `issue_comment`
+     * run: on the default branch, at its head, with the commenter as the actor.
+     */
+    automaticRun(
+      sha: string,
+      options: { actor?: SimulatedAccount; event?: string; branch?: string; path?: string; workflowId?: number; headSha?: string } = {},
+    ): Dispatch {
+      return api.dispatch(sha, {
+        path: AUTOMATIC_WORKFLOW_PATH,
+        workflowId: AUTOMATIC_WORKFLOW_ID,
+        event: "issue_comment",
+        ...options,
+      });
+    },
+
     /** A re-run of a dispatch, by `by`. Returns the new attempt. */
     rerun(dispatch: Dispatch, by: SimulatedAccount): Dispatch {
       const run = state.github.runs.get(dispatch.runId)!;
@@ -395,6 +465,9 @@ export function useReleaseFixture() {
 
     reviewBody(release: PreparedRelease, overrides: Record<string, string | number> = {}) {
       return recordBody("independent-review", {
+        agent: CHATGPT,
+        role: "independent-review",
+        ticket: TICKET,
         "pull-request": release.pr,
         "reviewed-head": release.reviewedHead,
         version: release.version,
@@ -403,12 +476,35 @@ export function useReleaseFixture() {
       });
     },
 
-    acceptanceBody(release: PreparedRelease, deployment: number, overrides: Record<string, string | number> = {}) {
+    /** The acceptance also names the records it rests on; under standing authorization it starts the release. */
+    acceptanceBody(
+      release: PreparedRelease,
+      refs: { deployment: number; review: string; hostedMigration?: string },
+      overrides: Record<string, string | number> = {},
+    ) {
       return recordBody("production-acceptance", {
+        agent: CHATGPT,
+        role: "production-acceptance",
+        ticket: TICKET,
+        "pull-request": release.pr,
         version: release.version,
         commit: release.mergeSha,
-        deployment,
+        deployment: refs.deployment,
+        review: refs.review,
+        "hosted-migration": refs.hostedMigration ?? "none",
         verdict: "ACCEPTED",
+        ...overrides,
+      });
+    },
+
+    hostedBody(release: PreparedRelease, overrides: Record<string, string | number> = {}) {
+      return recordBody("hosted-migration", {
+        agent: CHATGPT,
+        role: "hosted-migration",
+        ticket: TICKET,
+        "schema-boundary": release.boundary,
+        "migration-first": "applied-before-merge",
+        "hosted-preservation": "verified",
         ...overrides,
       });
     },
@@ -419,6 +515,11 @@ export function useReleaseFixture() {
       overrides: Record<string, string | number> = {},
     ) {
       return recordBody("owner-release-approval", {
+        agent: CHATGPT,
+        role: "owner-authorization-relay",
+        ticket: TICKET,
+        authorization: "direct-owner-instruction",
+        "stable-contract": "authorized",
         version: release.version,
         tag: `v${release.version}`,
         commit: release.mergeSha,
@@ -437,13 +538,22 @@ export function useReleaseFixture() {
 
     /**
      * The complete, valid evidence for a merged preparation: passing final-merge CI, Vercel's production
-     * deployment, the READY before the merge, the acceptance after the deployment, then the Owner's approval.
+     * deployment, the READY before the merge, then the acceptance after the deployment. Every record is a
+     * comment by the Owner, attesting ChatGPT's work — the only identity GitHub authenticates here.
+     *
+     * The Owner's own release approval is added too, for the explicit route. A standing release ignores it:
+     * `request` carries `none`, and `explicitRequest` is the same release with the approval.
      */
     evidence(release: PreparedRelease, options: { hostedMigration?: string } = {}): Evidence {
       const ciRun = fixture.ci(release.mergeSha);
       const deployment = api.deploy(release.mergeSha);
-      const review = api.comment(release.pr, REVIEWER, api.reviewBody(release), TIMES.review);
-      const acceptance = api.comment(release.pr, VERIFIER, api.acceptanceBody(release, deployment), TIMES.accepted);
+      const review = api.comment(release.pr, OWNER, api.reviewBody(release), TIMES.review);
+      const acceptance = api.comment(
+        release.pr,
+        OWNER,
+        api.acceptanceBody(release, { deployment, review: review.reference, hostedMigration: options.hostedMigration }),
+        TIMES.accepted,
+      );
       const approval = api.comment(
         release.pr,
         OWNER,
@@ -455,17 +565,25 @@ export function useReleaseFixture() {
         }),
         TIMES.approved,
       );
-      const request: ReleaseRequest = {
+      const common = {
+        ticket: TICKET,
         sha: release.mergeSha,
         version: release.version,
         preparationPr: release.pr,
         deployment,
         review: review.reference,
         productionAcceptance: acceptance.reference,
-        ownerApproval: approval.reference,
         hostedMigration: options.hostedMigration ?? "none",
       };
-      return { ciRun, deployment, review, acceptance, approval, request };
+      return {
+        ciRun,
+        deployment,
+        review,
+        acceptance,
+        approval,
+        request: { ...common, ownerApproval: "none" },
+        explicitRequest: { ...common, ownerApproval: approval.reference },
+      };
     },
 
     /** `evaluate-release`, after fetching what GitHub has. */
@@ -480,6 +598,51 @@ export function useReleaseFixture() {
           { env: environment(null), ...options.bundle },
         ),
       );
+    },
+
+    /**
+     * `evaluate-standing-release`: the automatic route's read-only half. It gets the comment's id and the
+     * pull request the event claimed, and reads everything else from the API.
+     */
+    standingEvaluate(
+      acceptance: Reference | number,
+      options: {
+        dispatch?: Dispatch | null;
+        eventPullRequest?: number | null;
+        sync?: boolean;
+        extra?: string[];
+        bundle?: { cwd: string; controller: string };
+      } = {},
+    ): Promise<ReleaseRun> {
+      if (options.sync !== false) state.checkout.sync();
+      const id = typeof acceptance === "number" ? acceptance : acceptance.id;
+      return toJson(
+        runController(
+          [
+            "evaluate-standing-release",
+            ...scope(),
+            "--acceptance-comment",
+            String(id),
+            ...(options.eventPullRequest === null ? [] : ["--event-pull-request", String(options.eventPullRequest ?? 43)]),
+            ...dispatchArgs(options.dispatch ?? null),
+            ...(options.extra ?? []),
+            "--format",
+            "json",
+          ],
+          { env: environment(null), ...options.bundle },
+        ),
+      );
+    },
+
+    /** One run of the automatic workflow: the derivation and evaluation, then the writer when every gate holds. */
+    async standingRun(
+      acceptance: Reference,
+      run: Dispatch,
+      options: { activation?: string | null; eventPullRequest?: number | null } = {},
+    ): Promise<{ plan: ReleaseRun; publication: ReleaseRun | null }> {
+      const plan = await api.standingEvaluate(acceptance, { dispatch: run, eventPullRequest: options.eventPullRequest });
+      const publication = plan.json?.decision === "eligible" ? await api.publish(plan.json, run, options) : null;
+      return { plan, publication };
     },
 
     /** `publish-release`: the tag writer's normal operation. `activation` defaults to `enabled`. */
@@ -515,15 +678,20 @@ export function useReleaseFixture() {
       return { plan, publication };
     },
 
-    /** The prepared release, its evidence and the Owner's dispatch: everything a valid publication needs. */
+    /**
+     * The prepared release and its evidence, with both runs that could carry it: `run`, the one the Owner's
+     * acceptance comment starts, and `dispatch`, the Owner's manual one. A 0.x release publishes through the
+     * first; the second exists so a test can show it refuses.
+     */
     async validRelease(
-      options: { history?: HistoryOptions } = {},
-    ): Promise<{ history: History; release: PreparedRelease; evidence: Evidence; dispatch: Dispatch }> {
+      options: { history?: HistoryOptions; version?: string; stableContract?: boolean } = {},
+    ): Promise<{ history: History; release: PreparedRelease; evidence: Evidence; run: Dispatch; dispatch: Dispatch }> {
       const history = api.history(options.history);
-      const release = await api.prepareAndMerge();
+      const release = await api.prepareAndMerge({ version: options.version, stableContract: options.stableContract });
       const evidence = api.evidence(release);
+      const run = api.automaticRun(release.mergeSha);
       const dispatch = api.dispatch(release.mergeSha);
-      return { history, release, evidence, dispatch };
+      return { history, release, evidence, run, dispatch };
     },
 
     gate(report: ReleaseReport, name: string) {

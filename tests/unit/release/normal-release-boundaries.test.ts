@@ -7,6 +7,7 @@ import {
   MIGRATOR,
   MIGRATIONS,
   OWNER,
+  TICKET,
   policyText,
   recordBody,
   TIMES,
@@ -26,6 +27,9 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
   const withHostedRecord = (prepared: PreparedRelease, hosted: string) => release.evidence(prepared, { hostedMigration: hosted });
   const hostedBody = (boundary: string, overrides: Record<string, string> = {}) =>
     recordBody("hosted-migration", {
+      agent: "ChatGPT",
+      role: "hosted-migration",
+      ticket: TICKET,
       "schema-boundary": boundary,
       "migration-first": "applied-before-merge",
       "hosted-preservation": "verified",
@@ -33,14 +37,14 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
     });
 
   it("proves an unchanged migration tree from Git, and refuses a hosted record that does not belong", async () => {
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const unchanged = await release.evaluate(evidence.request, { dispatch });
     expect(unchanged.json.schemaBoundary).toMatchObject({ state: "unchanged", changedBy: [] });
     expect(unchanged.json.schemaBoundary!.before).toBe(state.repo.git("rev-parse", `v0.0.6^{commit}:${MIGRATIONS}`));
     expect(unchanged.json.schemaBoundary!.after).toBe(unchanged.json.schemaBoundary!.before);
     expect(release.gate(unchanged.json, "hosted-migration").state).toBe("not_required");
 
-    const stray = release.comment(prepared.pr, MIGRATOR, hostedBody(prepared.boundary), TIMES.hosted);
+    const stray = release.comment(prepared.pr, OWNER, hostedBody(prepared.boundary), TIMES.hosted);
     const withStray = withHostedRecord(prepared, stray.reference);
     const run = await release.evaluate(withStray.request, { dispatch });
     expect(run.code).toBe(4);
@@ -49,7 +53,7 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
   });
 
   it("proves a history with no migrations at all as an unchanged, absent boundary", async () => {
-    const { release: prepared, evidence, dispatch } = await release.validRelease({ history: { migrations: false } });
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease({ history: { migrations: false } });
     expect(prepared.boundary).toBe("unchanged absent");
     const run = await release.evaluate(evidence.request, { dispatch });
     expect(run.code, run.stderr).toBe(0);
@@ -67,23 +71,26 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
 
     // No record: refused, naming the merge that changed the tree.
     const bare = release.evidence(prepared);
-    const dispatch = release.dispatch(prepared.mergeSha);
+    const dispatch = release.automaticRun(prepared.mergeSha);
     const withoutRecord = await release.evaluate(bare.request, { dispatch });
     expect(withoutRecord.code).toBe(4);
     expect(release.unsatisfied(withoutRecord.json)).toEqual(["schema-boundary:hosted_migration_record_required", "hosted-migration:not_checked"]);
     expect(withoutRecord.json.schemaBoundary).toMatchObject({ state: "changed", changedBy: [44] });
     expect(withoutRecord.json.reasons[0].detail).toContain("#44");
 
-    const hosted = (user = MIGRATOR, body = hostedBody(prepared.boundary), time = TIMES.hosted, issue = 44) =>
+    const hosted = (user = OWNER, body = hostedBody(prepared.boundary), time = TIMES.hosted, issue = 44) =>
       release.comment(issue, user, body, time).reference;
     const cases: Array<[string, string]> = [
-      ["evidence_out_of_order", hosted(MIGRATOR, hostedBody(prepared.boundary), "2026-09-13T09:30:00Z")],
-      ["evidence_out_of_order", hosted(MIGRATOR, hostedBody(prepared.boundary), TIMES.merged)],
+      ["evidence_out_of_order", hosted(OWNER, hostedBody(prepared.boundary), "2026-09-13T09:30:00Z")],
+      ["evidence_out_of_order", hosted(OWNER, hostedBody(prepared.boundary), TIMES.merged)],
       ["evidence_wrong_issuer", hosted(INTRUDER)],
-      ["evidence_wrong_issuer", hosted(OWNER)],
-      ["evidence_field_mismatch", hosted(MIGRATOR, hostedBody(`changed ${"1".repeat(40)} ${"2".repeat(40)}`))],
-      ["evidence_field_mismatch", hosted(MIGRATOR, hostedBody(prepared.boundary, { "hosted-preservation": "skipped" }))],
-      ["evidence_field_mismatch", hosted(MIGRATOR, hostedBody(prepared.boundary, { "migration-first": "applied-after-merge" }))],
+      ["evidence_wrong_issuer", hosted(MIGRATOR)],
+      ["evidence_agent_mismatch", hosted(OWNER, hostedBody(prepared.boundary, { agent: "Claude Code" }))],
+      ["evidence_role_mismatch", hosted(OWNER, hostedBody(prepared.boundary, { role: "production-acceptance" }))],
+      ["evidence_ticket_mismatch", hosted(OWNER, hostedBody(prepared.boundary, { ticket: "#40" }))],
+      ["evidence_field_mismatch", hosted(OWNER, hostedBody(`changed ${"1".repeat(40)} ${"2".repeat(40)}`))],
+      ["evidence_field_mismatch", hosted(OWNER, hostedBody(prepared.boundary, { "hosted-preservation": "skipped" }))],
+      ["evidence_field_mismatch", hosted(OWNER, hostedBody(prepared.boundary, { "migration-first": "applied-after-merge" }))],
     ];
     for (const [code, reference] of cases) {
       const run = await release.evaluate(withHostedRecord(prepared, reference).request, { dispatch });
@@ -91,12 +98,12 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
       expect(release.unsatisfied(run.json), code).toEqual([`hosted-migration:${code}`]);
     }
 
-    // The record from the configured issuer, made before #44 merged, on #44 itself: the release publishes.
+    // The Owner's record, attesting ChatGPT, made before #44 merged, on #44 itself: the release publishes.
     const good = hosted();
     const evidence = withHostedRecord(prepared, good);
     const plan = await release.evaluate(evidence.request, { dispatch });
     expect(plan.code, plan.stderr).toBe(0);
-    expect(plan.json.records.hostedMigration).toMatchObject({ author: MIGRATOR, issue: 44, satisfied: true });
+    expect(plan.json.records.hostedMigration).toMatchObject({ author: OWNER, agent: "ChatGPT", issue: 44, satisfied: true });
     const published = await release.publish(plan.json, dispatch);
     expect(published.json.decision).toBe("published");
     const annotation = repo.git("cat-file", "tag", "v0.0.7").split("\n");
@@ -106,17 +113,17 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
     expect(github.writes()).toHaveLength(2);
   });
 
-  it("refuses a changed migration tree when the policy names no hosted-migration issuer, as main's does", async () => {
-    release.history({ policy: policyText({ issuers: { "hosted-migration": null } }) });
+  it("refuses a changed migration tree when the policy attests no agent for hosted migrations", async () => {
+    release.history({ policy: policyText({ attestations: { "hosted-migration": null } }) });
     release.mergeFiles(44, "fix(db): index invoices by customer", {
       [`${MIGRATIONS}/20260915000000_invoice_index.sql`]: "create index invoices_customer on invoices (customer_id);\n",
     });
     const prepared = await release.prepareAndMerge();
-    const record = release.comment(44, MIGRATOR, hostedBody(prepared.boundary), TIMES.hosted).reference;
+    const record = release.comment(44, OWNER, hostedBody(prepared.boundary), TIMES.hosted).reference;
     const evidence = withHostedRecord(prepared, record);
-    const run = await release.evaluate(evidence.request, { dispatch: release.dispatch(prepared.mergeSha) });
+    const run = await release.evaluate(evidence.request, { dispatch: release.automaticRun(prepared.mergeSha) });
     expect(run.code).toBe(4);
-    expect(release.unsatisfied(run.json)).toEqual(["hosted-migration:evidence_issuer_unconfigured"]);
+    expect(release.unsatisfied(run.json)).toEqual(["hosted-migration:evidence_attestation_unconfigured"]);
     expect(state.github.writes()).toEqual([]);
   });
 
@@ -142,7 +149,7 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
     const buildTagsBefore = build.remoteTags();
 
     // The normal release is published at the preparation's merge through the same writer.
-    const dispatch = release.dispatch(prepared.mergeSha);
+    const dispatch = release.automaticRun(prepared.mergeSha);
     const normal = await release.workflowRun(evidence.request, dispatch);
     expect(normal.publication!.code, normal.publication!.stderr).toBe(0);
     expect(normal.publication!.json.decision).toBe("published");
@@ -173,7 +180,7 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
     expect(next.publication!.json.commits.map((c) => [c.pr, c.tag?.name])).toEqual([[44, "v0.0.8-dev.1"]]);
     const replay = await release.evaluate(
       { ...evidence.request, sha: pr44.mergeSha, version: "0.0.8" },
-      { dispatch: release.dispatch(pr44.mergeSha) },
+      { dispatch: release.automaticRun(pr44.mergeSha) },
     );
     expect(replay.code).toBe(4);
     expect(release.unsatisfied(replay.json)).toEqual(
@@ -206,7 +213,7 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
     for (const merge of [pr32, pr33, pr42]) build.ci(merge.mergeSha);
     const prepared = await release.prepareAndMerge();
     const evidence = release.evidence(prepared);
-    const dispatch = release.dispatch(prepared.mergeSha);
+    const dispatch = release.automaticRun(prepared.mergeSha);
     const plan = await release.evaluate(evidence.request, { dispatch });
     const buildPlan = await build.reconcile();
     const normalPath = build.writePlan(plan.json);
@@ -252,7 +259,7 @@ describe("normal releases: schema boundaries, build tags and later releases", { 
     repo.mergePullRequest({ number: 44, title: "feat(reports): add the daily sales report" });
     const prepared = await release.prepareAndMerge({ version: "0.1.0", branch: "release/v0.1.0" });
     const evidence = release.evidence(prepared);
-    const dispatch = release.dispatch(prepared.mergeSha);
+    const dispatch = release.automaticRun(prepared.mergeSha);
 
     const patch = await release.evaluate({ ...evidence.request, version: "0.0.7" }, { dispatch });
     expect(patch.code).toBe(4);

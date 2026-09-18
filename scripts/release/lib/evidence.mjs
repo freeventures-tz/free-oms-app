@@ -9,15 +9,25 @@
  * accepts a claim because it is well formed.
  *
  * The policy is read from Git at the commit being released, so the reviewed history that is released also
- * carries the rules that release it. An issuer the policy leaves `null` refuses its gate: there is no
- * default and no override.
+ * carries the rules that release it. There is no default and no override.
+ *
+ * Who writes a record. GitHub authenticates exactly one identity for this repository: the Owner's account.
+ * The agents working on it have none of their own, so every record is a comment the Owner posts, and the
+ * block names the agent and role whose work the Owner is vouching for. That is an Owner-authorized
+ * attestation, not cryptographically proven agent identity: the `agent` field does not prove which model
+ * wrote the text, and nothing here treats it as proof. A signing service and per-agent keys are deferred.
+ *
+ * What the controller reads is the structured block, never the prose around it. A footer in a review, a
+ * handoff or a commit message carries no authority.
  */
 
 import { createHash } from "node:crypto";
 
+import { NORMAL_VERSION } from "./version.mjs";
+
 export const POLICY_PATH = "scripts/release/release-evidence-policy.json";
-export const POLICY_SCHEMA = 1;
-export const RECORD_SCHEMA = "1";
+export const POLICY_SCHEMA = 2;
+export const RECORD_SCHEMA = "2";
 
 /** The one action an Owner approval can authorise. */
 export const AUTHORIZED_ACTIONS = "publish-normal-tag";
@@ -25,16 +35,46 @@ export const AUTHORIZED_ACTIONS = "publish-normal-tag";
 /** `comment:<id>@sha256:<hex>`: a comment of this repository and the digest of its body. */
 export const RECORD_REFERENCE = /^comment:([1-9]\d{0,15})@(sha256:[0-9a-f]{64})$/;
 
-/** The kinds a policy issuer is named for. The first two must not be the Owner's account. */
-export const ISSUED_KINDS = Object.freeze(["independent-review", "production-acceptance", "hosted-migration"]);
-const INDEPENDENT_KINDS = new Set(["independent-review", "production-acceptance"]);
+/** The kinds the policy names an attesting agent and role for. Every one is authored by the Owner. */
+export const ATTESTED_KINDS = Object.freeze(["independent-review", "production-acceptance", "hosted-migration"]);
+
+/**
+ * The agents a record may name. The field says whose work the Owner is vouching for; it is not proof of
+ * which model wrote the text, and nothing here treats it as proof. See scripts/release/README.md.
+ */
+export const AGENTS = Object.freeze(["ChatGPT", "Claude Code"]);
+
+/** `#<positive integer>`: the release-control work item a release's records are all bound to. */
+export const TICKET = /^#[1-9]\d{0,9}$/;
+
+/** The role an agent record carries when it only relays the Owner's direct instruction. */
+export const RELAY_ROLE = "owner-authorization-relay";
+/** What an Owner release approval must say before `v1.0.0` or any later stable version may publish. */
+export const STABLE_CONTRACT = "authorized";
+/** Where the authority in an Owner release approval comes from. The controller cannot prove it occurred. */
+export const DIRECT_OWNER_INSTRUCTION = "direct-owner-instruction";
+
+/** The three fields every agent record carries, before the fields its kind needs. */
+const ATTESTATION_KEYS = Object.freeze(["agent", "role", "ticket"]);
 
 /** The keys each kind's block carries besides `schema`, `kind` and `repository`. */
 export const RECORD_KEYS = Object.freeze({
-  "independent-review": ["pull-request", "reviewed-head", "version", "verdict"],
-  "production-acceptance": ["version", "commit", "deployment", "verdict"],
-  "hosted-migration": ["schema-boundary", "migration-first", "hosted-preservation"],
+  "independent-review": [...ATTESTATION_KEYS, "pull-request", "reviewed-head", "version", "verdict"],
+  "production-acceptance": [
+    ...ATTESTATION_KEYS,
+    "pull-request",
+    "version",
+    "commit",
+    "deployment",
+    "review",
+    "hosted-migration",
+    "verdict",
+  ],
+  "hosted-migration": [...ATTESTATION_KEYS, "schema-boundary", "migration-first", "hosted-preservation"],
   "owner-release-approval": [
+    ...ATTESTATION_KEYS,
+    "authorization",
+    "stable-contract",
     "version",
     "tag",
     "commit",
@@ -81,28 +121,61 @@ export function readPolicy(text, repository) {
     problems.push(`it is not JSON (${error.message})`);
   }
   if (data !== null && (typeof data !== "object" || Array.isArray(data))) problems.push("it is not a JSON object");
-  const policy = { owner: null, issuers: {}, vercel: null };
+  const policy = { owner: null, attestations: {}, standingBelow: null, vercel: null };
   if (problems.length === 0) {
     if (data.schema !== POLICY_SCHEMA) problems.push(`its schema is ${JSON.stringify(data.schema ?? null)}, not ${POLICY_SCHEMA}`);
     if (data.repository !== repository) problems.push(`it is for ${JSON.stringify(data.repository ?? null)}, not ${repository}`);
     policy.owner = readAccount(data.owner);
     if (!policy.owner) problems.push("its owner is not a GitHub login and numeric id");
 
-    const issuers = data.issuers;
-    if (!issuers || typeof issuers !== "object" || Array.isArray(issuers)) {
-      problems.push("it has no issuers");
+    // Every evidence record is a comment by the Owner's account. GitHub has no separate identity for an
+    // agent, so the Owner's authorship is the authentication and the block's `agent` says whose work the
+    // Owner is vouching for. Anything but `owner` here would claim an identity the controller cannot check.
+    const evidence = data.evidence;
+    if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+      problems.push("it has no evidence section");
     } else {
-      for (const key of Object.keys(issuers)) {
-        if (!ISSUED_KINDS.includes(key)) problems.push(`it names an issuer for an unknown kind ${JSON.stringify(key)}`);
+      if (evidence.author !== "owner") {
+        problems.push(`its evidence author is ${JSON.stringify(evidence.author ?? null)}, not "owner"`);
       }
-      for (const kind of ISSUED_KINDS) {
-        if (!Object.hasOwn(issuers, kind)) problems.push(`it does not say who issues ${kind} records`);
-        else if (issuers[kind] === null) policy.issuers[kind] = null;
-        else {
-          policy.issuers[kind] = readAccount(issuers[kind]);
-          if (!policy.issuers[kind]) problems.push(`its ${kind} issuer is not null or a GitHub login and numeric id`);
+      const attestations = evidence.attestations;
+      if (!attestations || typeof attestations !== "object" || Array.isArray(attestations)) {
+        problems.push("it has no evidence attestations");
+      } else {
+        for (const key of Object.keys(attestations)) {
+          if (!ATTESTED_KINDS.includes(key)) problems.push(`it attests an unknown kind ${JSON.stringify(key)}`);
+        }
+        for (const kind of ATTESTED_KINDS) {
+          if (!Object.hasOwn(attestations, kind)) {
+            problems.push(`it does not say which agent attests ${kind} records`);
+            continue;
+          }
+          const entry = attestations[kind];
+          // `null` says no agent attests this kind. That refuses its gate, and leaves the rest of the
+          // policy usable — the same shape as a policy that has not settled one kind of evidence yet.
+          if (entry === null) {
+            policy.attestations[kind] = null;
+            continue;
+          }
+          const agent = entry?.agent;
+          const role = entry?.role;
+          if (typeof entry !== "object" || Array.isArray(entry) || !AGENTS.includes(agent) || role !== kind) {
+            problems.push(`its ${kind} attestation is not null or an agent of ${AGENTS.join(" or ")} with role ${kind}`);
+          } else {
+            policy.attestations[kind] = { agent, role };
+          }
         }
       }
+    }
+
+    // Below this version a release publishes under the Owner's standing authorization; at or above it the
+    // Owner's own approval record and dispatch are required for every release.
+    const authorization = data.authorization;
+    const below = authorization?.["standing-normal-below"];
+    if (!authorization || typeof authorization !== "object" || Array.isArray(authorization) || typeof below !== "string" || !NORMAL_VERSION.test(below)) {
+      problems.push("its authorization does not say the normal version standing authorization stops below");
+    } else {
+      policy.standingBelow = below;
     }
 
     const vercel = data.vercel;
@@ -128,6 +201,20 @@ export function readPolicy(text, repository) {
     };
   }
   return { policy, reasons: [] };
+}
+
+/** The agents and role a record of `kind` must attest, from the policy, or null when it names none. */
+export function attestationFor(policy, kind) {
+  const attestation = policy?.attestations?.[kind];
+  return attestation ? { agents: [attestation.agent], role: attestation.role } : null;
+}
+
+/**
+ * The attestation an Owner release approval carries. Either agent may relay the Owner's direct instruction,
+ * and the role says that relaying is all it does: the authority is the Owner's, not the agent's.
+ */
+export function relayAttestation() {
+  return { agents: [...AGENTS], role: RELAY_ROLE };
 }
 
 /** A record reference, as `{ id, digest }`, or null when the text is not one. */
@@ -198,16 +285,21 @@ export function isBefore(earlier, later) {
 }
 
 /**
- * Reads one record and checks it: the comment exists here and its body has the referenced digest, the issuer
- * is configured (and, for a review or an acceptance, is not the Owner), the author is that issuer, the
- * comment is where the kind belongs, and the block is this kind's, with `expected` values exactly.
+ * Reads one record and checks it: the comment exists here and its body has the referenced digest, it is
+ * unedited, the Owner wrote it, it is where the kind belongs, and its block is this kind's — carrying the
+ * attestation this kind requires, this release's ticket, and `expected` values exactly.
  *
- * `issuer` is the account allowed to write it, or null when the policy names none. `pullRequest` is the pull
- * request it must sit on, or null for anywhere in this repository. `verdict` is the verdict it must give.
+ * `attestation` is `{ agents, role }`: the agents whose work this kind's record may vouch for, and the role
+ * it must name. It is null when the policy configures none, which refuses. `ticket` is the release's work
+ * item, `#<number>`. `pullRequest` is the pull request it must sit on, or null for anywhere in this
+ * repository. `verdict` is the verdict it must give.
+ *
+ * The attestation is an audit binding, not proof of authorship: GitHub authenticates the Owner's account and
+ * nothing else, so a record says which agent's work the Owner vouches for. See scripts/release/README.md.
  *
  * Returns the record as the report shows it, the refusals, and the comment's `createdAt`.
  */
-export async function readRecord({ github, gate, kind, reference, issuer, owner, repository, pullRequest, expected, verdict }) {
+export async function readRecord({ github, gate, kind, reference, attestation, ticket, owner, repository, pullRequest, expected, verdict }) {
   const reasons = [];
   const refuse = (code, detail) => reasons.push(refusal(gate, code, `${kind} record ${reference.text}: ${detail}`));
   const record = {
@@ -221,15 +313,14 @@ export async function readRecord({ github, gate, kind, reference, issuer, owner,
     updatedAt: null,
     issue: null,
     fields: null,
+    agent: null,
+    role: null,
+    ticket: null,
     satisfied: false,
   };
 
-  if (issuer === null) {
-    reasons.push(refusal(gate, "evidence_issuer_unconfigured", `the release-evidence policy names no issuer of ${kind} records`));
-  } else if (INDEPENDENT_KINDS.has(kind) && (issuer.id === owner.id || issuer.login.toLowerCase() === owner.login.toLowerCase())) {
-    reasons.push(
-      refusal(gate, "evidence_issuer_not_independent", `the release-evidence policy names the Owner's account as the issuer of ${kind} records`),
-    );
+  if (!attestation) {
+    reasons.push(refusal(gate, "evidence_attestation_unconfigured", `the release-evidence policy names no attesting agent for ${kind} records`));
   }
 
   const comment = await github.issueComment(reference.id);
@@ -261,10 +352,12 @@ export async function readRecord({ github, gate, kind, reference, issuer, owner,
   if (record.updatedAt !== record.createdAt) {
     refuse("evidence_record_edited", `it was created at ${record.createdAt} and edited at ${record.updatedAt}; post a new record instead`);
   }
-  if (issuer !== null && (record.author.id !== issuer.id || record.author.login !== issuer.login)) {
+  // The Owner's account is the only identity GitHub authenticates for this repository, so every record is a
+  // comment the Owner wrote. An agent's own claim to have written one is not evidence of anything.
+  if (record.author.id !== owner.id || record.author.login !== owner.login) {
     refuse(
       "evidence_wrong_issuer",
-      `it was written by ${JSON.stringify(record.author.login)} (${record.author.id}), not ${issuer.login} (${issuer.id})`,
+      `it was written by ${JSON.stringify(record.author.login)} (${record.author.id}), not the Owner ${owner.login} (${owner.id})`,
     );
   }
   if (record.issue === null || (pullRequest !== null && record.issue !== pullRequest)) {
@@ -293,6 +386,26 @@ export async function readRecord({ github, gate, kind, reference, issuer, owner,
         .join("; "),
     );
   } else {
+    record.agent = block.fields.agent;
+    record.role = block.fields.role;
+    record.ticket = block.fields.ticket;
+    // Each of these has its own code, because each names a different thing that went wrong: the wrong agent's
+    // work, the wrong role for the gate, or a record belonging to another release's work item.
+    if (attestation && !attestation.agents.includes(block.fields.agent)) {
+      refuse(
+        "evidence_agent_mismatch",
+        `agent is ${JSON.stringify(block.fields.agent)}, not ${attestation.agents.map((a) => JSON.stringify(a)).join(" or ")}`,
+      );
+    }
+    if (attestation && block.fields.role !== attestation.role) {
+      refuse("evidence_role_mismatch", `role is ${JSON.stringify(block.fields.role)}, not ${JSON.stringify(attestation.role)}`);
+    }
+    if (!TICKET.test(block.fields.ticket)) {
+      refuse("evidence_ticket_invalid", `ticket is ${JSON.stringify(block.fields.ticket)}, not #<number>`);
+    } else if (ticket !== undefined && block.fields.ticket !== ticket) {
+      refuse("evidence_ticket_mismatch", `ticket is ${JSON.stringify(block.fields.ticket)}, not this release's ${ticket}`);
+    }
+
     const authoritative = { schema: RECORD_SCHEMA, repository, ...expected };
     for (const [key, value] of Object.entries(authoritative)) {
       if (block.fields[key] !== value) {

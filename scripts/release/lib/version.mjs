@@ -14,6 +14,9 @@
 
 import semver from "semver";
 
+/** The one version no change calculates: the Owner deciding the interface is stable. */
+export const STABLE_VERSION = "1.0.0";
+
 /** An annotated normal release tag: `vMAJOR.MINOR.PATCH`, no prerelease, no build metadata. */
 export const NORMAL_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
@@ -45,7 +48,7 @@ export function nextVersion({ baseVersion, highest, stableContractAcceptance }) 
         },
       };
     }
-    return { ok: true, version: "1.0.0" };
+    return { ok: true, version: STABLE_VERSION };
   }
   const release = highest === "breaking" ? (policy === "0.x" ? "minor" : "major") : highest;
   return { ok: true, version: semver.inc(baseVersion, release) };

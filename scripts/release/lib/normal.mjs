@@ -1,23 +1,34 @@
 /**
- * Normal releases: whether an Owner's request to publish `vX.Y.Z` at an exact merge is satisfied by
- * authoritative evidence, and the one path that publishes it.
+ * Normal releases: whether a request to publish `vX.Y.Z` at an exact merge is satisfied by authoritative
+ * evidence, and the one path that publishes it.
+ *
+ * Two ways a release is authorised, and a version belongs to exactly one of them:
+ *
+ *   standing   below the policy's stable version. The Owner has authorised these in advance, so posting a
+ *              valid production-acceptance record is the whole authorisation: it starts the automatic
+ *              workflow and names the review and hosted-migration records the release rests on. There is no
+ *              separate approval record and no manual dispatch, and a request that brings either is refused.
+ *   explicit   at or above it. The Owner's own release-approval record, saying the stable contract is
+ *              authorized, and the Owner's own manual dispatch. Both are necessary; neither alone publishes.
  *
  * `evaluateRelease` only reads. It checks every gate of the evidence contract in scripts/release/README.md
  * and reports each one, so a refusal names what is missing:
  *
- *   dispatch               the Owner started this run, and the Owner started its current attempt
+ *   dispatch               the Owner started this run of the mode's workflow, and started its current attempt
  *   policy                 the release-evidence policy at the release commit
  *   history                the commit is an accepted merge on main, with its own ancestral release
  *   main                   main is still exactly the commit
- *   version                the requested version is the calculated one, and its tag is free or already this release
+ *   version                the requested version is the calculated one, it publishes through the route its
+ *                          version allows, and its tag is free or already this release
  *   preparation            the commit is the reviewed preparation's merge, and its metadata agrees
  *   schema-boundary        the migration tree is unchanged, or a hosted migration record is required
  *   hosted-migration       that record, when the tree changed
  *   ci                     final-merge CI passed for the commit
  *   deployment             Vercel's production deployment of the commit
  *   review                 the independent READY for the preparation's reviewed head
- *   production-acceptance  production verification of that deployment
- *   owner-approval         the Owner's written approval of all of the above
+ *   production-acceptance  production verification of that deployment, naming the records it rests on
+ *   owner-approval         the authorisation: standing below the policy's stable version, and otherwise the
+ *                          Owner's own written approval of all of the above
  *
  * `publishRelease` evaluates everything again from Git and GitHub inside the tag writer's locked job,
  * refuses a plan the evaluation no longer matches, and writes only when normal publication is activated.
@@ -31,30 +42,68 @@ import { evaluateFinalMergeCi, FINAL_MERGE_CI } from "./ci.mjs";
 import { FULL_SHA } from "./cli.mjs";
 import { ControllerError } from "./errors.mjs";
 import {
+  attestationFor,
   AUTHORIZED_ACTIONS,
+  bodyDigest,
+  DIRECT_OWNER_INSTRUCTION,
   formatBoundary,
   isBefore,
   notAfter,
   POLICY_PATH,
+  readBlock,
   readPolicy,
   readRecord,
   readReference,
+  relayAttestation,
   renderBlock,
+  STABLE_CONTRACT,
+  TICKET,
 } from "./evidence.mjs";
 import { readAcceptedRange } from "./history.mjs";
 import { MAIN_BRANCH, verifyMergedPreparation } from "./preparation.mjs";
 import { createAnnotatedTag } from "./tag-write.mjs";
 import { compareVersions, NORMAL_TAG, NORMAL_VERSION, policyFor } from "./version.mjs";
 
-export const RELEASE_PLAN_SCHEMA = 1;
+export const RELEASE_PLAN_SCHEMA = 2;
 
-/** The workflow the Owner dispatches. Only a run of it, on main, can publish. */
+/** The workflow the Owner dispatches by hand. Only a run of it, on main, can publish a stable release. */
 export const NORMAL_RELEASE_WORKFLOW = Object.freeze({
   file: "release-normal-tag.yml",
   path: ".github/workflows/release-normal-tag.yml",
   event: "workflow_dispatch",
   branch: MAIN_BRANCH,
 });
+
+/**
+ * The workflow the Owner's own production-acceptance comment starts. Only a run of it, on main, can publish
+ * a release under the Owner's standing authorization.
+ */
+export const AUTOMATIC_RELEASE_WORKFLOW = Object.freeze({
+  file: "release-normal-tag-automatic.yml",
+  path: ".github/workflows/release-normal-tag-automatic.yml",
+  event: "issue_comment",
+  branch: MAIN_BRANCH,
+});
+
+/**
+ * The two ways a normal release is authorised.
+ *
+ *   standing   below the policy's stable version: the Owner's standing authorization, carried by the
+ *              acceptance record the Owner posts. No separate approval record, no manual dispatch.
+ *   explicit   at or above it: the Owner's own release-approval record saying the stable contract is
+ *              authorized, and the Owner's own workflow dispatch. Both are necessary.
+ *
+ * A release's mode follows from its version, so it is stable across a retry and belongs in the annotation.
+ */
+export const RELEASE_MODES = Object.freeze({
+  standing: Object.freeze({ name: "standing", workflow: AUTOMATIC_RELEASE_WORKFLOW }),
+  explicit: Object.freeze({ name: "explicit", workflow: NORMAL_RELEASE_WORKFLOW }),
+});
+
+/** The mode a version publishes under, given the version standing authorization stops below. */
+export function modeForVersion(version, standingBelow) {
+  return compareVersions(version, standingBelow) < 0 ? RELEASE_MODES.standing : RELEASE_MODES.explicit;
+}
 
 /** The directory whose tree is a release's schema boundary. */
 export const MIGRATIONS_PATH = "supabase/migrations";
@@ -80,9 +129,15 @@ const IDENTITY_CODES = new Set(["unknown_commit", "unknown_main_ref", "not_on_ma
 const IN_PROGRESS = new Set(["pending", "queued", "in_progress"]);
 const NORMAL_TAG_WRITE = Object.freeze({ noun: "normal release tag", publication: "a published release" });
 
-const PROVENANCE_FIELDS = Object.freeze([
+/**
+ * The fields a retry must reproduce exactly. The mode, its ticket and the workflow that may publish it all
+ * follow from the release itself, so a second attempt of the same release writes the same values.
+ */
+const STABLE_FIELDS = Object.freeze([
   "Release-Controller-Schema",
   "Release-Kind",
+  "Release-Authorization",
+  "Release-Ticket",
   "Repository",
   "Commit",
   "Version",
@@ -101,28 +156,31 @@ const PROVENANCE_FIELDS = Object.freeze([
   "Authorized-Actions",
   "Owner",
   "CI-Workflow",
-  "CI-Run",
-  "CI-Attempt",
-  "Dispatch-Run",
+  "Dispatch-Workflow",
 ]);
-/** The fields a retry must reproduce exactly. The CI attempt is proved separately; the dispatch run differs per retry. */
-const STABLE_FIELDS = Object.freeze(PROVENANCE_FIELDS.slice(0, 20));
+/** Every provenance field. The CI attempt is proved separately; the dispatch run differs per retry. */
+const PROVENANCE_FIELDS = Object.freeze([...STABLE_FIELDS, "CI-Run", "CI-Attempt", "Dispatch-Run"]);
 
 const reason = (kind, gate, code, detail, commit = null, pr = null) => ({ kind, gate, code, detail, commit, pr });
 const refusal = (gate, code, detail, commit = null, pr = null) => reason("refusal", gate, code, detail, commit, pr);
 const same = (account, expected) => account?.id === expected.id && account?.login === expected.login;
 const peeledCommit = (tag) => (tag.objectType === "tag" ? tag.peeledName : tag.objectName);
 
-/** The request as a plan and a report carry it. */
+/**
+ * The request as a plan and a report carry it. `mode` is not the caller's to choose: it follows from the
+ * version and the policy, and `evaluateRelease` fills it in once it has read the policy at the commit.
+ */
 export function describeRequest(request) {
   return {
+    mode: null,
+    ticket: request.ticket,
     sha: request.sha,
     version: request.version,
     preparationPr: request.preparationPr,
     deployment: request.deployment,
     review: request.review.text,
     productionAcceptance: request.productionAcceptance.text,
-    ownerApproval: request.ownerApproval.text,
+    ownerApproval: request.ownerApproval?.text ?? "none",
     hostedMigration: request.hostedMigration?.text ?? "none",
     dispatch: request.dispatch,
   };
@@ -134,23 +192,25 @@ export function requestFromPlan(value) {
   const positive = (n) => Number.isSafeInteger(n) && n > 0;
   const review = readReference(value.review);
   const productionAcceptance = readReference(value.productionAcceptance);
-  const ownerApproval = readReference(value.ownerApproval);
+  const ownerApproval = value.ownerApproval === "none" ? null : readReference(value.ownerApproval);
   const hostedMigration = value.hostedMigration === "none" ? null : readReference(value.hostedMigration);
   const dispatch = value.dispatch;
   if (
+    !TICKET.test(String(value.ticket ?? "")) ||
     !FULL_SHA.test(String(value.sha ?? "")) ||
     !NORMAL_VERSION.test(String(value.version ?? "")) ||
     !positive(value.preparationPr) ||
     !positive(value.deployment) ||
     !review ||
     !productionAcceptance ||
-    !ownerApproval ||
+    (value.ownerApproval !== "none" && !ownerApproval) ||
     (value.hostedMigration !== "none" && !hostedMigration) ||
     !(dispatch === null || (dispatch && positive(dispatch.runId) && positive(dispatch.attempt)))
   ) {
     return null;
   }
   return {
+    ticket: value.ticket,
     sha: value.sha,
     version: value.version,
     preparationPr: value.preparationPr,
@@ -171,6 +231,8 @@ export function expectedReleaseProvenance(report) {
     fields: {
       "Release-Controller-Schema": String(RELEASE_PLAN_SCHEMA),
       "Release-Kind": "normal",
+      "Release-Authorization": report.mode,
+      "Release-Ticket": request.ticket,
       Repository: report.repository,
       Commit: request.sha,
       Version: release.version,
@@ -189,6 +251,7 @@ export function expectedReleaseProvenance(report) {
       "Authorized-Actions": AUTHORIZED_ACTIONS,
       Owner: `${report.owner.login} ${report.owner.id}`,
       "CI-Workflow": FINAL_MERGE_CI.workflowPath,
+      "Dispatch-Workflow": RELEASE_MODES[report.mode].workflow.path,
     },
   };
 }
@@ -257,8 +320,8 @@ export function renderReleaseAnnotation(report) {
   return `${lines.join("\n")}\n`;
 }
 
-/** Every way a run differs from a run of the normal-release workflow, dispatched on main for `sha`. */
-function dispatchIdentityMismatches(run, { repository, repositoryId, workflowId, sha }) {
+/** Every way a run differs from a run of `workflow`, started on main for `sha`. */
+function dispatchIdentityMismatches(run, { repository, repositoryId, workflow, workflowId, sha }) {
   const mismatches = [];
   const expect = (label, actual, expected) => {
     if (actual !== expected) mismatches.push(`its ${label} is ${JSON.stringify(actual ?? null)}, not ${JSON.stringify(expected)}`);
@@ -267,9 +330,9 @@ function dispatchIdentityMismatches(run, { repository, repositoryId, workflowId,
   if (repositoryId !== null) expect("repository id", run.repository?.id, repositoryId);
   expect("head repository", run.head_repository?.full_name, repository);
   expect("workflow id", run.workflow_id, workflowId);
-  expect("workflow path", run.path, NORMAL_RELEASE_WORKFLOW.path);
-  expect("event", run.event, NORMAL_RELEASE_WORKFLOW.event);
-  expect("branch", run.head_branch, NORMAL_RELEASE_WORKFLOW.branch);
+  expect("workflow path", run.path, workflow.path);
+  expect("event", run.event, workflow.event);
+  expect("branch", run.head_branch, workflow.branch);
   expect("head commit", run.head_sha, sha);
   return mismatches;
 }
@@ -278,27 +341,33 @@ function dispatchIdentityMismatches(run, { repository, repositoryId, workflowId,
  * Why the dispatch an existing tag cites, `Dispatch-Run: <run> <attempt>`, is not the Owner's dispatch of this
  * release, read from GitHub. Empty when it is.
  *
- * The cited run must be this repository's normal-release workflow, dispatched on main for the tag's commit, and
- * started by the Owner, and the cited attempt must exist and have been started by the Owner. Unlike the current
+ * The cited run must be this repository's workflow for the release's mode — the Owner's manual dispatch for an
+ * explicit release, or the Owner's own acceptance comment for a standing one — started on main for the tag's
+ * commit by the Owner, and the cited attempt must exist and have been started by the Owner. Unlike the current
  * invocation's dispatch, it need not be running or be the run's latest attempt: the run that wrote a tag may
  * have finished, failed after writing, or been re-run since, and none of that unmakes its tag.
+ *
+ * The annotation's own `Dispatch-Workflow` is a stable field, checked against the mode's workflow beside every
+ * other stable field, so a tag that names the other mode's workflow is already a difference before this runs.
  */
 async function citedDispatchDifferences(github, cited, report) {
   const [runId, attempt] = cited.split(" ").map(Number);
   const owner = report.owner;
   const sha = report.request.sha;
-  const unverified = (detail) => [`its Dispatch-Run ${cited} is not the Owner's dispatch of ${sha}: ${detail}`];
+  const expected = RELEASE_MODES[report.mode].workflow;
+  const unverified = (detail) => [`its Dispatch-Run ${cited} is not the Owner's ${report.mode} dispatch of ${sha}: ${detail}`];
   if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(attempt)) return unverified("it is not a run id and an attempt");
 
-  const workflow = await github.workflow(NORMAL_RELEASE_WORKFLOW.file);
-  if (!workflow || workflow.path !== NORMAL_RELEASE_WORKFLOW.path || !Number.isSafeInteger(workflow.id)) {
-    return unverified(`${NORMAL_RELEASE_WORKFLOW.path} is not a workflow of ${report.repository}`);
+  const workflow = await github.workflow(expected.file);
+  if (!workflow || workflow.path !== expected.path || !Number.isSafeInteger(workflow.id)) {
+    return unverified(`${expected.path} is not a workflow of ${report.repository}`);
   }
   const run = await github.workflowRun(runId);
   if (!run) return unverified(`${report.repository} has no workflow run ${runId}`);
   const mismatches = dispatchIdentityMismatches(run, {
     repository: report.repository,
     repositoryId: report.repositoryId,
+    workflow: expected,
     workflowId: workflow.id,
     sha,
   });
@@ -316,14 +385,14 @@ async function citedDispatchDifferences(github, cited, report) {
   return mismatches.length > 0 ? unverified(mismatches.join("; ")) : [];
 }
 
-async function checkDispatch({ github, repository, repositoryId, sha, dispatch, owner }) {
+async function checkDispatch({ github, repository, repositoryId, sha, dispatch, owner, mode }) {
   const reasons = [];
-  const summary = { runId: dispatch.runId, attempt: dispatch.attempt, actor: null, triggeringActor: null };
+  const summary = { mode: mode.name, workflow: mode.workflow.path, runId: dispatch.runId, attempt: dispatch.attempt, actor: null, triggeringActor: null };
   const invalid = (detail) => reasons.push(refusal("dispatch", "dispatch_run_invalid", detail, sha));
 
-  const workflow = await github.workflow(NORMAL_RELEASE_WORKFLOW.file);
-  if (!workflow || workflow.path !== NORMAL_RELEASE_WORKFLOW.path || !Number.isSafeInteger(workflow.id)) {
-    invalid(`${NORMAL_RELEASE_WORKFLOW.path} is not a workflow of ${repository}`);
+  const workflow = await github.workflow(mode.workflow.file);
+  if (!workflow || workflow.path !== mode.workflow.path || !Number.isSafeInteger(workflow.id)) {
+    invalid(`${mode.workflow.path} is not a workflow of ${repository}`);
     return { summary, reasons };
   }
   const run = await github.workflowRun(dispatch.runId);
@@ -331,14 +400,14 @@ async function checkDispatch({ github, repository, repositoryId, sha, dispatch, 
     invalid(`${repository} has no workflow run ${dispatch.runId}`);
     return { summary, reasons };
   }
-  const mismatches = dispatchIdentityMismatches(run, { repository, repositoryId, workflowId: workflow.id, sha });
+  const mismatches = dispatchIdentityMismatches(run, { repository, repositoryId, workflow: mode.workflow, workflowId: workflow.id, sha });
   const expect = (label, actual, expected) => {
     if (actual !== expected) mismatches.push(`its ${label} is ${JSON.stringify(actual ?? null)}, not ${JSON.stringify(expected)}`);
   };
   expect("latest attempt", run.run_attempt, dispatch.attempt);
   // A dispatch authorises only the run it started, while that run is running.
   expect("status", run.status, "in_progress");
-  if (mismatches.length > 0) invalid(`run ${dispatch.runId} is not the Owner's dispatch of ${sha}: ${mismatches.join("; ")}`);
+  if (mismatches.length > 0) invalid(`run ${dispatch.runId} is not the Owner's ${mode.name} dispatch of ${sha}: ${mismatches.join("; ")}`);
 
   const attempt = await github.workflowRunAttempt(dispatch.runId, dispatch.attempt);
   summary.actor = run.actor ? { login: run.actor.login ?? null, id: run.actor.id ?? null } : null;
@@ -437,6 +506,7 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
     repositoryId,
     mainRef,
     request: describeRequest(request),
+    mode: null,
     owner: null,
     main: null,
     tag: { name: tagName, provisional: true },
@@ -499,8 +569,22 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
   settle("policy", policyReasons);
   report.owner = policy?.owner ?? null;
 
+  // The mode is the policy's, never the request's: a request that claims the other mode has its dispatch
+  // checked against the workflow its version actually publishes through, and the version gate refuses it.
+  const requiredMode = policy ? modeForVersion(request.version, policy.standingBelow) : null;
+  report.mode = requiredMode?.name ?? null;
+  report.request.mode = report.mode;
+
   if (policy && request.dispatch) {
-    const dispatch = await checkDispatch({ github, repository, repositoryId, sha, dispatch: request.dispatch, owner: policy.owner });
+    const dispatch = await checkDispatch({
+      github,
+      repository,
+      repositoryId,
+      sha,
+      dispatch: request.dispatch,
+      owner: policy.owner,
+      mode: requiredMode,
+    });
     report.dispatch = dispatch.summary;
     settle("dispatch", dispatch.reasons);
   }
@@ -526,17 +610,21 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
 
   // The version, and whether its tag is free or already this release.
   const policyName = policyFor(base.version);
-  const prepared = verifyMergedPreparation({ git, repository, sha, base, merges, pr: request.preparationPr });
+  // 1.0.0 is the one version no change calculates. Asking for it during 0.x means the preparation was made
+  // with the Owner's stable-contract decision, so the same calculation is used here to recognise it. The
+  // authorization gate is what makes it legitimate: without the Owner's own approval record saying the
+  // stable contract is authorized, this release refuses however well the versions line up.
+  const stableContract = request.version === "1.0.0" && policyName === "0.x";
+  const prepared = verifyMergedPreparation({ git, repository, sha, base, merges, pr: request.preparationPr, stableContract });
   const versionReasons = [];
-  if (request.version === "1.0.0" && policyName === "0.x") {
-    versionReasons.push(
-      refusal("version", "stable_contract_acceptance_undecided", `1.0.0 needs the Owner's stable-contract acceptance, and no reviewed way to record and check it exists yet`, sha),
-    );
-  } else if (prepared.version !== request.version) {
+  if (prepared.version !== request.version) {
     versionReasons.push(
       refusal("version", "version_mismatch", `${tagName} was requested, but the accepted merges after ${base.tag} calculate ${prepared.version ?? "nothing"}`, sha),
     );
   }
+  // A release publishes through the one route its version allows, and the dispatch gate is where that is
+  // proved: the run must be of the mode's workflow. The automatic route cannot reach a stable version, and a
+  // manual dispatch cannot stand in for the Owner's standing authorization of a release below it.
   const normalTags = tags.filter((tag) => NORMAL_TAG.test(tag.name));
   const existing = normalTags.find((tag) => tag.name === tagName) ?? null;
   const otherAtSha = normalTags.filter((tag) => tag.name !== tagName && peeledCommit(tag) === sha).map((tag) => tag.name);
@@ -593,7 +681,8 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
         gate: "hosted-migration",
         kind: "hosted-migration",
         reference: request.hostedMigration,
-        issuer: policy.issuers["hosted-migration"],
+        attestation: attestationFor(policy, "hosted-migration"),
+        ticket: request.ticket,
         owner: policy.owner,
         repository,
         pullRequest: null,
@@ -649,7 +738,8 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
       gate: "review",
       kind: "independent-review",
       reference: request.review,
-      issuer: policy.issuers["independent-review"],
+      attestation: attestationFor(policy, "independent-review"),
+      ticket: request.ticket,
       owner: policy.owner,
       repository,
       pullRequest: request.preparationPr,
@@ -672,11 +762,21 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
       gate: "production-acceptance",
       kind: "production-acceptance",
       reference: request.productionAcceptance,
-      issuer: policy.issuers["production-acceptance"],
+      attestation: attestationFor(policy, "production-acceptance"),
+      ticket: request.ticket,
       owner: policy.owner,
       repository,
       pullRequest: request.preparationPr,
-      expected: { version: request.version, commit: sha, deployment: String(request.deployment) },
+      // The acceptance names the two records it rests on. Under standing authorization it is also what starts
+      // the release, so those references are the only thing binding that run to this review and this migration.
+      expected: {
+        "pull-request": String(request.preparationPr),
+        version: request.version,
+        commit: sha,
+        deployment: String(request.deployment),
+        review: request.review.text,
+        "hosted-migration": request.hostedMigration?.text ?? "none",
+      },
       verdict: "ACCEPTED",
     });
     report.records.productionAcceptance = acceptance.record;
@@ -689,9 +789,28 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
     settle("production-acceptance", acceptance.reasons);
   }
 
-  if (policy && preparedHere && prepared.releaseDate) {
+  // The authorization gate. Under standing authorization the Owner has already authorised every release below
+  // the policy's stable version, so there is no approval record to read and one supplied anyway is refused:
+  // an unread record beside a published tag would look like an approval the controller had checked.
+  if (policy && requiredMode?.name === "standing") {
+    settle(
+      "owner-approval",
+      request.ownerApproval
+        ? [
+            refusal(
+              "owner-approval",
+              "owner_approval_record_unexpected",
+              `${tagName} is below ${policy.standingBelow} and publishes under the Owner's standing authorization, so no owner-release-approval record belongs to it`,
+              sha,
+            ),
+          ]
+        : [],
+    );
+  } else if (policy && preparedHere && prepared.releaseDate && request.ownerApproval) {
     const expectedApproval = {
       repository,
+      authorization: DIRECT_OWNER_INSTRUCTION,
+      "stable-contract": STABLE_CONTRACT,
       version: request.version,
       tag: tagName,
       commit: sha,
@@ -710,7 +829,10 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
       gate: "owner-approval",
       kind: "owner-release-approval",
       reference: request.ownerApproval,
-      issuer: policy.owner,
+      // Either agent may post the Owner's relay, and the role says relaying is all it does. The controller
+      // cannot read the chat the instruction was given in, and never claims the record proves it happened.
+      attestation: relayAttestation(),
+      ticket: request.ticket,
       owner: policy.owner,
       repository,
       pullRequest: request.preparationPr,
@@ -727,8 +849,143 @@ export async function evaluateRelease({ git, github, repository, repositoryId, r
     if (others.every((entry) => entry.state === "satisfied" || entry.state === "not_required")) {
       report.approvalTemplate = renderBlock("owner-release-approval", expectedApproval);
     }
+  } else if (policy && requiredMode?.name === "explicit" && !request.ownerApproval) {
+    settle("owner-approval", [
+      refusal(
+        "owner-approval",
+        "owner_approval_record_required",
+        `${tagName} is not below ${policy.standingBelow}, so it publishes only with the Owner's own release approval saying the stable contract is ${STABLE_CONTRACT}`,
+        sha,
+      ),
+    ]);
   }
   return finish();
+}
+
+/**
+ * The release a production-acceptance comment asks for, read from GitHub — never from the event that
+ * mentioned it.
+ *
+ * The automatic workflow hands the controller one number, the comment's id, and the pull request the event
+ * said it was on. Everything else comes from the API: the comment's body, its author and its location. This
+ * only reads the candidate out of the record; it proves nothing. The record is then checked like any other,
+ * by the production-acceptance gate, against the policy at the commit it names — the Owner's authorship, the
+ * ChatGPT attestation, the digest, the location, the ticket and every field. A comment that survives parsing
+ * here and fails there publishes nothing.
+ *
+ * `eventPullRequest` is the event's claim about where the comment is. It is compared with the API's answer
+ * and never used in its place, so a forged or stale payload refuses instead of redirecting the release.
+ */
+export async function deriveStandingRequest({ github, repository, commentId, eventPullRequest }) {
+  const reasons = [];
+  const refuse = (code, detail) => {
+    reasons.push(refusal("production-acceptance", code, `comment ${commentId}: ${detail}`));
+    return { request: null, reasons };
+  };
+
+  const comment = await github.issueComment(commentId);
+  if (!comment) return refuse("evidence_record_missing", `no comment ${commentId} exists in ${repository}`);
+  const body = typeof comment.body === "string" ? comment.body : "";
+
+  const issuePath = (() => {
+    try {
+      return new URL(String(comment.issue_url)).pathname;
+    } catch {
+      return "";
+    }
+  })();
+  const issueMatch = new RegExp(`/repos/${repository.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/issues/([1-9]\\d*)$`).exec(issuePath);
+  const issue = issueMatch ? Number(issueMatch[1]) : null;
+  if (issue === null) return refuse("evidence_wrong_location", "it is on no issue or pull request of this repository");
+  if (eventPullRequest !== null && issue !== eventPullRequest) {
+    return refuse(
+      "standing_event_mismatch",
+      `the event said it is on #${eventPullRequest}; GitHub says #${issue}. The API is authoritative and the release stops here`,
+    );
+  }
+
+  const block = readBlock(body);
+  if (block.problem) return refuse("evidence_block_invalid", block.problem);
+  const fields = block.fields;
+  if (fields.kind !== "production-acceptance") {
+    return refuse("evidence_block_invalid", `its block is a ${JSON.stringify(fields.kind ?? null)} record, not production-acceptance`);
+  }
+
+  const positive = /^[1-9]\d*$/;
+  const problems = [];
+  if (!FULL_SHA.test(String(fields.commit ?? ""))) problems.push("its commit is not a full sha");
+  if (!NORMAL_VERSION.test(String(fields.version ?? ""))) problems.push("its version is not X.Y.Z");
+  if (!positive.test(String(fields["pull-request"] ?? ""))) problems.push("its pull-request is not a number");
+  if (!positive.test(String(fields.deployment ?? ""))) problems.push("its deployment is not a number");
+  if (!TICKET.test(String(fields.ticket ?? ""))) problems.push("its ticket is not #<number>");
+  const review = readReference(fields.review);
+  if (!review) problems.push("its review is not a record reference");
+  const hostedMigration = fields["hosted-migration"] === "none" ? null : readReference(fields["hosted-migration"]);
+  if (fields["hosted-migration"] !== "none" && !hostedMigration) problems.push("its hosted-migration is not a record reference or none");
+  if (problems.length > 0) return refuse("standing_request_underived", problems.join("; "));
+
+  if (Number(fields["pull-request"]) !== issue) {
+    return refuse(
+      "evidence_wrong_location",
+      `its block names preparation #${fields["pull-request"]}, but it is on #${issue}; an acceptance sits on the preparation it accepts`,
+    );
+  }
+
+  return {
+    request: {
+      ticket: fields.ticket,
+      sha: fields.commit,
+      version: fields.version,
+      preparationPr: issue,
+      deployment: Number(fields.deployment),
+      review,
+      // The record is its own reference: the digest is of the bytes GitHub is serving right now. What proves
+      // it was not changed after the Owner posted it is `updated_at`, which the record gate checks.
+      productionAcceptance: readReference(`comment:${commentId}@${bodyDigest(body)}`),
+      ownerApproval: null,
+      hostedMigration,
+      dispatch: null,
+    },
+    reasons,
+  };
+}
+
+/**
+ * Evaluates the release a production-acceptance comment asks for, under the Owner's standing authorization.
+ * Reads Git and GitHub; writes nothing. Its report is the plan the tag writer receives, exactly as
+ * `evaluateRelease`'s is.
+ */
+export async function evaluateStandingRelease({ git, github, repository, repositoryId, commentId, eventPullRequest, dispatch, mainRef, serverUrl }) {
+  const derived = await deriveStandingRequest({ github, repository, commentId, eventPullRequest });
+  if (!derived.request) {
+    return {
+      command: "evaluate-release",
+      schema: RELEASE_PLAN_SCHEMA,
+      decision: "refused",
+      publication: "none",
+      repository,
+      repositoryId,
+      mainRef,
+      request: null,
+      mode: RELEASE_MODES.standing.name,
+      acceptanceComment: commentId,
+      tag: null,
+      existingTag: null,
+      gates: GATES.map((gate) => ({ gate, state: "not_checked", reasons: [] })),
+      reasons: derived.reasons,
+    };
+  }
+  const report = await evaluateRelease({
+    git,
+    github,
+    repository,
+    repositoryId,
+    request: { ...derived.request, dispatch },
+    mainRef,
+    serverUrl,
+  });
+  report.acceptanceComment = commentId;
+  return report;
 }
 
 /** Why a value read from a plan file cannot be an evaluate-release plan for this repository. Empty when it can. */
@@ -754,6 +1011,7 @@ function releaseDrift(plan, fresh) {
   const compare = (label, planned, actual) => {
     if (planned !== actual) drift.push(`${label} was ${JSON.stringify(planned ?? null)} and is ${JSON.stringify(actual ?? null)}`);
   };
+  compare("the authorization", plan.mode, fresh.mode);
   compare("the version", plan.release?.version, fresh.release?.version);
   compare("the classification", plan.release?.highestChange, fresh.release?.highestChange);
   compare("the base tag object", plan.release?.base?.tagObject, fresh.release?.base?.tagObject);

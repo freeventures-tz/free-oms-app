@@ -16,7 +16,7 @@ import semver from "semver";
 
 import { parseChangelog } from "./changelog.mjs";
 import { ControllerError } from "./errors.mjs";
-import { nextVersion, NORMAL_VERSION } from "./version.mjs";
+import { nextVersion, NORMAL_VERSION, policyFor, STABLE_VERSION } from "./version.mjs";
 
 export const PACKAGE_FILE = "package.json";
 export const LOCKFILE = "package-lock.json";
@@ -266,8 +266,8 @@ export function describeMetadata(metadata, baseVersion) {
 
 /**
  * The versions one normal release can reach from `baseVersion` under the policy: patch, minor, and
- * breaking, which is minor during 0.x and major after it. `1.0.0` by stable-contract acceptance is not
- * among them: preparation does not take that acceptance.
+ * breaking, which is minor during 0.x and major after it. `1.0.0` is not among them, because no change
+ * calculates it — it comes only from the Owner's stable-contract decision. See `isPendingVersion`.
  */
 export function oneReleaseFrom(baseVersion) {
   const versions = ["patch", "minor", "breaking"].map(
@@ -279,11 +279,17 @@ export function oneReleaseFrom(baseVersion) {
 /**
  * Whether a version ahead of the last normal release can be a preparation that merged and has not been
  * released: one release step from it, and no higher than what the accepted merges now calculate.
+ *
+ * `1.0.0` during 0.x counts only when it is the target itself. A preparation reaches it by being made for
+ * the Owner's stable-contract decision, so it is a legitimate pending version exactly when that is the
+ * release being calculated — never as a step some ordinary change could have produced.
  */
 export function isPendingVersion(version, baseVersion, target) {
+  const reachable = oneReleaseFrom(baseVersion);
+  if (target === STABLE_VERSION && policyFor(baseVersion) === "0.x") reachable.push(STABLE_VERSION);
   return (
     NORMAL_VERSION.test(version) &&
-    oneReleaseFrom(baseVersion).includes(version) &&
+    reachable.includes(version) &&
     semver.gt(version, baseVersion) &&
     semver.lte(version, target)
   );

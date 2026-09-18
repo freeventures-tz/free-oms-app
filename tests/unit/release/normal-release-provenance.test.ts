@@ -23,18 +23,18 @@ describe("normal releases: the dispatch an existing tag cites", { timeout: 300_0
 
   it("refuses an existing tag whose cited dispatch is missing, or is not the Owner's dispatch of this commit", async () => {
     const { repo, github } = state;
-    const { history, release: prepared, evidence, dispatch } = await release.validRelease();
+    const { history, release: prepared, evidence, run: dispatch } = await release.validRelease();
     const sha = prepared.mergeSha;
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
     expect((await release.publish(plan, dispatch)).json.decision).toBe("published");
 
     // Runs that look like a dispatch but are not the Owner's dispatch of this commit.
-    const byIntruder = release.dispatch(sha, { actor: INTRUDER });
-    const reranByIntruder = release.rerun(release.dispatch(sha), INTRUDER);
-    const otherCommit = release.dispatch(history.pr42.mergeSha);
-    const pushed = release.dispatch(sha, { event: "push" });
-    const otherBranch = release.dispatch(sha, { branch: "release/v0.0.7" });
-    const otherWorkflow = release.dispatch(sha, { path: ".github/workflows/release-build-tag.yml", workflowId: 1 });
+    const byIntruder = release.automaticRun(sha, { actor: INTRUDER });
+    const reranByIntruder = release.rerun(release.automaticRun(sha), INTRUDER);
+    const otherCommit = release.automaticRun(history.pr42.mergeSha);
+    const pushed = release.automaticRun(sha, { event: "push" });
+    const otherBranch = release.automaticRun(sha, { branch: "release/v0.0.7" });
+    const otherWorkflow = release.automaticRun(sha, { path: ".github/workflows/release-build-tag.yml", workflowId: 1 });
     const cases: Array<[string, string]> = [
       ["999999999999 99", "has no workflow run 999999999999"],
       [`${dispatch.runId} 9`, "the run has no attempt 9"],
@@ -47,14 +47,14 @@ describe("normal releases: the dispatch an existing tag cites", { timeout: 300_0
       [`${evidence.ciRun} 1`, `its workflow path is ".github/workflows/ci.yml"`],
     ];
 
-    const current = release.dispatch(sha);
+    const current = release.automaticRun(sha);
     for (const [cited, why] of cases) {
       repo.git("tag", "-f", "-a", "v0.0.7", "-m", annotationCiting("v0.0.7", cited), sha);
       const run = await release.evaluate(evidence.request, { dispatch: current });
       expect(run.code, cited).toBe(4);
       expect(run.json.decision, cited).toBe("refused");
       expect(release.unsatisfied(run.json), cited).toEqual(["version:normal_tag_conflict"]);
-      expect(run.json.reasons[0].detail, cited).toContain(`its Dispatch-Run ${cited} is not the Owner's dispatch of ${sha}`);
+      expect(run.json.reasons[0].detail, cited).toContain(`its Dispatch-Run ${cited} is not the Owner's standing dispatch of ${sha}`);
       expect(run.json.reasons[0].detail, cited).toContain(why);
     }
 
@@ -75,7 +75,7 @@ describe("normal releases: the dispatch an existing tag cites", { timeout: 300_0
 
   it("recovers a release whose writing attempt lost its response and failed, through the Owner's re-run and a later dispatch", async () => {
     const { repo, github } = state;
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
 
     // The reference is created, its response is lost, and the attempt fails.
@@ -94,7 +94,7 @@ describe("normal releases: the dispatch an existing tag cites", { timeout: 300_0
     finishAttempt(dispatch.runId, 2, "success");
 
     // A later dispatch, after that run finished, finds the release as well.
-    const later = await release.workflowRun(evidence.request, release.dispatch(prepared.mergeSha));
+    const later = await release.workflowRun(evidence.request, release.automaticRun(prepared.mergeSha));
     expect(later.plan.code, later.plan.stderr).toBe(0);
     expect(later.plan.json.decision).toBe("already_published");
     expect(later.publication).toBeNull();
@@ -103,12 +103,12 @@ describe("normal releases: the dispatch an existing tag cites", { timeout: 300_0
 
   it("reads a racing tag back as this release only when it cites the Owner's dispatch", async () => {
     const { repo, github } = state;
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const sha = prepared.mergeSha;
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
-    const earlier = release.dispatch(sha);
+    const earlier = release.automaticRun(sha);
     finishAttempt(earlier.runId, 1, "success");
-    const intruded = release.dispatch(sha, { actor: INTRUDER });
+    const intruded = release.automaticRun(sha, { actor: INTRUDER });
 
     // Just before the reference is created, another tag takes the name: the writer's own annotation, citing
     // another dispatch.
@@ -127,7 +127,7 @@ describe("normal releases: the dispatch an existing tag cites", { timeout: 300_0
     expect(refused.code).toBe(4);
     expect(refused.json.decision).toBe("refused");
     expect(refused.json.reasons.map((r) => r.code)).toEqual(["normal_tag_name_collision"]);
-    expect(refused.json.reasons[0].detail).toContain(`its Dispatch-Run ${intruded.runId} 1 is not the Owner's dispatch of ${sha}`);
+    expect(refused.json.reasons[0].detail).toContain(`its Dispatch-Run ${intruded.runId} 1 is not the Owner's standing dispatch of ${sha}`);
     expect(repo.git("cat-file", "tag", "v0.0.7")).toContain(`Dispatch-Run: ${intruded.runId} 1`);
 
     // The same race won by the Owner's earlier, finished dispatch of this release is this release.

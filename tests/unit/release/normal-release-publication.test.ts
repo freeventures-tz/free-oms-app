@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { REPOSITORY, REPOSITORY_ID, TOKEN } from "./support/build-harness";
-import { DATE, OWNER, useReleaseFixture } from "./support/release-harness";
+import { AUTOMATIC_WORKFLOW_PATH, DATE, OWNER, TICKET, useReleaseFixture } from "./support/release-harness";
 import { runController } from "./support/run-controller";
 
 /**
@@ -18,7 +18,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("publishes exactly one annotated v0.0.7 at the preparation's merge, with complete provenance, and a retry writes nothing", async () => {
     const { repo, github } = state;
-    const { history, release: prepared, evidence, dispatch } = await release.validRelease();
+    const { history, release: prepared, evidence, run: dispatch } = await release.validRelease();
     const { released, pr32, pr33, pr42 } = history;
 
     const plan = await release.evaluate(evidence.request, { dispatch });
@@ -115,8 +115,10 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
     const lines = raw.split("\n");
     for (const line of [
       `Release v0.0.7 of ${REPOSITORY}`,
-      "Release-Controller-Schema: 1",
+      "Release-Controller-Schema: 2",
       "Release-Kind: normal",
+      "Release-Authorization: standing",
+      `Release-Ticket: ${TICKET}`,
       `Repository: ${REPOSITORY}`,
       `Commit: ${prepared.mergeSha}`,
       "Version: 0.0.7",
@@ -130,11 +132,12 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
       `Deployment: ${evidence.deployment}`,
       `Review-Record: ${evidence.review.reference}`,
       `Production-Acceptance-Record: ${evidence.acceptance.reference}`,
-      `Owner-Approval-Record: ${evidence.approval.reference}`,
+      "Owner-Approval-Record: none",
       "Hosted-Migration-Record: none",
       "Authorized-Actions: publish-normal-tag",
       `Owner: ${OWNER.login} ${OWNER.id}`,
       "CI-Workflow: .github/workflows/ci.yml",
+      `Dispatch-Workflow: ${AUTOMATIC_WORKFLOW_PATH}`,
       `CI-Run: ${evidence.ciRun}`,
       "CI-Attempt: 1",
       `Dispatch-Run: ${dispatch.runId} 1`,
@@ -154,16 +157,16 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
     state.checkout.sync();
     const markdown = await runController(
       ["evaluate-release", "--repo", REPOSITORY, "--repo-id", String(REPOSITORY_ID), "--main-ref", "origin/main", "--path", state.checkout.dir,
-        "--sha", evidence.request.sha, "--version", "0.0.7", "--preparation-pr", "43", "--deployment", String(evidence.deployment),
-        "--review", evidence.review.reference, "--production-acceptance", evidence.acceptance.reference,
-        "--owner-approval", evidence.approval.reference, "--summary", summary],
+        "--sha", evidence.request.sha, "--version", "0.0.7", "--ticket", TICKET, "--preparation-pr", "43",
+        "--deployment", String(evidence.deployment), "--review", evidence.review.reference,
+        "--production-acceptance", evidence.acceptance.reference, "--summary", summary],
       { env: release.fixture.environment(null) },
     );
     expect(markdown.code, markdown.stderr).toBe(0);
     expect(markdown.stdout).toContain("## Normal release `v0.0.7`: already published");
     expect(markdown.stdout).toContain("| owner-approval | satisfied |");
     expect(markdown.stdout).toContain("### Final release notes");
-    expect(markdown.stdout).toContain("### The Owner's approval");
+    expect(markdown.stdout).not.toContain("### The Owner's approval");
     expect(readFileSync(summary, "utf8")).toBe(markdown.stdout);
 
     // Nothing else moved: every other ref is as it was.
@@ -175,7 +178,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
     const again = await release.publish(plan.json, retry);
     expect(again.code, again.stderr).toBe(0);
     expect(again.json).toMatchObject({ decision: "already_published", tag: null, existingTag: { name: "v0.0.7", commit: prepared.mergeSha } });
-    const second = release.dispatch(prepared.mergeSha);
+    const second = release.automaticRun(prepared.mergeSha);
     const rerun = await release.workflowRun(evidence.request, second);
     expect(rerun.plan.code, rerun.plan.stderr).toBe(0);
     expect(rerun.plan.json.decision).toBe("already_published");
@@ -194,7 +197,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("writes nothing unless RELEASE_NORMAL_PUBLICATION is exactly `enabled`; build activation does not count", async () => {
     const { github, repo } = state;
-    const { evidence, dispatch } = await release.validRelease();
+    const { evidence, run: dispatch } = await release.validRelease();
     const plan = await release.evaluate(evidence.request, { dispatch });
     expect(plan.json.decision).toBe("eligible");
     const planPath = release.fixture.writePlan(plan.json);
@@ -225,7 +228,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("refuses plans it cannot trust, a plan from another run and a plan that no longer matches, before any write", async () => {
     const { github } = state;
-    const { evidence, dispatch } = await release.validRelease();
+    const { evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
     const codes = (run: { json: { reasons: Array<{ code: string }> } }) => run.json.reasons.map((r) => r.code);
 
@@ -259,7 +262,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("refuses a retry started by anyone but the Owner, and accepts the Owner's", async () => {
     const { github } = state;
-    const { evidence, dispatch } = await release.validRelease();
+    const { evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
 
     const intruded = release.rerun(dispatch, { login: "fixture-intruder", id: 9666 });
@@ -281,7 +284,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("reports no success when a write is interrupted, and a retry converges on exactly one tag", async () => {
     const { github, repo } = state;
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
 
     // The object is created and the reference is refused by a server error: nothing is published.
@@ -311,7 +314,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("does not report success when the new tag cannot be read back, and the retry confirms it", async () => {
     const { github, repo } = state;
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
     // The read-back of the new reference fails once. The fault is armed only when the reference is created.
     github.faults.push({ method: "GET", path: /\/git\/ref\/tags\/v0\.0\.7$/, when: "before", status: 503, times: 0 });
@@ -334,7 +337,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("does not report success when the reference it created reads back as another object", async () => {
     const { github, repo } = state;
-    const { history, evidence, dispatch } = await release.validRelease();
+    const { history, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
     // Between the reference's creation and its read-back, the name comes to point at another object: the same
     // annotation, provenance and all, on another commit. Only the object and what it tags differ.
@@ -357,7 +360,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("refuses a tag name GitHub has given to something else, and moves nothing", async () => {
     const { github, repo } = state;
-    const { history, evidence, dispatch } = await release.validRelease();
+    const { history, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
     github.faults.push({
       method: "POST",
@@ -380,7 +383,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("never tags a newer main: drift before the object refuses, and drift after it leaves the object unreferenced", async () => {
     const { github, repo } = state;
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
 
     // Main moves between the object and the reference.
@@ -415,7 +418,7 @@ describe("publish-release: one immutable normal tag", { timeout: 300_000 }, () =
 
   it("publishes one tag when two writers race past the lock with the same plan", async () => {
     const { github, repo } = state;
-    const { release: prepared, evidence, dispatch } = await release.validRelease();
+    const { release: prepared, evidence, run: dispatch } = await release.validRelease();
     const plan = (await release.evaluate(evidence.request, { dispatch })).json;
     const planPath = release.fixture.writePlan(plan);
     state.checkout.sync();

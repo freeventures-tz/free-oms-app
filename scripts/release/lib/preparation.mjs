@@ -60,7 +60,7 @@ const refusal = (code, detail, { commit = null, pr = null } = {}) => ({ kind: "r
  * result is the report and, for a preparation that is not a dry run, all three files as
  * `[{ path, before, after }]`, for the command to write the changed ones. Nothing here writes.
  */
-export async function prepareRelease({ git, github, readWorkingFile, repository, sha, mainRef, serverUrl, pr, date, dryRun }) {
+export async function prepareRelease({ git, github, readWorkingFile, repository, sha, mainRef, serverUrl, pr, date, dryRun, stableContract = false }) {
   const report = {
     command: "prepare-release",
     status: null,
@@ -107,8 +107,12 @@ export async function prepareRelease({ git, github, readWorkingFile, repository,
   if (range.merges.length === 0) return finish("nothing_to_prepare");
 
   const highest = highestChange(range.merges.map((merge) => merge.change));
-  const { version } = nextVersion({ baseVersion: base.version, highest, stableContractAcceptance: null });
   const policy = policyFor(base.version);
+  // 1.0.0 is never calculated from a change: it is the Owner deciding the interface is stable. Preparing it
+  // writes the version into a branch and settles nothing — the release itself still needs the Owner's own
+  // approval record saying the stable contract is authorized.
+  const acceptance = stableContract && policy === "0.x" ? true : null;
+  const { version } = nextVersion({ baseVersion: base.version, highest, stableContractAcceptance: acceptance });
   Object.assign(report, {
     version,
     policy,
@@ -125,7 +129,7 @@ export async function prepareRelease({ git, github, readWorkingFile, repository,
       policy,
       highestChange: highest,
       version,
-      stableContractAcceptance: null,
+      stableContractAcceptance: acceptance,
       candidateMetadata: report.candidateMetadata,
       merges,
       proposed: [],
@@ -277,8 +281,8 @@ const RELEASE_HEADING = /^## \[([^\]]*)\] — (\d{4}-\d{2}-\d{2})$/;
  * Returns the refusals, and when there are none the version, the release date and the final notes, which list
  * every accepted merge once, the preparation's own merge included.
  */
-export function verifyMergedPreparation({ git, repository, sha, base, merges, pr }) {
-  const result = { reasons: [], version: null, policy: null, highestChange: null, releaseDate: null, candidateMetadata: null, notes: null, preparation: null };
+export function verifyMergedPreparation({ git, repository, sha, base, merges, pr, stableContract = false }) {
+  const result = { reasons: [], version: null, policy: null, highestChange: null, stableContract: false, releaseDate: null, candidateMetadata: null, notes: null, preparation: null };
   const at = { commit: sha, pr };
   const candidate = readCommitMetadata(git, sha);
   result.candidateMetadata = describeMetadata(candidate, base.version);
@@ -287,8 +291,10 @@ export function verifyMergedPreparation({ git, repository, sha, base, merges, pr
     return result;
   }
   const highest = highestChange(merges.map((merge) => merge.change));
-  const { version } = nextVersion({ baseVersion: base.version, highest, stableContractAcceptance: null });
-  Object.assign(result, { version, policy: policyFor(base.version), highestChange: highest });
+  const policyName = policyFor(base.version);
+  const acceptance = stableContract && policyName === "0.x" ? true : null;
+  const { version } = nextVersion({ baseVersion: base.version, highest, stableContractAcceptance: acceptance });
+  Object.assign(result, { version, policy: policyName, highestChange: highest, stableContract: acceptance === true });
 
   const last = merges[merges.length - 1];
   result.preparation = { pr: last.pr, reviewedHead: last.headSha, mergeSha: last.mergeSha, title: last.title };
@@ -334,7 +340,7 @@ export function verifyMergedPreparation({ git, repository, sha, base, merges, pr
     policy: result.policy,
     highestChange: highest,
     version,
-    stableContractAcceptance: null,
+    stableContractAcceptance: acceptance,
     candidateMetadata: result.candidateMetadata,
     merges,
     proposed: [],

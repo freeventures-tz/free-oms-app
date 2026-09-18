@@ -26,6 +26,9 @@ export function renderReleaseReport(report) {
       `| Repository | ${escapeMarkdown(report.repository)} |`,
       `| Exact merge | ${code(request.sha)} |`,
       `| Main now | ${report.main ? code(report.main) : "not read"} |`,
+      // The mode is settled once the policy at the commit has been read, which a refusal before that never does.
+      `| Authorization | ${report.mode ?? "not read"} |`,
+      `| Ticket | ${code(request.ticket)} |`,
       `| Preparation | #${request.preparationPr} |`,
       `| Deployment | ${request.deployment} |`,
       `| Dispatch | ${request.dispatch ? `run ${request.dispatch.runId} attempt ${request.dispatch.attempt}` : "not given; the writer checks it"} |`,
@@ -58,8 +61,10 @@ export function renderReleaseReport(report) {
     lines.push("", "### Records", "");
     for (const [, record] of records) {
       const author = record.author ? `${escapeMarkdown(record.author.login ?? "unknown")} (${record.author.id})` : "not read";
+      // The agent and role are what the Owner is vouching for. GitHub authenticates the author, not them.
+      const attests = record.agent ? ` attesting ${escapeMarkdown(record.agent)} as ${escapeMarkdown(record.role ?? "no role")} on ${code(record.ticket ?? "no ticket")},` : "";
       lines.push(
-        `- ${record.kind}: comment ${record.id} on ${record.issue ? `#${record.issue}` : "no issue"} by ${author}${record.via ? ` via ${escapeMarkdown(record.via)}` : ""}, created ${record.createdAt ?? "unknown"}, digest ${record.digest ? code(record.digest) : "none"}${record.satisfied ? "" : " · not satisfied"}`,
+        `- ${record.kind}: comment ${record.id} on ${record.issue ? `#${record.issue}` : "no issue"} by ${author}${record.via ? ` via ${escapeMarkdown(record.via)}` : ""},${attests} created ${record.createdAt ?? "unknown"}, digest ${record.digest ? code(record.digest) : "none"}${record.satisfied ? "" : " · not satisfied"}`,
       );
     }
   }
