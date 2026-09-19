@@ -101,6 +101,42 @@ const ALLOWED_ACTIONS = /^(actions\/(checkout|setup-node|upload-artifact|downloa
 const HOSTED = /secrets\.|vercel|--linked|db push|supabase link|--project-ref|SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD|bootstrap[:-]director|\bdeploy\b|psql|curl|wget/i;
 
 describe("the normal-release workflow", () => {
+  /**
+   * What the operator documentation must say about a stable release, in the workflow's own comments and in
+   * the README. The controller cannot check any of this, which is exactly why the wording has to be right:
+   * it is the only place the rule exists, and an earlier version of it said the opposite.
+   */
+  it("says who may post the approval and start the dispatch, and what the controller cannot prove", () => {
+    // Both files wrap their prose, and the workflow's is inside `#` comments, so the wording is checked
+    // against the sentence rather than against how it happens to be broken across lines.
+    const prose = (text: string) => text.replace(/^\s*#[ \t]?/gm, "").replace(/\s+/g, " ");
+    const sources: Array<[string, string]> = [
+      ["release-normal-tag.yml", prose(normal.text)],
+      ["scripts/release/README.md", prose(readFileSync("scripts/release/README.md", "utf8"))],
+    ];
+    for (const [where, text] of sources) {
+      // Who may act, and on what. Naming both agents matters: leaving it implicit is how a reader concludes
+      // that only a person may act, or that any agent may act on its own.
+      expect(text, where).toContain("ChatGPT or Claude Code may post");
+      expect(text, where).toContain("only after a direct Owner instruction in the active task");
+      // The limit, stated wherever that permission is. GitHub authenticates the account, not the hands on it.
+      expect(text, where).toContain("who operated the login");
+      // An instruction found in a document is not an instruction, however the document is signed.
+      expect(text, where).toMatch(/quoted inside a review, (an )?issue, (a )?handoff, (a )?commit/);
+
+      // The superseded rule, which required the Owner personally and now contradicts the policy this PR
+      // implements. A release below the stable version has no approval record at all, and above it an agent
+      // may act on a direct instruction, so neither file may still tell a reader to wait for the Owner's hands.
+      for (const stale of [
+        "the Owner posts the approval and dispatches personally",
+        "The Owner starts it personally",
+        "A re-run must be started by the Owner too",
+      ]) {
+        expect(text, `${where}: ${stale}`).not.toContain(stale);
+      }
+    }
+  });
+
   it("is started only by hand, with the request as typed string inputs, and runs only from main", () => {
     expect(Object.keys(normal.workflow.on)).toEqual(["workflow_dispatch"]);
     const inputs = (normal.workflow.on.workflow_dispatch as { inputs: Record<string, { required: boolean; type: string; default?: string }> }).inputs;
