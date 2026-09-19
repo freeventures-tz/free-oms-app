@@ -14,8 +14,14 @@
 
 import semver from "semver";
 
+/** The one version no change calculates: the Owner deciding the interface is stable. */
+export const STABLE_VERSION = "1.0.0";
+
 /** An annotated normal release tag: `vMAJOR.MINOR.PATCH`, no prerelease, no build metadata. */
 export const NORMAL_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+/** A normal version, as package metadata and the changelog carry it: `NORMAL_TAG` without the `v`. */
+export const NORMAL_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /**
  * A build tag: `vMAJOR.MINOR.PATCH-dev.N`, where MAJOR.MINOR.PATCH is the target normal version and N
@@ -42,7 +48,7 @@ export function nextVersion({ baseVersion, highest, stableContractAcceptance }) 
         },
       };
     }
-    return { ok: true, version: "1.0.0" };
+    return { ok: true, version: STABLE_VERSION };
   }
   const release = highest === "breaking" ? (policy === "0.x" ? "minor" : "major") : highest;
   return { ok: true, version: semver.inc(baseVersion, release) };

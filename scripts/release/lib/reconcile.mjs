@@ -76,6 +76,8 @@ export function rememberingGit(git) {
     commitsBetween: (from, to) => once(["between", from, to], () => git.commitsBetween(from, to)),
     tagObject: (object) => once(["tag", object], () => git.tagObject(object)),
     tags: () => once(["tags"], () => git.tags()),
+    fileAt: (commit, path) => once(["file", commit, path], () => git.fileAt(commit, path)),
+    objectAt: (commit, path) => once(["object", commit, path], () => git.objectAt(commit, path)),
   };
 }
 

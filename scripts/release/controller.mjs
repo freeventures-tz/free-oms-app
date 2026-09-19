@@ -10,17 +10,26 @@
  *   reconcile-builds      Find every accepted merge after v0.0.6 that is owed a build tag. Reads only.
  *   publish-reconciled-builds  Tag each merge that is eligible now, through publish-build's writer.
  *   write-reconciled-statuses  Report those merges as commit statuses, when publication is activated.
+ *   prepare-release       Write the next normal version into package.json, the lockfile and the
+ *                         changelog of a preparation branch's working tree, or check a merged preparation.
+ *   evaluate-release      Check every gate of the Owner's explicit request to publish a stable normal tag.
+ *                         Reads only.
+ *   evaluate-standing-release  The same check for a release below the policy's stable version, derived from
+ *                         the Owner's production-acceptance comment. Reads only.
+ *   publish-release       Publish that normal tag, when normal publication is activated.
  *   runtime-dependencies  List the lockfile paths the writing jobs receive instead of installing.
  *
- * Only publish-build, write-build-status and their two reconciled forms can write, each through a client
- * that makes exactly one kind of write, and none writes anything unless RELEASE_BUILD_PUBLICATION is
- * exactly `enabled`.
+ * Only publish-build, write-build-status, their two reconciled forms and publish-release can write to
+ * GitHub, each through a client that makes exactly one kind of write. The build commands write nothing
+ * unless RELEASE_BUILD_PUBLICATION is exactly `enabled`, and publish-release nothing unless
+ * RELEASE_NORMAL_PUBLICATION is.
  * Every other command's GitHub client can only send GET requests, and the Git client only reads the
- * local clone it is pointed at. Nothing pushes, and nothing writes a package version.
+ * local clone it is pointed at. Nothing pushes or commits. prepare-release is the only command that
+ * writes a file: the three release-metadata files of the working tree it is given.
  *
  * Exit status is part of the interface:
  *
- *   0  classified, calculated, eligible, tagged, already tagged, or nothing to do
+ *   0  classified, calculated, eligible, tagged, published, already tagged or published, or nothing to do
  *   1  the controller could not finish (Git or GitHub failed, or a write was not confirmed); nothing was guessed
  *   2  usage error
  *   3  pending: an Owner decision, or final-merge CI that has not finished
@@ -48,7 +57,10 @@ import { createGitReader } from "./lib/git.mjs";
 import { createGitHubReader } from "./lib/github.mjs";
 import { readAcceptedRange } from "./lib/history.mjs";
 import { escapeMarkdown, listParagraphs } from "./lib/markdown.mjs";
+import { describeMetadata, readCommitMetadata } from "./lib/metadata.mjs";
 import { renderPreviewReport, renderReleaseNotes } from "./lib/notes.mjs";
+import { evaluateReleaseCommand, evaluateStandingReleaseCommand, publishReleaseCommand } from "./lib/normal-commands.mjs";
+import { prepareReleaseCommand } from "./lib/preparation-commands.mjs";
 import {
   publishReconciledBuildsCommand,
   reconcileBuildsCommand,
@@ -225,6 +237,7 @@ async function preview(args, env) {
     sha,
     mainRef,
     base: range.base,
+    candidateMetadata: range.base ? describeMetadata(readCommitMetadata(git, sha), range.base.version) : null,
     policy: range.base ? policyFor(range.base.version) : null,
     highestChange: null,
     version: null,
@@ -292,6 +305,10 @@ const COMMANDS = {
   "reconcile-builds": reconcileBuildsCommand,
   "publish-reconciled-builds": publishReconciledBuildsCommand,
   "write-reconciled-statuses": writeReconciledStatusesCommand,
+  "prepare-release": prepareReleaseCommand,
+  "evaluate-release": evaluateReleaseCommand,
+  "evaluate-standing-release": evaluateStandingReleaseCommand,
+  "publish-release": publishReleaseCommand,
   "runtime-dependencies": runtimeDependenciesCommand,
 };
 

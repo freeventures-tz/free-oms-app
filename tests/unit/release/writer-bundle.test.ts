@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { REPOSITORY, REPOSITORY_ID, useBuildFixture } from "./support/build-harness";
+import { useReleaseFixture } from "./support/release-harness";
 import { runController } from "./support/run-controller";
 
 /**
@@ -19,6 +20,17 @@ const sourceFiles = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory() ? sourceFiles(join(dir, entry.name)) : entry.name.endsWith(".mjs") ? [join(dir, entry.name)] : [],
   );
+
+/** Main's controller and exactly the packages it lists, in a directory of their own. */
+async function makeBundle() {
+  const bundle = mkdtempSync(join(tmpdir(), "release-bundle-"));
+  cpSync("scripts/release", join(bundle, "scripts/release"), { recursive: true });
+  const listed = await runController(["runtime-dependencies"]);
+  for (const path of listed.stdout.split("\n").filter(Boolean)) {
+    cpSync(path, join(bundle, path), { recursive: true });
+  }
+  return { dir: bundle, controller: join(bundle, "scripts/release/controller.mjs") };
+}
 
 const packageOf = (specifier: string) =>
   specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
@@ -134,6 +146,26 @@ describe("the writer bundle", { timeout: 180_000 }, () => {
         expect(state.github.statuses.map((status) => status.state)).toEqual(["success", "success"]);
       } finally {
         rmSync(bundle, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("a normal release from the bundle alone", () => {
+    const release = useReleaseFixture();
+
+    it("evaluates and publishes with nothing but main's controller and the listed packages", async () => {
+      const bundle = await makeBundle();
+      try {
+        const { release: prepared, evidence, run: dispatch } = await release.validRelease();
+        const options = { bundle: { cwd: bundle.dir, controller: bundle.controller } };
+        const plan = await release.evaluate(evidence.request, { dispatch, ...options });
+        expect(plan.code, plan.stderr).toBe(0);
+        expect(plan.json.decision).toBe("eligible");
+        const published = await release.publish(plan.json, dispatch, options);
+        expect(published.code, published.stderr).toBe(0);
+        expect(published.json).toMatchObject({ decision: "published", tag: { name: "v0.0.7", commit: prepared.mergeSha } });
+      } finally {
+        rmSync(bundle.dir, { recursive: true, force: true });
       }
     });
   });

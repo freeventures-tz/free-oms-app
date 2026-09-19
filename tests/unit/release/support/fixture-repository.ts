@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { GitHubSimulator, SimulatedPull } from "./github-simulator";
 
@@ -72,7 +72,7 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
     title,
     body,
     labels: [],
-    head: { sha: headSha, ref: `pr-${number}` },
+    head: { sha: headSha, ref: `pr-${number}`, repo: { full_name: repository } },
     base: { ref: "main", repo: { full_name: repository } },
   });
 
@@ -85,8 +85,20 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
 
     /** Commits one file with exact contents. */
     commitFile(name: string, contents: string, message: string) {
+      mkdirSync(dirname(join(dir, name)), { recursive: true });
       writeFileSync(join(dir, name), contents);
       git("add", "--", name);
+      git("commit", "-q", "-m", message);
+      return git("rev-parse", "HEAD");
+    },
+
+    /** Commits several files with exact contents, in one commit. */
+    commitFiles(contents: Record<string, string>, message: string) {
+      for (const [name, text] of Object.entries(contents)) {
+        mkdirSync(dirname(join(dir, name)), { recursive: true });
+        writeFileSync(join(dir, name), text);
+      }
+      git("add", "--", ...Object.keys(contents));
       git("commit", "-q", "-m", message);
       return git("rev-parse", "HEAD");
     },
@@ -148,6 +160,29 @@ export function createFixtureRepository(repository: string, github: GitHubSimula
       const mergeSha = git("rev-parse", "HEAD");
       const headSha = developmentCommits[developmentCommits.length - 1];
       const pull = pullFor(options.number, headSha, options.title, options.description ?? null);
+      pull.merge_commit_sha = mergeSha;
+      github.pulls.set(options.number, pull);
+      return { number: options.number, mergeSha, headSha, developmentCommits, pull };
+    },
+
+    /**
+     * Merges a branch that already exists here, as `gh pr merge --merge` would merge its pull request.
+     * The pull request is recorded as merged, whatever the simulator held for it before.
+     */
+    mergeExistingBranch(options: { number: number; branch: string; title: string; retainedBody?: string }) {
+      const developmentCommits = git("rev-list", "--reverse", `main..${options.branch}`).split("\n").filter(Boolean);
+      const headSha = git("rev-parse", options.branch);
+      git(
+        "merge",
+        "--no-ff",
+        "-q",
+        "-m",
+        `Merge pull request #${options.number} from fixture/${options.branch}\n\n${options.retainedBody ?? options.title}`,
+        options.branch,
+      );
+      const mergeSha = git("rev-parse", "HEAD");
+      const pull = pullFor(options.number, headSha, options.title, null);
+      pull.head.ref = options.branch;
       pull.merge_commit_sha = mergeSha;
       github.pulls.set(options.number, pull);
       return { number: options.number, mergeSha, headSha, developmentCommits, pull };

@@ -23,6 +23,8 @@
     "release:preview": "node scripts/release/controller.mjs preview",
     "release:evaluate-build": "node scripts/release/controller.mjs evaluate-build",
     "release:reconcile-builds": "node scripts/release/controller.mjs reconcile-builds",
+    "release:prepare": "node scripts/release/controller.mjs prepare-release",
+    "release:evaluate-release": "node scripts/release/controller.mjs evaluate-release",
     "test:release": "vitest run --project unit tests/unit/release"
   },
   "dependencies": {

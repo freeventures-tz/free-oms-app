@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "repository": "freeventures-tz/free-oms-app",
+  "owner": { "login": "freeventures-tz", "id": 313431047 },
+  "evidence": {
+    "author": "owner",
+    "attestations": {
+      "independent-review": { "agent": "ChatGPT", "role": "independent-review" },
+      "production-acceptance": { "agent": "ChatGPT", "role": "production-acceptance" },
+      "hosted-migration": { "agent": "ChatGPT", "role": "hosted-migration" }
+    }
+  },
+  "authorization": { "standing-normal-below": "1.0.0" },
+  "vercel": {
+    "creator": { "login": "vercel[bot]", "id": 35613825 },
+    "environment": "Production",
+    "project": "free-oms",
+    "team": "freeventures-tz"
+  }
+}

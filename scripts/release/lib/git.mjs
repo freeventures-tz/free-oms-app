@@ -1,6 +1,7 @@
 /**
- * The Git the preview reads. Reading commands only: nothing here fetches, writes an object, moves a
- * ref or takes an optional lock. Arguments go to `git` as an array, never through a shell.
+ * The Git the controller reads. Reading commands only: nothing here fetches, writes an object, moves a
+ * ref, touches the index or takes an optional lock. Arguments go to `git` as an array, never through a
+ * shell.
  */
 
 import { spawnSync } from "node:child_process";
@@ -69,6 +70,41 @@ export function createGitReader(cwd) {
           const [sha, subject] = line.split("\u0000");
           return { sha, subject };
         });
+    },
+
+    /** A file's contents in a commit, exactly as stored, or null when the commit has no such file. */
+    fileAt(commit, path) {
+      const entry = run(["ls-tree", "-z", "--full-tree", "--end-of-options", commit, path]).split("\u0000")[0];
+      if (!entry) return null;
+      const [mode, type, object] = entry.slice(0, entry.indexOf("\t")).split(" ");
+      if (type !== "blob" || mode === "120000") return null;
+      return run(["cat-file", "blob", object]);
+    },
+
+    /** The object a path names in a commit — for a directory, its tree id — or null when there is none. */
+    objectAt(commit, path) {
+      const entry = run(["ls-tree", "-z", "--full-tree", "--end-of-options", commit, path]).split("\u0000")[0];
+      if (!entry) return null;
+      return entry.slice(0, entry.indexOf("\t")).split(" ")[2] ?? null;
+    },
+
+    /** Paths whose contents differ between two commits. */
+    changedPaths(from, to) {
+      return run(["diff", "--name-only", "--no-renames", "--no-ext-diff", "--no-textconv", "-z", "--end-of-options", from, to, "--"])
+        .split("\u0000")
+        .filter(Boolean);
+    },
+
+    /** The branch HEAD names, or null when HEAD is detached. */
+    currentBranch() {
+      const out = run(["symbolic-ref", "--quiet", "--short", "HEAD"], { exitOneIsAnswer: true });
+      return out ? out.trim() : null;
+    },
+
+    /** Whether the directory this reader was given is the top level of a working tree. */
+    isWorkTreeRoot() {
+      if (run(["rev-parse", "--is-inside-work-tree"]).trim() !== "true") return false;
+      return run(["rev-parse", "--show-cdup"]).trim() === "";
     },
 
     /** An annotated tag object's `object`, `type` and `tag` headers and its message, exactly as stored. */

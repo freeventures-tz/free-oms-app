@@ -38,6 +38,7 @@ const writer = load("release-tag-writer.yml");
 const release = [build, writer];
 
 const ACTIVATED = "vars.RELEASE_BUILD_PUBLICATION == 'enabled'";
+const NORMAL_ACTIVATED = "vars.RELEASE_NORMAL_PUBLICATION == 'enabled'";
 const WRITER_CALL = "./.github/workflows/release-tag-writer.yml";
 
 /** The top-level `&&` parts of a condition, with whitespace normalised. */
@@ -61,9 +62,12 @@ describe("the build-tag workflows", () => {
 
     for (const { file, workflow } of workflows) {
       for (const [event, filter] of Object.entries(workflow.on)) {
-        expect(["push", "pull_request", "workflow_run", "workflow_call", "workflow_dispatch"], `${file} ${event}`).toContain(event);
+        expect(["push", "pull_request", "issue_comment", "workflow_run", "workflow_call", "workflow_dispatch"], `${file} ${event}`).toContain(event);
         if (event === "push") expect((filter as Record<string, unknown>)?.tags, file).toBeUndefined();
-        if (event === "workflow_dispatch") expect(file).toBe("release-build-tag.yml");
+        // The recovery dispatch, and the Owner's normal-release dispatch (release-normal-workflow.test.ts).
+        if (event === "workflow_dispatch") expect(["release-build-tag.yml", "release-normal-tag.yml"]).toContain(file);
+        // The standing route, guarded by the Owner id inside it (release-standing-workflow.test.ts).
+        if (event === "issue_comment") expect([file, filter]).toEqual(["release-normal-tag-automatic.yml", { types: ["created"] }]);
       }
     }
     const ci = load("ci.yml").workflow;
@@ -104,15 +108,20 @@ describe("the build-tag workflows", () => {
     const writing = everyJob().filter(({ job }) => typeof job.permissions === "object" && job.permissions.contents === "write");
     expect(writing.map(({ file, id }) => `${file}#${id}`).sort()).toEqual([
       "release-build-tag.yml#publish",
+      "release-normal-tag-automatic.yml#publish",
+      "release-normal-tag.yml#publish",
       "release-tag-writer.yml#write",
     ]);
-    const caller = build.workflow.jobs.publish;
-    expect(caller.uses).toBe(WRITER_CALL);
-    expect(caller.steps).toBeUndefined();
+    // Both callers are calls to the one writer, with no steps of their own.
+    for (const { file, id, job } of writing.filter(({ file }) => file !== "release-tag-writer.yml")) {
+      expect(job.uses, `${file}#${id}`).toBe(WRITER_CALL);
+      expect(job.steps, `${file}#${id}`).toBeUndefined();
+    }
 
     const write = writer.workflow.jobs.write;
     expect(writer.workflow.permissions).toEqual({});
-    expect(write.permissions).toEqual({ contents: "write", actions: "read", "pull-requests": "read" });
+    // Deployments are read by the writer's normal operation.
+    expect(write.permissions).toEqual({ contents: "write", actions: "read", "pull-requests": "read", deployments: "read" });
     expect(write.concurrency).toEqual({ group: "release-tag-writer", "cancel-in-progress": false, queue: "max" });
     for (const { file, workflow } of workflows) expect(workflow.concurrency, file).toBeUndefined();
 
@@ -153,8 +162,11 @@ describe("the build-tag workflows", () => {
     for (const step of jobs.evaluate.steps!.filter((s) => s.id === "bundle" || s.uses?.startsWith("actions/upload-artifact@"))) {
       expect(step.if).toBe(ACTIVATED);
     }
+    // Each caller of the writer is gated on the activation of the operation it asks for.
     for (const { file, id, job } of everyJob().filter(({ job }) => job.uses === WRITER_CALL)) {
-      expect(conjuncts(job.if), `${file}#${id}`).toContain(ACTIVATED);
+      const operation = job.with?.operation;
+      expect(["build", "normal"], `${file}#${id}`).toContain(operation);
+      expect(conjuncts(job.if), `${file}#${id}`).toContain(operation === "normal" ? NORMAL_ACTIVATED : ACTIVATED);
     }
 
     const controllerSteps = [
@@ -219,8 +231,12 @@ describe("the build-tag workflows", () => {
           if (step.uses) expect(step.uses, file).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
         }
       }
-      // Parsed, so the comments that describe what is absent are not mistaken for it.
-      const content = JSON.stringify(workflow);
+      // Parsed, so the comments that describe what is absent are not mistaken for it. Permissions are left out:
+      // the read-only `deployments` scope is named like a deployment, and every job's scopes are asserted above.
+      const content = JSON.stringify({
+        ...workflow,
+        jobs: Object.fromEntries(Object.entries(workflow.jobs).map(([id, job]) => [id, { ...job, permissions: undefined }])),
+      });
       expect(content, file).not.toMatch(/secrets\.|vercel|supabase|deploy|migrat|pull_request_target/i);
     }
   });
