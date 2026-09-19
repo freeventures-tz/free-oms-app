@@ -639,10 +639,15 @@
     },
     "invoice": {
       "heading": "Invoice",
-      "unpaid": "Unpaid",
       "cancelled": "Cancelled",
       "cancelledBecause": "Cancelled: {reason}",
-      "immutable": "An invoice cannot be changed. A correction is a cancellation and a new order."
+      "immutable": "An invoice cannot be changed. A correction is a cancellation and a new order.",
+      "moneyReceived": "Money received",
+      "balanceDue": "Balance due",
+      "approvedCredit": "Approved credit",
+      "creditIsNotMoney": "Credit is an approved unpaid balance. It is not money received, so it does not change the status.",
+      "settlementUnavailable": "Payment status not shown",
+      "settlementUnavailableHelp": "Payment records are not part of your role, so this invoice is shown without them."
     },
     "discount": {
       "heading": "Discount",

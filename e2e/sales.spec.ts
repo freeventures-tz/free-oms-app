@@ -282,8 +282,12 @@ test.describe.serial("an order becomes an invoice", () => {
 
     await page.reload();
     await expect(page.getByText(/FV-INV-/)).toBeVisible();
-    // §12.3: the status is calculated from money received, and no money has been received.
-    await expect(page.getByText(/^unpaid$/i)).toBeVisible();
+    // §12.3 derives the status from money received, and this role may not read what was received
+    // (design.md §4.2). So the card says the status is not shown — which is true — rather than
+    // Unpaid, which it would have no way of knowing. It said Unpaid for years, to everybody, on
+    // every invoice; that is the defect this assertion used to encode.
+    await expect(page.getByText(/payment status not shown/i)).toBeVisible();
+    await expect(page.getByText(/^unpaid$/i)).toHaveCount(0);
     await expect(page.getByText(/units held for this order/i)).toBeVisible();
 
     // Exactly one — the invoice heading appears once on the page.
@@ -330,6 +334,9 @@ test.describe.serial("an order becomes an invoice", () => {
     await expect(page.getByText(invoiceNo)).toBeVisible();
     await expect(page.getByText(/^unpaid$/i)).toHaveCount(0);
     await expect(page.getByText(/cancelled: customer changed their mind/i).first()).toBeVisible();
+    // Cancellation outranks the settlement boundary: nobody owes a cancelled invoice, so there is
+    // no status being withheld and the card stops saying one is.
+    await expect(page.getByText(/payment status not shown/i)).toHaveCount(0);
 
     // The reservation is released, so the card that reported it is gone (§4.3).
     await expect(page.getByText(/units held for this order/i)).toHaveCount(0);

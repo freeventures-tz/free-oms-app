@@ -639,10 +639,15 @@
     },
     "invoice": {
       "heading": "Ankara",
-      "unpaid": "Haijalipwa",
       "cancelled": "Imeghairiwa",
       "cancelledBecause": "Imeghairiwa: {reason}",
-      "immutable": "Ankara haiwezi kubadilishwa. Marekebisho ni kughairi na kutengeneza oda mpya."
+      "immutable": "Ankara haiwezi kubadilishwa. Marekebisho ni kughairi na kutengeneza oda mpya.",
+      "moneyReceived": "Fedha zilizopokelewa",
+      "balanceDue": "Deni lililobaki",
+      "approvedCredit": "Mkopo ulioidhinishwa",
+      "creditIsNotMoney": "Mkopo ni deni lililoidhinishwa. Si fedha zilizopokelewa, hivyo haubadilishi hali ya malipo.",
+      "settlementUnavailable": "Hali ya malipo haionyeshwi",
+      "settlementUnavailableHelp": "Kumbukumbu za malipo si sehemu ya jukumu lako, hivyo ankara hii imeonyeshwa bila kumbukumbu hizo."
     },
     "discount": {
       "heading": "Punguzo",

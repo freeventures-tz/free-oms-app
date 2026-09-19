@@ -26,7 +26,7 @@ import { Card, StatusChip } from "@/components/ui/surface";
 import type { CatalogueProduct, Unit } from "@/lib/catalogue/catalogue";
 import { formatTzs } from "@/lib/money";
 import { mayDecideDiscount } from "@/lib/sales/discount-authority";
-import type { Availability, Order, Proforma } from "@/lib/sales/sales";
+import type { Availability, Invoice, Order, Proforma, SettlementStatus } from "@/lib/sales/sales";
 import type { AppRole } from "@/lib/auth/roles";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
@@ -122,14 +122,7 @@ export function OrderDetail({
                 <h2 className="text-sm font-semibold">{t("sales.invoice.heading")}</h2>
                 <span className="fv-identifier text-sm">{order.invoice.invoiceNo}</span>
               </div>
-              {/* §12.3: the status is CALCULATED from money received, never chosen. No payment
-                  exists yet in this stage, so it is Unpaid — and it says Unpaid rather than
-                  pretending the question has not been asked. */}
-              <StatusChip tone={order.invoice.cancelledAt ? "danger" : "attention"}>
-                {order.invoice.cancelledAt
-                  ? t("sales.invoice.cancelled")
-                  : t("sales.invoice.unpaid")}
-              </StatusChip>
+              <InvoiceStatus invoice={order.invoice} />
             </div>
 
             <LineTable lines={order.invoice.lines} locale={locale} />
@@ -140,6 +133,8 @@ export function OrderDetail({
               total={order.invoice.totalTzs}
               locale={locale}
             />
+
+            <InvoiceSettlementFigures invoice={order.invoice} locale={locale} />
 
             {order.invoice.cancelReason ? (
               <p className="text-xs text-muted-foreground">
@@ -213,6 +208,103 @@ export function OrderDetail({
           </div>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+/** Never colour alone (design.md §11.5): the state is a word first, and the tone follows it. */
+const SETTLEMENT_TONE: Record<SettlementStatus, "neutral" | "success" | "attention" | "danger"> = {
+  unpaid: "attention",
+  partially_paid: "attention",
+  paid: "success",
+  cancelled: "danger",
+};
+
+/**
+ * What this invoice is worth NOW — the one thing the card used to get wrong.
+ *
+ * It read "Unpaid" for every invoice ever issued, because it was written in the stage before
+ * payments existed and said so in a comment. product.md §12.3 derives the status from money
+ * actually received, so that sentence was a fact about money with nothing behind it: a Cashier
+ * could take the whole bill at the till and then read, on the order it belonged to, that nothing
+ * had been paid.
+ *
+ * Three states, and the third is the one that matters. `settlement` is the view's own figures.
+ * `null` is the settlement boundary of design.md §4.2 — a Sales Representative is told the status
+ * is not shown, which is true, rather than told it is Unpaid, which would not be. There is no
+ * fourth state where the figures were unavailable and the card guessed: `loadOrder` throws for
+ * that, and the shell's error boundary offers a retry.
+ */
+function InvoiceStatus({ invoice }: { invoice: Invoice }) {
+  const t = useTranslations();
+
+  // Cancellation outranks the money, and reads the same to every role (AC-11). The view agrees —
+  // it returns `cancelled` for exactly these invoices — so this is the same answer, sourced from
+  // the field a Sales Representative can also see.
+  if (invoice.cancelledAt) {
+    return <StatusChip tone="danger">{t("sales.invoice.cancelled")}</StatusChip>;
+  }
+
+  if (!invoice.settlement) {
+    return <StatusChip tone="neutral">{t("sales.invoice.settlementUnavailable")}</StatusChip>;
+  }
+
+  return (
+    <StatusChip tone={SETTLEMENT_TONE[invoice.settlement.status]}>
+      {t(`settlement.status.${invoice.settlement.status}`)}
+    </StatusChip>
+  );
+}
+
+/**
+ * The money behind the status: what was received, what is left, and what was carried as credit.
+ *
+ * Credit is listed third and labelled as itself, because product.md §12.5 makes it a different
+ * kind of thing from a tender — an approved unpaid balance, recording no payment. Adding it to the
+ * money would turn a fully credited invoice into a paid one, which is the reading §12.5 exists to
+ * forbid.
+ */
+function InvoiceSettlementFigures({ invoice, locale }: { invoice: Invoice; locale: string }) {
+  const t = useTranslations();
+
+  // A cancelled invoice is owed by nobody, so it has no balance to state and no status to keep
+  // back. It says Cancelled and stops there, exactly as it did before payments existed.
+  if (invoice.cancelledAt) return null;
+
+  if (!invoice.settlement) {
+    return <Help>{t("sales.invoice.settlementUnavailableHelp")}</Help>;
+  }
+
+  const { amountPaidTzs, outstandingTzs, approvedCreditTzs } = invoice.settlement;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <dl className="flex flex-wrap gap-x-8 gap-y-3">
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-xs text-muted-foreground">{t("sales.invoice.moneyReceived")}</dt>
+          <dd className="fv-numeric text-sm font-medium" data-testid="invoice-received">
+            {formatTzs(amountPaidTzs, locale)}
+          </dd>
+        </div>
+
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-xs text-muted-foreground">{t("sales.invoice.balanceDue")}</dt>
+          <dd className="fv-numeric text-sm font-medium" data-testid="invoice-outstanding">
+            {formatTzs(outstandingTzs, locale)}
+          </dd>
+        </div>
+
+        {approvedCreditTzs > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            <dt className="text-xs text-muted-foreground">{t("sales.invoice.approvedCredit")}</dt>
+            <dd className="fv-numeric text-sm font-medium" data-testid="invoice-credit">
+              {formatTzs(approvedCreditTzs, locale)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      {approvedCreditTzs > 0 ? <Help>{t("sales.invoice.creditIsNotMoney")}</Help> : null}
     </div>
   );
 }
