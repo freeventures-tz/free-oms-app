@@ -421,10 +421,15 @@ select is(
 -- ---------------------------------------------------------------------------
 select tests.acting_as('e0000000-0000-0000-0000-000000000002'::uuid);   -- Manager
 
+-- Tomorrow is counted on the business clock, not the server's. current_date follows whatever
+-- zone the server runs in, so on a UTC server between 21:00 and midnight current_date + 1 is
+-- merely today in Dar es Salaam -- a date the command rightly accepts, and the refusal below
+-- stops being true for three hours a day (issue #34). The test asks the clock the product
+-- asks: private.business_date(), the same definition the command compares against.
 select is(
   (api.staff_enter_stock_receipt(
      (select id from public.suppliers where name = 'Twiga Cement'),
-     'store', current_date + 1, 'DN-003',
+     'store', private.business_date() + 1, 'DN-003',
      jsonb_build_array(jsonb_build_object(
        'product_id', tests.product('Sand'), 'expected_quantity', 1, 'received_quantity', 1)),
      'rcv-key-future') ->> 'reason'),
