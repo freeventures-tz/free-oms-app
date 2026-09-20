@@ -3,6 +3,11 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
+  SETTLEMENT_COLUMNS,
+  requireSettlement,
+  requireSettlementAccess,
+} from "@/lib/sales/invoice-settlement";
+import {
   SECRET_KEY,
   createLiveStaff,
   ensureDirector,
@@ -1896,5 +1901,227 @@ describe("the settlement tables, from outside the database", () => {
       .from("assignable_dispatch_lines")
       .select("allocation_id, invoice_id, product_id, assignable_quantity");
     expect(assignableLines.error, assignableLines.error?.message).toBeNull();
+  });
+});
+
+/**
+ * The single-invoice settlement read the ORDER screen makes (issue #45).
+ *
+ * The payments queue reads a page of invoices and tolerates a gap in it. The order screen reads
+ * one invoice it already has in hand, for a reader it has already asked about, and has nothing to
+ * tolerate: every outcome except "here are the figures" and "you may not see them" is a failed
+ * read. These run the real parsers over real rows, as each real signed-in role, so the refusal the
+ * view makes and the refusal the application makes are proved to be the same refusal.
+ */
+describe("the settlement an order screen reads", () => {
+  async function readSettlement(who: Fixture, invoiceId: string) {
+    const access = await who.api.rpc("staff_settlement_readable");
+    const row = await who.read
+      .from("invoice_settlement")
+      .select(SETTLEMENT_COLUMNS)
+      .eq("invoice_id", invoiceId)
+      .maybeSingle();
+
+    return { access, row };
+  }
+
+  it("resolves the invoice identity the order read embeds", async () => {
+    // `loadOrder` learns whether there is an invoice from the order row itself, so the settlement
+    // can be read in the same wave rather than one round trip later. If PostgREST ever stops
+    // resolving that embed, the screen loses its status — so it is asserted here, as each role.
+    const { orderId, invoiceId } = await invoicedOrder(2);
+
+    for (const who of [director, manager, cashier, salesRep]) {
+      const { data, error } = await who.read
+        .from("orders")
+        .select(`
+          id, order_no, customer_id, status, is_cash_sale, discount_percent, discount_reason,
+          created_role, created_at, cancel_reason,
+          customers!inner(name),
+          invoices(id)
+        `)
+        .eq("id", orderId)
+        .maybeSingle();
+
+      expect(error, `the embed failed for a ${who.role}: ${error?.message}`).toBeNull();
+      const embedded = data!.invoices as { id: string } | { id: string }[] | null;
+      expect(
+        Array.isArray(embedded) ? embedded[0]?.id : embedded?.id,
+        `a ${who.role} could not identify the invoice`,
+      ).toBe(invoiceId);
+    }
+  });
+
+  it("gives a Director, a Manager and a Cashier the authoritative figures", async () => {
+    const { invoiceId } = await invoicedOrder(3);
+    await cashier.api.rpc("staff_record_payment", {
+      p_invoice_id: invoiceId,
+      p_method: "cash",
+      p_amount_tzs: UNIT_PRICE,
+      p_idempotency_key: randomUUID(),
+    });
+
+    for (const who of [director, manager, cashier]) {
+      const { access, row } = await readSettlement(who, invoiceId);
+
+      expect(requireSettlementAccess(access, "test.access"), who.role).toBe(true);
+      // Parsed by the code the screen runs, not by the test — a shape the parser rejects is a
+      // blank status in the yard, whatever the raw row looks like here.
+      expect(requireSettlement(row, "test.settlement"), who.role).toEqual({
+        totalTzs: 3 * UNIT_PRICE,
+        amountPaidTzs: UNIT_PRICE,
+        approvedCreditTzs: 0,
+        outstandingTzs: 2 * UNIT_PRICE,
+        status: "partially_paid",
+      });
+    }
+  });
+
+  it("answers a Sales Representative no, and answers it before the empty row can be misread", async () => {
+    const { invoiceId } = await invoicedOrder(2);
+    await cashier.api.rpc("staff_record_payment", {
+      p_invoice_id: invoiceId,
+      p_method: "cash",
+      p_amount_tzs: 2 * UNIT_PRICE,
+      p_idempotency_key: randomUUID(),
+    });
+
+    const { access, row } = await readSettlement(salesRep, invoiceId);
+
+    // Not an error, and not zero: NOTHING. Without the access question first, this row is
+    // indistinguishable from a broken read, and the screen would have to guess — which is how a
+    // fully paid invoice comes to read Unpaid.
+    expect(row.error, row.error?.message).toBeNull();
+    expect(row.data).toBeNull();
+    expect(requireSettlementAccess(access, "test.access")).toBe(false);
+  });
+
+  it("follows the money down again when a payment is reversed", async () => {
+    const { invoiceId } = await invoicedOrder(2);
+
+    const unpaid = await readSettlement(cashier, invoiceId);
+    expect(requireSettlement(unpaid.row, "test.settlement")).toMatchObject({
+      amountPaidTzs: 0,
+      outstandingTzs: 2 * UNIT_PRICE,
+      status: "unpaid",
+    });
+
+    const { data: payment } = await cashier.api.rpc("staff_record_payment", {
+      p_invoice_id: invoiceId,
+      p_method: "cash",
+      p_amount_tzs: 2 * UNIT_PRICE,
+      p_idempotency_key: randomUUID(),
+    });
+    const paymentId = (payment!.payment as { id: string }).id;
+
+    const paid = await readSettlement(cashier, invoiceId);
+    expect(requireSettlement(paid.row, "test.settlement")).toMatchObject({
+      amountPaidTzs: 2 * UNIT_PRICE,
+      outstandingTzs: 0,
+      status: "paid",
+    });
+
+    await cashier.api.rpc("staff_request_payment_reversal", {
+      p_payment_id: paymentId,
+      p_reason: "paid against the wrong invoice",
+      p_idempotency_key: randomUUID(),
+    });
+    const { data: approved } = await director.api.rpc("admin_approve_payment_reversal", {
+      p_payment_id: paymentId,
+      p_idempotency_key: randomUUID(),
+    });
+    expect(approved?.ok, JSON.stringify(approved)).toBe(true);
+
+    // The reversal is a negative row, so the view's sum falls and the status follows it. The order
+    // screen reports the fall because it reports the view, and holds no figure of its own.
+    const reversed = await readSettlement(cashier, invoiceId);
+    expect(requireSettlement(reversed.row, "test.settlement")).toMatchObject({
+      amountPaidTzs: 0,
+      outstandingTzs: 2 * UNIT_PRICE,
+      status: "unpaid",
+    });
+  });
+
+  it("keeps an invoice settled entirely on credit Unpaid, with the credit beside the money", async () => {
+    // product.md §12.5: credit records an approved unpaid balance and no payment at all.
+    const { invoiceId } = await invoicedOrder(3);
+
+    await cashier.api.rpc("staff_request_credit", {
+      p_invoice_id: invoiceId,
+      p_amount_tzs: 3 * UNIT_PRICE,
+      p_reason: "regular customer, pays monthly",
+      p_idempotency_key: randomUUID(),
+    });
+    const { data: credit } = await director.read
+      .from("credit_authorisations")
+      .select("id")
+      .eq("invoice_id", invoiceId)
+      .single();
+    const { data: approved } = await director.api.rpc("staff_approve_credit", {
+      p_credit_id: credit!.id as string,
+      p_idempotency_key: randomUUID(),
+    });
+    expect(approved?.ok, JSON.stringify(approved)).toBe(true);
+
+    const { row } = await readSettlement(cashier, invoiceId);
+
+    expect(requireSettlement(row, "test.settlement")).toEqual({
+      totalTzs: 3 * UNIT_PRICE,
+      amountPaidTzs: 0,
+      approvedCreditTzs: 3 * UNIT_PRICE,
+      outstandingTzs: 3 * UNIT_PRICE,
+      status: "unpaid",
+    });
+  });
+
+  it("judges part tender plus credit on the tender alone", async () => {
+    const { invoiceId } = await invoicedOrder(4);
+
+    await cashier.api.rpc("staff_record_payment", {
+      p_invoice_id: invoiceId,
+      p_method: "cash",
+      p_amount_tzs: UNIT_PRICE,
+      p_idempotency_key: randomUUID(),
+    });
+    await cashier.api.rpc("staff_request_credit", {
+      p_invoice_id: invoiceId,
+      p_amount_tzs: 3 * UNIT_PRICE,
+      p_reason: "the rest next month",
+      p_idempotency_key: randomUUID(),
+    });
+    const { data: credit } = await director.read
+      .from("credit_authorisations")
+      .select("id")
+      .eq("invoice_id", invoiceId)
+      .single();
+    await director.api.rpc("staff_approve_credit", {
+      p_credit_id: credit!.id as string,
+      p_idempotency_key: randomUUID(),
+    });
+
+    const { row } = await readSettlement(cashier, invoiceId);
+
+    // Money and credit together cover the bill, and the status still reads on the money.
+    expect(requireSettlement(row, "test.settlement")).toEqual({
+      totalTzs: 4 * UNIT_PRICE,
+      amountPaidTzs: UNIT_PRICE,
+      approvedCreditTzs: 3 * UNIT_PRICE,
+      outstandingTzs: 3 * UNIT_PRICE,
+      status: "partially_paid",
+    });
+  });
+
+  it("states a cancelled invoice as cancelled rather than as unpaid", async () => {
+    const { orderId, invoiceId } = await invoicedOrder(2);
+
+    const { data: cancelled } = await salesRep.api.rpc("staff_cancel_order", {
+      p_order_id: orderId,
+      p_reason: "customer changed their mind",
+      p_idempotency_key: randomUUID(),
+    });
+    expect(cancelled?.ok, JSON.stringify(cancelled)).toBe(true);
+
+    const { row } = await readSettlement(director, invoiceId);
+    expect(requireSettlement(row, "test.settlement").status).toBe("cancelled");
   });
 });

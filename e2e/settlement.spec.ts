@@ -271,6 +271,21 @@ test("an invoice is settled and the goods leave", async ({ page }) => {
     await expect(card.getByRole("button", { name: /carry as credit/i })).toBeVisible();
   });
 
+  await test.step("the order behind it says Unpaid because nothing was received", async () => {
+    // The same fact, from the same view, on the screen the Sales Representative's work produced.
+    // Reached by the queue's own link, so the test follows the path a Cashier follows.
+    await page.getByRole("link", { name: invoiceNo, exact: true }).click();
+
+    const invoice = page.getByRole("article", { name: invoiceNo, exact: true });
+    await expect(invoice.getByText(/^unpaid$/i)).toBeVisible();
+    await expect(invoice.getByTestId("invoice-received")).toHaveText("TZS 0");
+    await expect(invoice.getByTestId("invoice-outstanding")).toHaveText("TZS 600,000");
+    // Nothing was carried as credit, so nothing claims it was.
+    await expect(invoice.getByTestId("invoice-credit")).toHaveCount(0);
+
+    await page.goto(PAYMENTS_HREF);
+  });
+
   await test.step("a part payment leaves it partly paid", async () => {
     const card = page.getByRole("article", { name: invoiceNo, exact: true });
     await card.getByRole("button", { name: /take payment/i }).click();
@@ -324,6 +339,29 @@ test("an invoice is settled and the goods leave", async ({ page }) => {
     // the invoice is still Partly paid.
     await expect(card.getByText(/400,000 approved as credit/i)).toBeVisible();
     await expect(card.getByText(/partly paid/i)).toBeVisible();
+  });
+
+  await test.step("the order names the credit apart from the money, and stays Partly paid", async () => {
+    // §12.5: money and approved credit together cover the bill, and the status still reads on the
+    // money alone. Adding the two would turn this invoice into a paid one, which is the reading
+    // §12.5 exists to forbid — so the order card lists them as two separate figures.
+    await page.getByRole("link", { name: invoiceNo, exact: true }).click();
+
+    const invoice = page.getByRole("article", { name: invoiceNo, exact: true });
+    await expect(invoice.getByText(/^partly paid$/i)).toBeVisible();
+    await expect(invoice.getByTestId("invoice-received")).toHaveText("TZS 200,000");
+    await expect(invoice.getByTestId("invoice-outstanding")).toHaveText("TZS 400,000");
+    await expect(invoice.getByTestId("invoice-credit")).toHaveText("TZS 400,000");
+    await expect(invoice.getByText(/it is not money received/i)).toBeVisible();
+
+    // Three money figures on one row is the widest this card ever gets, and the phone tier is
+    // 390px. They wrap; they do not push the body sideways (design.md §3.2).
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, "the order page scrolls horizontally").toBeLessThanOrEqual(1);
+
+    await page.goto(PAYMENTS_HREF);
   });
 
   await test.step("the Cashier marks it settled", async () => {
@@ -591,6 +629,19 @@ test("a walk-in sale is completed in one action at the till", async ({ page }) =
     await expect(balanceOn(invoiced)).toHaveText("TZS 0");
     // AC-16 is a FULL settlement: the walk-in path exists for nothing else.
     await expect(page.getByRole("article", { name: orderNo, exact: true })).toHaveCount(0);
+  });
+
+  await test.step("the order the money was taken for says the same thing", async () => {
+    // The defect this journey now guards: the order screen reported every invoice ever issued as
+    // Unpaid, so the Cashier who had just taken TZS 300,000 could open the order it was for and
+    // read that nothing had been paid. Two screens, one view, one answer (product.md §12.3).
+    await page.goto(`/orders/${orderId}`);
+
+    const invoice = page.getByRole("article", { name: /^FV-INV-\d{8}-\d{4}$/ });
+    await expect(invoice.getByText(/^paid$/i)).toBeVisible();
+    await expect(invoice.getByTestId("invoice-received")).toHaveText("TZS 300,000");
+    await expect(invoice.getByTestId("invoice-outstanding")).toHaveText("TZS 0");
+    await expect(page.getByText(/^unpaid$/i)).toHaveCount(0);
   });
 });
 

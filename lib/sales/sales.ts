@@ -1,6 +1,14 @@
-import { requireRows, requireText } from "@/lib/supabase/query";
+import {
+  SETTLEMENT_COLUMNS,
+  requireSettlement,
+  requireSettlementAccess,
+  type InvoiceSettlement,
+} from "@/lib/sales/invoice-settlement";
+import { DATA_UNAVAILABLE, requireRows, requireText } from "@/lib/supabase/query";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/auth/roles";
+
+export type { InvoiceSettlement, SettlementStatus } from "@/lib/sales/invoice-settlement";
 
 /**
  * Orders, proformas, invoices and what is left to sell (product.md §12, §8.1).
@@ -76,6 +84,12 @@ export type Invoice = {
   cancelledAt: string | null;
   cancelReason: string | null;
   lines: ProformaLine[];
+  /**
+   * What the invoice is worth NOW, or `null` when the caller's role may not read settlement facts
+   * at all (design.md §4.2). `null` never means "nothing has been paid" — a settlement this reader
+   * is entitled to and cannot get is a failed read, and `loadOrder` throws for it.
+   */
+  settlement: InvoiceSettlement | null;
 };
 
 /** A discount awaiting a decision, and whose decision it is (product.md §4). */
@@ -239,7 +253,8 @@ export async function loadOrder(orderId: string): Promise<Order | null> {
     .select(`
       id, order_no, customer_id, status, is_cash_sale, discount_percent, discount_reason,
       created_role, created_at, cancel_reason,
-      customers!inner(name)
+      customers!inner(name),
+      invoices(id)
     `)
     .eq("id", orderId)
     .maybeSingle();
@@ -254,8 +269,16 @@ export async function loadOrder(orderId: string): Promise<Order | null> {
   // A genuine absence, which the caller turns into a 404 rather than a retry.
   if (!orderRow) return null;
 
+  // The invoice's IDENTITY, one round trip before its contents. `invoices.order_id` is unique
+  // (AC-8), so this embed is one row or none — and knowing which, here, is what lets the
+  // settlement be read alongside everything else instead of after it. A third serial wave for a
+  // confirmed order would cross the Atlantic twice again (reviews/pr-04-review-brief.md §2).
+  const embeddedInvoice = orderRow.invoices as { id: string } | { id: string }[] | null;
+  const invoiceId =
+    (Array.isArray(embeddedInvoice) ? embeddedInvoice[0]?.id : embeddedInvoice?.id) ?? null;
+
   const [creatorName, lineRows, proformaRows, proformaLineRows, invoiceRows, invoiceLineRows,
-    discountRows, allocationRows] =
+    discountRows, allocationRows, settlementAccess, settlementRows] =
     await Promise.all([
       supabase.schema("api").rpc("staff_order_creator_name", { p_order_id: orderId }),
       supabase
@@ -305,6 +328,22 @@ export async function loadOrder(orderId: string): Promise<Order | null> {
         .from("stock_allocations")
         .select("quantity, state")
         .eq("order_id", orderId),
+      // Asked of the caller's own session, not of any row, and asked FIRST in the sense that
+      // matters: without it, the empty answer `invoice_settlement` gives a Sales Representative is
+      // indistinguishable from the empty answer a broken read gives everybody.
+      invoiceId
+        ? supabase.schema("api").rpc("staff_settlement_readable")
+        : Promise.resolve({ data: null, error: null }),
+      // Read even when the answer above turns out to be no: the view refuses on its own terms, so
+      // this returns nothing rather than something, and the alternative is a serial round trip
+      // spent asking permission to make a request that was already safe to make.
+      invoiceId
+        ? supabase
+            .from("invoice_settlement")
+            .select(SETTLEMENT_COLUMNS)
+            .eq("invoice_id", invoiceId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
   const lines = requireRows(lineRows, "sales.order_lines");
@@ -342,6 +381,23 @@ export async function loadOrder(orderId: string): Promise<Order | null> {
   const customer = orderRow.customers as { name: string } | { name: string }[] | null;
   const invoiceRow = invoiceRows.data;
   const discountRow = discounts[0] ?? null;
+
+  // Two reads of the same unique row (AC-8): the identity embedded in the order, and the invoice
+  // itself. They cannot disagree — and if they ever do, the screen does not get to pick a side.
+  // Showing no invoice on a confirmed order and showing one whose settlement was never asked for
+  // are both statements this read has no grounds for.
+  if ((invoiceId === null) !== (invoiceRow === null)) {
+    console.error("[data] sales.invoice: the order's invoice was identified or read, but not both");
+    throw new Error(`${DATA_UNAVAILABLE}: sales.invoice`);
+  }
+
+  // The settlement, or the reason there isn't one. There is no third outcome and, in particular,
+  // no zero: product.md §12.3 derives the status from money received, so a figure this screen
+  // could not obtain is a figure it may not print (memory.md §6).
+  const settlement: InvoiceSettlement | null =
+    invoiceRow && requireSettlementAccess(settlementAccess, "sales.settlement_access")
+      ? requireSettlement(settlementRows, "sales.invoice_settlement")
+      : null;
 
   return {
     id: orderRow.id as string,
@@ -391,6 +447,7 @@ export async function loadOrder(orderId: string): Promise<Order | null> {
           lines: invoiceLines
             .filter((line) => line.invoice_id === invoiceRow.id)
             .map((line) => toLine(line as Record<string, unknown>)),
+          settlement,
         }
       : null,
     discount: discountRow
