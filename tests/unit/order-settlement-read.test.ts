@@ -247,6 +247,26 @@ describe("a settlement read that did not work", () => {
     }
   });
 
+  it("fails the page for money this machine cannot hold exactly", async () => {
+    // Reviewed as F1 on PR #46. `Number.isInteger` is true for every value at or above 2^53, so a
+    // figure that rounds on the way in — or overflows to `Infinity` — reached the card as settled
+    // money. The boundary itself is covered in `settlement-money-range.test.ts`; this proves the
+    // whole read path refuses rather than just the parser in isolation.
+    const unholdable: [string, unknown][] = [
+      ["2^53 as a number", 2 ** 53],
+      ["integer text that rounds", "9007199254740993"],
+      ["integer text that overflows", "9".repeat(400)],
+    ];
+
+    for (const [label, amount] of unholdable) {
+      withSettlement(OK({ ...SETTLEMENT_ROW, outstanding_tzs: amount }));
+
+      await expect(loadOrder(ORDER_ID), label).rejects.toThrow(
+        `${DATA_UNAVAILABLE}: sales.invoice_settlement`,
+      );
+    }
+  });
+
   it("refuses a status nobody in product.md §12.3 wrote", async () => {
     for (const status of [null, "", "PAID", "settled", 7]) {
       withSettlement(OK({ ...SETTLEMENT_ROW, status }));

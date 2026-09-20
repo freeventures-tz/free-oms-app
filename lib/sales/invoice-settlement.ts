@@ -45,6 +45,9 @@ const MONEY_FIELDS = {
   outstandingTzs: "outstanding_tzs",
 } as const;
 
+/** Integer text, in case PostgREST is ever configured to send `bigint` as a string. */
+const INTEGER_TEXT = /^-?\d+$/;
+
 /**
  * What a value WAS, for the log — never what it said.
  *
@@ -54,12 +57,24 @@ const MONEY_FIELDS = {
 function shapeOf(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return "a number that is not finite";
-    return Number.isInteger(value) ? "a number" : "a fractional number";
+  if (typeof value === "number") return describeNumber(value);
+  if (typeof value === "string") {
+    if (value.trim().length === 0) return "blank text";
+    // Spelled correctly and still not a shilling figure is a different fault from gibberish, and
+    // the log has to separate them: one is a provider sending the wrong kind of thing, the other
+    // is a real number too large to state. The digits themselves never appear.
+    return INTEGER_TEXT.test(value) ? `text holding ${describeNumber(Number(value))}` : "text";
   }
-  if (typeof value === "string") return value.trim().length === 0 ? "blank text" : "text";
   return typeof value;
+}
+
+/** Why a number is not whole shillings — or that it is. No digits, ever. */
+function describeNumber(value: number): string {
+  if (Number.isNaN(value)) return "a value that is not a number";
+  if (!Number.isFinite(value)) return "a figure too large to hold at all";
+  if (!Number.isInteger(value)) return "a fractional number";
+  if (!Number.isSafeInteger(value)) return "a figure outside the range a double counts exactly";
+  return "a number";
 }
 
 function fail(what: string, detail: string): never {
@@ -68,20 +83,38 @@ function fail(what: string, detail: string): never {
 }
 
 /**
- * Whole shillings, or nothing.
+ * Whole shillings this machine can hold exactly, or nothing.
  *
- * `Number(value)` is the shape this has to refuse. It turns null into 0, an empty string into 0
- * and a missing column into NaN, and every one of those would land on the screen as a statement
- * that no money has been received. Only a whole number — or the digits of one, in case PostgREST
- * is ever configured to send `bigint` as text — is an answer.
+ * `Number(value)` is the first shape this has to refuse. It turns null into 0, an empty string
+ * into 0 and a missing column into NaN, and every one of those would land on the screen as a
+ * statement that no money has been received.
+ *
+ * `Number.isInteger` is the second, and it is subtler. It is true for EVERY value at or above
+ * 2^53 — the point where a double stops being able to count — so the correctly spelled
+ * `"9007199254740993"` arrived one shilling short and passed, and four hundred digits arrived as
+ * `Infinity` and passed too. Neither is a refusal; both are this screen stating a figure about
+ * somebody's money that is not the figure the database holds. `bigint` reaches well past 2^53, so
+ * the first case is inside the column's range even though it is far outside any yard's takings.
+ *
+ * `NaN` stands in for "not a figure at all", because it fails the same check and lets both kinds
+ * of wrong answer leave through one door. `shapeOf` still describes the ORIGINAL value, so the log
+ * says which kind it was.
  */
 function money(row: Record<string, unknown>, column: string, what: string): number {
   const value = row[column];
 
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  if (typeof value === "string" && /^-?\d+$/.test(value)) return Number(value);
+  const candidate =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && INTEGER_TEXT.test(value)
+        ? Number(value)
+        : Number.NaN;
 
-  return fail(what, `returned ${shapeOf(value)} for ${column} where whole shillings were expected`);
+  if (!Number.isSafeInteger(candidate)) {
+    return fail(what, `returned ${shapeOf(value)} for ${column} where whole shillings were expected`);
+  }
+
+  return candidate;
 }
 
 /**
