@@ -2,6 +2,53 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.0.7] — 2026-09-20
+
+**An invoice on an order now says what has actually been paid.** It said "Unpaid" — on every
+invoice ever issued, to everybody. The card was written in the stage before payments existed and
+nothing revisited it when they arrived, so a Cashier could take the whole bill at the till, open
+the order the money was for, and read that nothing had been paid. The status is now the one the
+payments screen shows, because both read the same record.
+
+**Money and credit are different things, and the card keeps them apart.** An invoice settled
+entirely on credit still reads Unpaid, because nothing was paid; part tender plus credit reads
+Partly paid on the tender alone. The approved balance is listed beside the money with its own
+label, never added to it.
+
+**A Sales Representative is told the status is not shown, rather than told it is Unpaid.** Payment
+records are not part of that role, and the honest answer to a question you may not ask is not
+zero. Everything else on the invoice — its number, its lines, its totals, and whether it was
+cancelled — is unchanged for them.
+
+**The staff workflows stay closed.** Nothing here activates an account, opens day-to-day
+operation, or changes any payment, reversal, cancellation or dispatch command. This release
+changes one screen and what it reads.
+
+### Fixed
+
+- **The invoice card on an order shows the current payment status, the money received and the
+  balance due.** Calculated from money actually received, never chosen, and read from the
+  settlement record rather than from a page of payments.
+- **A settlement figure that cannot be stated exactly is a failed read, not a figure.** A missing
+  or malformed record reaches the page-level retry instead of quietly becoming "Unpaid" or zero,
+  and that now includes an amount too large for the application to hold without rounding it.
+
+<!-- release-controller:begin version=0.0.7 base=v0.0.6 preparation=47 -->
+Generated from every accepted merge after `v0.0.6`. Each preparation replaces the lines between these markers; write prose above or below them.
+
+Version policy 0.x. Highest change: patch. No breaking change and no deprecation.
+
+### Accepted merges (7)
+
+1. **test(settlement): prove the walk-in sale landed before reloading on it** — [#32](https://github.com/freeventures-tz/free-oms-app/pull/32) · merge [`78275d2`](https://github.com/freeventures-tz/free-oms-app/commit/78275d2247be9ab57bb39d2b140a5223a7213e89) · `test` → patch
+2. **test: set the yard as well as the ledger, and wait for the inspection** — [#33](https://github.com/freeventures-tz/free-oms-app/pull/33) · merge [`91cb9b8`](https://github.com/freeventures-tz/free-oms-app/commit/91cb9b8a552b9384f49a2ac67260d5e765176939) · `test` → patch
+3. **ci(release): preview releases, tag exact merges and recover missed build tags** — [#42](https://github.com/freeventures-tz/free-oms-app/pull/42) · merge [`93bcd0b`](https://github.com/freeventures-tz/free-oms-app/commit/93bcd0be0ff8bd905651c6ae61115acbf1fabb6e) · `ci` → patch
+4. **ci(release): prepare normal releases and gate their tags on evidence** — [#43](https://github.com/freeventures-tz/free-oms-app/pull/43) · merge [`af45203`](https://github.com/freeventures-tz/free-oms-app/commit/af45203715a835b4f30c6bc211ede680887219f9) · `ci` → patch
+5. **test(inventory): date the future-delivery fixture on the business clock (\#34)** — [#44](https://github.com/freeventures-tz/free-oms-app/pull/44) · merge [`b2573e2`](https://github.com/freeventures-tz/free-oms-app/commit/b2573e263464c10d53a263a13a6b9fff949ecb78) · `test` → patch
+6. **fix(sales): show the invoice's real payment status on its order** — [#46](https://github.com/freeventures-tz/free-oms-app/pull/46) · merge [`f78ce49`](https://github.com/freeventures-tz/free-oms-app/commit/f78ce49313a13430ca98ad2de6441c2b646a4e16) · `fix` → patch
+7. **chore(release): prepare 0.0.7** — [#47](https://github.com/freeventures-tz/free-oms-app/pull/47) · this release's preparation · `chore` → patch
+<!-- release-controller:end -->
+
 ## [0.0.6] — 2026-09-09
 
 **Stock that has been sold stays sold.** Making bricks and writing stock off both used to look at
