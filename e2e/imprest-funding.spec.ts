@@ -232,6 +232,229 @@ test.describe("imprest funding", () => {
   });
 });
 
+// ---------------------------------------------------------------------------------------------
+// Review F1 on PR #49: the answer to a funding command is lost AFTER the server committed it.
+//
+// The action's POST really reaches the server and is really executed (`route.fetch`), then the
+// browser is told the connection failed. The screen must not claim that nothing changed, and Try
+// again must resend the same request so the database replays it rather than recording it twice.
+// ---------------------------------------------------------------------------------------------
+
+const LIST_ROUTE = /\/imprest(\?|$)/;
+const detailRoute = (id: string) => new RegExp(`/imprest/${id}(\\?|$)`);
+
+/** Lets the next POST to `pattern` reach the server and commit, then drops its answer. */
+async function loseNextAnswer(page: Page, pattern: RegExp): Promise<() => boolean> {
+  let lost = false;
+  await page.route(pattern, async (route, request) => {
+    if (request.method() !== "POST" || lost) return route.continue();
+    await route.fetch();
+    lost = true;
+    await route.abort("connectionfailed");
+  });
+  return () => lost;
+}
+
+const UNCONFIRMED =
+  "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which cannot be recorded twice.";
+
+test.describe("imprest funding when an answer is lost", () => {
+  test("a request that committed is reported as unconfirmed, and Try again does not create a second", async ({
+    page,
+  }) => {
+    const reason = `Lost ${SUFFIX} ${test.info().project.name}`;
+    await as(page, "manager");
+    await page.goto("/imprest");
+    const wasLost = await loseNextAnswer(page, LIST_ROUTE);
+
+    await submitForm(page, "request-funding-form", {
+      "Amount requested (TZS)": "12000",
+      "What the money is for": reason,
+    });
+
+    await expect(page.getByText(UNCONFIRMED)).toBeVisible();
+    expect(wasLost()).toBe(true);
+    await expect(page.getByText(/nothing was changed/i)).toHaveCount(0);
+    await expect(page.getByText("That did not work. Try again.")).toHaveCount(0);
+    // What was typed is still there for the retry.
+    await expect(page.getByTestId("request-funding-form").getByLabel("What the money is for")).toHaveValue(
+      reason,
+    );
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("status")).toHaveText("Funding request submitted.");
+
+    await page.unroute(LIST_ROUTE);
+    await page.goto("/imprest");
+    await expect(page.getByRole("link", { name: new RegExp(reason) })).toHaveCount(1);
+  });
+
+  test("a receipt that committed is reported as unconfirmed, and Try again posts it exactly once", async ({
+    page,
+  }) => {
+    const reason = `Lost receipt ${SUFFIX} ${test.info().project.name}`;
+    const id = await seedProvided(await sessionFor("manager"), await sessionFor("director"), reason);
+    await as(page, "manager");
+    const before = await postedTotal(page);
+
+    await page.goto(`/imprest/${id}`);
+    const wasLost = await loseNextAnswer(page, detailRoute(id));
+    await page.getByTestId("confirm-received").click();
+
+    await expect(page.getByText(UNCONFIRMED)).toBeVisible();
+    expect(wasLost()).toBe(true);
+    await page.unroute(detailRoute(id));
+
+    // It DID post, read from a second tab, which is why "nothing was changed" would have been false.
+    const second = await page.context().newPage();
+    expect(await postedTotal(second)).toBe(before + 10000);
+    await second.close();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("status")).toHaveText("Cash receipt confirmed and posted.");
+    expect(await postedTotal(page)).toBe(before + 10000);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review F2 on PR #49: each loading boundary is shaped like the funding page it stands in for.
+//
+// The navigation is HELD, not delayed, as the production board's skeleton test learned to do:
+// prefetches are let through and awaited, because the router can only show a boundary it already
+// holds, and the one real navigation is parked until the skeleton has been measured. The page is
+// then released and measured the same way, and the two are compared on this device tier.
+// ---------------------------------------------------------------------------------------------
+
+type Hold = { prefetched: () => boolean; holding: () => boolean; release: () => void };
+
+async function holdNavigation(page: Page, pattern: RegExp): Promise<Hold> {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let prefetched = false;
+  let holding = false;
+  await page.route(pattern, async (route, request) => {
+    if ("next-router-prefetch" in request.headers()) {
+      await route.continue();
+      prefetched = true;
+      return;
+    }
+    if (holding) return route.continue();
+    holding = true;
+    await released;
+    await route.continue();
+  });
+  return { prefetched: () => prefetched, holding: () => holding, release: () => release() };
+}
+
+async function awaitPrefetch(page: Page, hold: Hold) {
+  await expect
+    .poll(hold.prefetched, { message: "the loading boundary was never prefetched", timeout: 15_000 })
+    .toBe(true);
+  // Prefetching has to have FINISHED, not merely started, or the click commits with no boundary.
+  await page.waitForLoadState("networkidle");
+}
+
+async function awaitHeld(page: Page, hold: Hold) {
+  await expect
+    .poll(hold.holding, { message: "the navigation never reached the route handler", timeout: 15_000 })
+    .toBe(true);
+  const skeleton = page.getByRole("status");
+  await expect(skeleton).toBeVisible();
+  // Announced in words, not drawn only in grey (design.md §12.7 rule 6).
+  await expect(skeleton).toContainText("Working…");
+  return skeleton;
+}
+
+type Box = ReturnType<Page["getByTestId"]>;
+const gridColumns = (box: Box) =>
+  box.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
+const flexDirection = (box: Box) => box.evaluate((el) => getComputedStyle(el).flexDirection);
+const topOf = async (box: Box) => (await box.boundingBox())!.y;
+
+/** How far the page may land from where its skeleton stood: a line of text, not a section. */
+const LANDING_TOLERANCE_PX = 24;
+
+test.describe("imprest funding while a page is still loading", () => {
+  test("the list skeleton has the funding list's shape, not the production board's", async ({
+    page,
+  }, testInfo) => {
+    const reason = `Shape ${SUFFIX} ${testInfo.project.name}`;
+    await seedProvided(await sessionFor("manager"), await sessionFor("director"), reason);
+    await as(page, "director");
+
+    const hold = await holdNavigation(page, LIST_ROUTE);
+    // Empties the client router cache, so every prefetch for the link happens under the handler.
+    await page.reload();
+    const nav = await openNavigation(page, testInfo);
+    const link = nav.getByRole("link", { name: "Imprest funding" });
+    await expect(link).toBeVisible();
+    await awaitPrefetch(page, hold);
+    await link.click({ noWaitAfter: true });
+
+    const skeleton = await awaitHeld(page, hold);
+    const total = skeleton.getByTestId("funding-total-skeleton");
+    const list = skeleton.getByTestId("funding-list-skeleton");
+    await expect(total).toBeVisible();
+    await expect(list.locator("li")).toHaveCount(4);
+    // The posted-funding card comes first, then the list, as on the page.
+    expect(await topOf(total)).toBeLessThan(await topOf(list));
+    // Nothing the size of the production board's materials table (`h-24`, 96px).
+    const tallest = await skeleton
+      .locator("[data-slot='skeleton']")
+      .evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().height)));
+    expect(tallest).toBeLessThan(48);
+    const skeletonTotalTop = await topOf(total);
+    const skeletonRowDirection = await flexDirection(list.locator("li").first());
+
+    hold.release();
+    await expect(page.getByTestId("funding-total")).toBeVisible({ timeout: 20_000 });
+    await expect(skeleton).toHaveCount(0);
+    await page.unroute(LIST_ROUTE);
+
+    // The page lands where its skeleton stood, and its cards run the same way on this tier.
+    expect(Math.abs((await topOf(page.getByTestId("funding-total"))) - skeletonTotalTop)).toBeLessThanOrEqual(
+      LANDING_TOLERANCE_PX,
+    );
+    const card = page.getByRole("link", { name: new RegExp(reason) }).locator("> div");
+    expect(await flexDirection(card)).toBe(skeletonRowDirection);
+  });
+
+  test("the detail skeleton has one funding's shape: figures, actions and history", async ({
+    page,
+  }, testInfo) => {
+    const reason = `Detail shape ${SUFFIX} ${testInfo.project.name}`;
+    const id = await seedProvided(await sessionFor("manager"), await sessionFor("director"), reason);
+    await as(page, "director");
+
+    const hold = await holdNavigation(page, detailRoute(id));
+    await page.goto("/imprest");
+    const link = page.getByRole("link", { name: new RegExp(reason) });
+    await link.scrollIntoViewIfNeeded();
+    await awaitPrefetch(page, hold);
+    await link.click({ noWaitAfter: true });
+
+    const skeleton = await awaitHeld(page, hold);
+    const figures = skeleton.getByTestId("funding-figures-skeleton");
+    await expect(figures.locator("> div")).toHaveCount(4);
+    await expect(skeleton.getByTestId("funding-actions-skeleton")).toBeVisible();
+    await expect(skeleton.getByTestId("funding-history-skeleton").locator("li")).toHaveCount(3);
+    const skeletonColumns = await gridColumns(figures);
+    expect(skeletonColumns).toBe(testInfo.project.name === "mobile" ? 2 : 4);
+    const skeletonFiguresTop = await topOf(figures);
+
+    hold.release();
+    await expect(page.getByTestId("funding-figures")).toBeVisible({ timeout: 20_000 });
+    await expect(skeleton).toHaveCount(0);
+    await page.unroute(detailRoute(id));
+
+    expect(await gridColumns(page.getByTestId("funding-figures"))).toBe(skeletonColumns);
+    expect(
+      Math.abs((await topOf(page.getByTestId("funding-figures"))) - skeletonFiguresTop),
+    ).toBeLessThanOrEqual(LANDING_TOLERANCE_PX);
+    await expect(page.getByTestId("funding-history")).toBeVisible();
+  });
+});
+
 function psql(sql: string) {
   const url = process.env.SUPABASE_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
   try {
@@ -283,7 +506,11 @@ async function sessionFor(who: "director" | "manager"): Promise<SupabaseClient> 
   }).schema("api") as unknown as SupabaseClient;
 }
 
-async function seedProvided(manager: SupabaseClient, director: SupabaseClient): Promise<string> {
+async function seedProvided(
+  manager: SupabaseClient,
+  director: SupabaseClient,
+  reason = `Benchmark ${SUFFIX}`,
+): Promise<string> {
   const call = async (api: SupabaseClient, fn: string, args: Record<string, unknown>) => {
     const { data, error } = await api.rpc(fn, { ...args, p_idempotency_key: randomUUID() });
     if (error || !data.ok) throw new Error(`${fn}: ${error?.message ?? data.reason}`);
@@ -291,7 +518,7 @@ async function seedProvided(manager: SupabaseClient, director: SupabaseClient): 
   };
   const requested = await call(manager, "staff_request_imprest_funding", {
     p_amount_tzs: 10000,
-    p_reason: `Benchmark ${SUFFIX}`,
+    p_reason: reason,
   });
   const approved = await call(director, "admin_decide_imprest_funding", {
     p_funding_id: requested.id,
