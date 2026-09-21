@@ -88,6 +88,9 @@ where n.nspname in ('public', 'api', 'private')
   and (p.proconfig is null or not ('search_path=""' = any (p.proconfig)));
 
 -- 0001 unindexed_foreign_keys: a foreign key with no leading index makes the referencing side scan.
+-- "Leading" means the index's first N columns are the key's N columns, in any order. The rule used
+-- to accept single-column keys only, so the first composite key (the imprest receipt, #48) could
+-- never be satisfied by any index at all.
 insert into advisor_findings
 select 'unindexed_foreign_keys', 'INFO',
        conrelid::regclass::text || ' (' || conname || ')'
@@ -98,8 +101,6 @@ where c.contype = 'f'
     select 1 from pg_index i
     where i.indrelid = c.conrelid
       and (i.indkey::smallint[])[0:array_length(c.conkey, 1) - 1] @> c.conkey
-      and array_length(c.conkey, 1) = 1
-      and (i.indkey::smallint[])[0] = c.conkey[1]
   );
 
 -- Project rule, not a Supabase one, and the one a leaked secret key depends on:
