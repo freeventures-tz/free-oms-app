@@ -2,6 +2,39 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.1.0] — 2026-09-21
+
+**Imprest funding now runs in the application.** A Manager asks for operating cash, a Director
+approves an amount or rejects the request with a reason, a Director records the cash actually handed
+over, and the Manager confirms what arrived. Either Director may act, and every step keeps its own
+amount, person and time: what was requested, approved, handed over and received are four separate
+figures, never one.
+
+**Only the Manager's confirmation adds money.** A request, an approval, an approval increase, a
+handover and a Director's correction add nothing to posted imprest funding. Confirming the handover
+on screen posts that exact amount once; a retry, a second tap or a stale screen cannot post it
+again.
+
+**A handover can be less than approved, and more needs an approval increase first.** If the cash
+counted differs from what was recorded, the Manager reports the mismatch with the amount counted,
+zero included. A Director records the corrected handover with an explanation, and the Manager
+confirms it or reports again. Every approval, handover and count stays in the history.
+
+**This is funding only, and the staff workflows stay closed.** The total shown is confirmed funding,
+not a cash count. Spending, expense evidence, daily cash counts, variance and retirement are not in
+this release. Nothing here activates an account or opens day-to-day operation.
+
+<!-- release-controller:begin version=0.1.0 base=v0.0.7 preparation=50 -->
+Generated from every accepted merge after `v0.0.7`. Each preparation replaces the lines between these markers; write prose above or below them.
+
+Version policy 0.x. Highest change: minor. No breaking change and no deprecation.
+
+### Accepted merges (2)
+
+1. **feat(imprest): request, provide and confirm imprest funding with discrepancy history** — [#49](https://github.com/freeventures-tz/free-oms-app/pull/49) · merge [`4bc7fa9`](https://github.com/freeventures-tz/free-oms-app/commit/4bc7fa97601f12f3ff97b4117d5023b65ad564fb) · `feat` → minor
+2. **chore(release): prepare 0.1.0** — [#50](https://github.com/freeventures-tz/free-oms-app/pull/50) · this release's preparation · `chore` → patch
+<!-- release-controller:end -->
+
 ## [0.0.7] — 2026-09-20
 
 **An invoice on an order now says what has actually been paid.** It said "Unpaid" — on every
