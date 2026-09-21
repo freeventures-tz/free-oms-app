@@ -18,7 +18,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(94);
+select plan(96);
 
 create schema if not exists tests;
 
@@ -540,6 +540,33 @@ set local role authenticated;
 select is((select count(*)::int from public.imprest_fundings), 5,
   'a Cashier reads the funding history under the existing imprest read policy');
 reset role;
+
+-- ---------------------------------------------------------------------------
+-- A receipt names a handover of ITS OWN funding, at that handover's amount
+--
+-- The confirmation command copies both from the current handover, so no reachable path does
+-- otherwise. This is the database refusing it anyway, whoever the writer is (PR #49 review).
+-- f4 is disputed, so the update guard lets it move; only the receipt constraint can refuse it.
+-- ---------------------------------------------------------------------------
+select throws_ok(
+  format($$ update public.imprest_fundings
+               set status = 'received', version = version + 1,
+                   received_handover_id = h.id, received_amount_tzs = h.amount_tzs,
+                   received_by = 'e4800000-0000-0000-0000-000000000003', received_at = now()
+              from (select id, amount_tzs from public.imprest_funding_handovers
+                     where funding_id = %L order by cycle desc limit 1) h
+             where imprest_fundings.id = %L $$,
+         tests.fid('f3.req'), tests.fid('f4.req')),
+  '23503', null, 'a receipt cannot name another funding''s handover');
+select throws_ok(
+  format($$ update public.imprest_fundings
+               set status = 'received', version = version + 1,
+                   received_handover_id = %L, received_amount_tzs = 45000,
+                   received_by = 'e4800000-0000-0000-0000-000000000003', received_at = now()
+             where id = %L $$,
+         (select (res -> 'funding' ->> 'handover_id')::uuid from r where name = 'f4.prov'),
+         tests.fid('f4.req')),
+  '23503', null, 'a receipt cannot post an amount its handover did not carry');
 
 select * from finish();
 rollback;
