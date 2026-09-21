@@ -103,7 +103,8 @@
     "suppliers": "Wauzaji",
     "dispatch": "Utoaji",
     "storekeepers": "Wahifadhi",
-    "production": "Uzalishaji wa tofali"
+    "production": "Uzalishaji wa tofali",
+    "imprest": "Ufadhili wa imprest"
   },
   "unavailable": {
     "title": "Ukurasa huu haukuweza kupakiwa",
@@ -1093,5 +1094,112 @@
     "already_inspected": "Kundi hilo lilishakaguliwa.",
     "still_curing": "Saa 72 bado hazijaisha.",
     "inspection_must_account_for_all": "Kila kilichokomaa lazima kihesabiwe."
+  },
+  "imprest": {
+    "title": "Ufadhili wa imprest",
+    "description": "Maombi ya fedha za uendeshaji, kiasi ambacho Mkurugenzi aliidhinisha na kukabidhi, na kiasi ambacho Meneja alithibitisha kupokea.",
+    "total": {
+      "label": "Ufadhili wa imprest uliothibitishwa",
+      "help": "Jumla ya ufadhili ambao Meneja amethibitisha kuupokea. Si hesabu ya fedha taslimu, na matumizi bado hayarekodiwi hapa.",
+      "noFund": "Bado hakuna ombi la ufadhili wa imprest."
+    },
+    "request": {
+      "title": "Omba ufadhili"
+    },
+    "list": {
+      "title": "Maombi ya ufadhili",
+      "empty": "Bado hakuna maombi ya ufadhili.",
+      "requested": "Imeombwa {amount}",
+      "received": "Imepokelewa {amount}"
+    },
+    "status": {
+      "requested": "Inasubiri uamuzi",
+      "approved": "Imeidhinishwa, inasubiri fedha",
+      "provided": "Inasubiri uthibitisho wa Meneja",
+      "disputed": "Tofauti imeripotiwa",
+      "received": "Imepokelewa",
+      "rejected": "Imekataliwa"
+    },
+    "fields": {
+      "amount": "Kiasi kinachoombwa (TZS)",
+      "reason": "Fedha ni za nini",
+      "approvedAmount": "Kiasi cha kuidhinisha (TZS)",
+      "rejectionReason": "Sababu ya kukataa",
+      "providedAmount": "Kiasi kilichokabidhiwa kweli (TZS)",
+      "newApproval": "Kiasi kipya kilichoidhinishwa (TZS)",
+      "note": "Maelezo (si lazima)",
+      "correctedAmount": "Kiasi sahihi kilichokabidhiwa (TZS)",
+      "explanation": "Maelezo ya marekebisho",
+      "counted": "Kiasi ulichohesabu (TZS)"
+    },
+    "help": {
+      "provide": "Kinaweza kuwa chini ya kilichoidhinishwa. Ili kukabidhi zaidi, rekodi kwanza ongezeko la idhini.",
+      "counted": "Andika 0 kama hakuna fedha iliyofika."
+    },
+    "actions": {
+      "heading": "Hatua",
+      "request": "Tuma ombi",
+      "approve": "Idhinisha",
+      "reject": "Kataa",
+      "confirmReject": "Kataa ombi",
+      "provide": "Rekodi imprest iliyotolewa",
+      "increase": "Ongeza idhini",
+      "correct": "Rekodi makabidhiano sahihi",
+      "confirm": "Fedha imepokelewa: {amount}",
+      "reportMismatch": "Ripoti tofauti"
+    },
+    "success": {
+      "requested": "Ombi la ufadhili limetumwa.",
+      "approved": "Ufadhili umeidhinishwa. Hakuna kinachowekwa hadi Meneja athibitishe kupokea.",
+      "rejected": "Ombi la ufadhili limekataliwa.",
+      "increased": "Idhini imeongezwa.",
+      "provided": "Makabidhiano yamerekodiwa. Yatawekwa tu Meneja atakapoyathibitisha.",
+      "received": "Upokeaji wa fedha umethibitishwa na kuwekwa.",
+      "mismatch": "Tofauti imeripotiwa. Hakuna kilichowekwa.",
+      "corrected": "Makabidhiano sahihi yamerekodiwa. Meneja lazima ayathibitishe."
+    },
+    "detail": {
+      "back": "Maombi yote ya ufadhili",
+      "requested": "Imeombwa",
+      "approved": "Imeidhinishwa",
+      "provided": "Imekabidhiwa",
+      "received": "Imepokelewa",
+      "none": "Bado",
+      "disputed": "Mkurugenzi alirekodi {provided}; Meneja alihesabu {counted}.",
+      "awaitingManager": "Inasubiri Meneja athibitishe makabidhiano au aripoti tofauti.",
+      "awaitingDirector": "Inasubiri Mkurugenzi arekodi makabidhiano sahihi."
+    },
+    "history": {
+      "title": "Historia",
+      "requested": "Imeombwa {amount}",
+      "approved": "Imeidhinishwa {amount}",
+      "increased": "Idhini imeongezwa hadi {amount}",
+      "provided": "Imekabidhiwa {amount}",
+      "corrected": "Makabidhiano sahihi {amount}",
+      "shortage": "Upungufu umeripotiwa: imehesabiwa {counted} dhidi ya {provided}",
+      "excess": "Ziada imeripotiwa: imehesabiwa {counted} dhidi ya {provided}",
+      "rejected": "Imekataliwa",
+      "received": "Upokeaji umethibitishwa: {amount} imewekwa"
+    }
+  },
+  "imprestErrors": {
+    "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",
+    "generic": "Hitilafu imetokea na hakuna kilichobadilishwa. Jaribu tena.",
+    "idempotency_key_conflict": "Ombi hili tayari limetumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
+    "amount_invalid": "Andika kiasi kamili cha shilingi.",
+    "amount_too_large": "Kiasi hicho ni kikubwa kuliko mfumo unavyokubali.",
+    "reason_required": "Toa sababu yenye angalau herufi 3.",
+    "note_invalid": "Maelezo yawe na herufi 3 hadi 500, au yaachwe wazi.",
+    "explanation_required": "Eleza marekebisho kwa angalau herufi 3.",
+    "no_funding": "Ombi hili la ufadhili halipo tena.",
+    "stale": "Ufadhili huu umebadilika tangu ulipoufungua. Pakia upya uone makabidhiano ya sasa.",
+    "not_awaiting_decision": "Ombi hili tayari limeamuliwa.",
+    "not_open_for_approval_change": "Idhini inaweza kuongezwa kabla ya makabidhiano au wakati tofauti bado iko wazi.",
+    "not_awaiting_provision": "Makabidhiano tayari yamerekodiwa kwa ombi hili.",
+    "not_awaiting_receipt": "Hakuna makabidhiano yanayosubiri uthibitisho wako.",
+    "not_in_dispute": "Hakuna tofauti iliyoripotiwa ya kurekebisha.",
+    "exceeds_approval": "Hiyo ni zaidi ya TZS {approved_amount_tzs} iliyoidhinishwa. Rekodi kwanza ongezeko la idhini.",
+    "increase_not_higher": "Idhini mpya lazima iwe juu ya TZS {approved_amount_tzs}.",
+    "counted_matches_provided": "Umehesabu kiasi kilichorekodiwa. Thibitisha upokeaji badala yake."
   }
 }

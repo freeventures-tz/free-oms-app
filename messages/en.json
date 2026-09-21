@@ -103,7 +103,8 @@
     "suppliers": "Suppliers",
     "dispatch": "Dispatch",
     "storekeepers": "Storekeepers",
-    "production": "Brick production"
+    "production": "Brick production",
+    "imprest": "Imprest funding"
   },
   "unavailable": {
     "title": "This page could not be loaded",
@@ -1093,5 +1094,112 @@
     "already_inspected": "That lot has already been inspected.",
     "still_curing": "The 72 hours are not up yet.",
     "inspection_must_account_for_all": "Everything that cured has to be accounted for."
+  },
+  "imprest": {
+    "title": "Imprest funding",
+    "description": "Requests for operating cash, what a Director approved and handed over, and what the Manager confirmed receiving.",
+    "total": {
+      "label": "Posted imprest funding",
+      "help": "The sum of funding the Manager has confirmed receiving. It is not a cash count, and spending is not recorded here yet.",
+      "noFund": "No imprest funding has been requested yet."
+    },
+    "request": {
+      "title": "Request funding"
+    },
+    "list": {
+      "title": "Funding requests",
+      "empty": "No funding requests yet.",
+      "requested": "Requested {amount}",
+      "received": "Received {amount}"
+    },
+    "status": {
+      "requested": "Awaiting decision",
+      "approved": "Approved, awaiting cash",
+      "provided": "Awaiting Manager confirmation",
+      "disputed": "Mismatch reported",
+      "received": "Received",
+      "rejected": "Rejected"
+    },
+    "fields": {
+      "amount": "Amount requested (TZS)",
+      "reason": "What the money is for",
+      "approvedAmount": "Amount to approve (TZS)",
+      "rejectionReason": "Reason for rejecting",
+      "providedAmount": "Amount actually handed over (TZS)",
+      "newApproval": "New approved amount (TZS)",
+      "note": "Note (optional)",
+      "correctedAmount": "Corrected amount handed over (TZS)",
+      "explanation": "Explanation of the correction",
+      "counted": "Amount you counted (TZS)"
+    },
+    "help": {
+      "provide": "May be less than the approval. To hand over more, record an approval increase first.",
+      "counted": "Enter 0 if no cash arrived."
+    },
+    "actions": {
+      "heading": "Actions",
+      "request": "Submit request",
+      "approve": "Approve",
+      "reject": "Reject",
+      "confirmReject": "Reject request",
+      "provide": "Record imprest provided",
+      "increase": "Increase approval",
+      "correct": "Record corrected handover",
+      "confirm": "Cash received: {amount}",
+      "reportMismatch": "Report mismatch"
+    },
+    "success": {
+      "requested": "Funding request submitted.",
+      "approved": "Funding approved. Nothing is posted until the Manager confirms receipt.",
+      "rejected": "Funding request rejected.",
+      "increased": "Approval increased.",
+      "provided": "Handover recorded. It posts only when the Manager confirms it.",
+      "received": "Cash receipt confirmed and posted.",
+      "mismatch": "Mismatch reported. Nothing was posted.",
+      "corrected": "Corrected handover recorded. The Manager must confirm it."
+    },
+    "detail": {
+      "back": "All funding requests",
+      "requested": "Requested",
+      "approved": "Approved",
+      "provided": "Handed over",
+      "received": "Received",
+      "none": "Not yet",
+      "disputed": "The Director recorded {provided}; the Manager counted {counted}.",
+      "awaitingManager": "Waiting for the Manager to confirm the handover or report a mismatch.",
+      "awaitingDirector": "Waiting for a Director to record the corrected handover."
+    },
+    "history": {
+      "title": "History",
+      "requested": "Requested {amount}",
+      "approved": "Approved {amount}",
+      "increased": "Approval increased to {amount}",
+      "provided": "Handed over {amount}",
+      "corrected": "Corrected handover {amount}",
+      "shortage": "Shortage reported: counted {counted} against {provided}",
+      "excess": "Excess reported: counted {counted} against {provided}",
+      "rejected": "Rejected",
+      "received": "Receipt confirmed: {amount} posted"
+    }
+  },
+  "imprestErrors": {
+    "not_permitted": "Your account may not do this.",
+    "generic": "Something went wrong and nothing was changed. Try again.",
+    "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
+    "amount_invalid": "Enter a whole number of shillings.",
+    "amount_too_large": "That amount is larger than the system accepts.",
+    "reason_required": "Give a reason of at least 3 characters.",
+    "note_invalid": "A note must be between 3 and 500 characters, or left empty.",
+    "explanation_required": "Explain the correction in at least 3 characters.",
+    "no_funding": "This funding request no longer exists.",
+    "stale": "This funding changed since you opened it. Reload to see the current handover.",
+    "not_awaiting_decision": "This request has already been decided.",
+    "not_open_for_approval_change": "The approval can only be increased before a handover or while a mismatch is open.",
+    "not_awaiting_provision": "A handover has already been recorded for this request.",
+    "not_awaiting_receipt": "There is no handover waiting for your confirmation.",
+    "not_in_dispute": "There is no reported mismatch to correct.",
+    "exceeds_approval": "That is more than the approved TZS {approved_amount_tzs}. Record an approval increase first.",
+    "increase_not_higher": "The new approval must be higher than TZS {approved_amount_tzs}.",
+    "counted_matches_provided": "You counted the recorded amount. Confirm receipt instead."
   }
 }
