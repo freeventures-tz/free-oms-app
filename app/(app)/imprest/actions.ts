@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getLocale } from "next-intl/server";
 import type { z } from "zod";
 
 import { requireRole } from "@/lib/auth/guard";
@@ -15,6 +16,7 @@ import {
   requestFunding,
   type ImprestResult,
 } from "@/lib/imprest/commands";
+import { formatTzs } from "@/lib/money";
 import { fieldErrors } from "@/lib/validation/auth";
 import {
   approveFundingSchema,
@@ -65,10 +67,20 @@ export type ImprestActionState = {
   errorValues?: Record<string, string | number>;
 };
 
-function fromRefusal(result: Extract<ImprestResult, { ok: false }>): ImprestActionState {
+async function fromRefusal(result: Extract<ImprestResult, { ok: false }>): Promise<ImprestActionState> {
+  // Shillings in a refusal are shown the way every other amount is: grouped, in the viewer's locale.
+  const locale = await getLocale();
+  const values = result.context
+    ? Object.fromEntries(
+        Object.entries(result.context).map(([key, value]) => [
+          key,
+          key.endsWith("_tzs") && typeof value === "number" ? formatTzs(value, locale) : value,
+        ]),
+      )
+    : undefined;
   return {
     error: `imprestErrors.${KNOWN_ERRORS.has(result.reason) ? result.reason : "generic"}`,
-    errorValues: result.context,
+    errorValues: values,
   };
 }
 
@@ -84,7 +96,7 @@ async function run<S extends z.ZodTypeAny>(
   if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };
 
   const result = await command(parsed.data);
-  if (!result.ok) return fromRefusal(result);
+  if (!result.ok) return await fromRefusal(result);
 
   revalidatePath("/imprest", "layout");
   return { successKey };

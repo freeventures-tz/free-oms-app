@@ -386,7 +386,12 @@ export function FundingActions({ funding, role }: { funding: FundingSummary; rol
     toggles = toggle("mismatch", "imprest.actions.reportMismatch", "danger");
   }
 
-  if (!toggles && !direct) return null;
+  // After the last action a viewer may take, the controls go but the server's answer stays.
+  if (!toggles && !direct) {
+    return controller.result.successKey || controller.result.error ? (
+      <Outcome controller={controller} />
+    ) : null;
+  }
 
   return (
     <section className="flex flex-col gap-3" aria-label={t("imprest.actions.heading")}>

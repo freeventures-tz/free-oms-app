@@ -1198,8 +1198,8 @@
     "not_awaiting_provision": "A handover has already been recorded for this request.",
     "not_awaiting_receipt": "There is no handover waiting for your confirmation.",
     "not_in_dispute": "There is no reported mismatch to correct.",
-    "exceeds_approval": "That is more than the approved TZS {approved_amount_tzs}. Record an approval increase first.",
-    "increase_not_higher": "The new approval must be higher than TZS {approved_amount_tzs}.",
+    "exceeds_approval": "That is more than the approved {approved_amount_tzs}. Record an approval increase first.",
+    "increase_not_higher": "The new approval must be higher than {approved_amount_tzs}.",
     "counted_matches_provided": "You counted the recorded amount. Confirm receipt instead."
   }
 }

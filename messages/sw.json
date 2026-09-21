@@ -1198,8 +1198,8 @@
     "not_awaiting_provision": "Makabidhiano tayari yamerekodiwa kwa ombi hili.",
     "not_awaiting_receipt": "Hakuna makabidhiano yanayosubiri uthibitisho wako.",
     "not_in_dispute": "Hakuna tofauti iliyoripotiwa ya kurekebisha.",
-    "exceeds_approval": "Hiyo ni zaidi ya TZS {approved_amount_tzs} iliyoidhinishwa. Rekodi kwanza ongezeko la idhini.",
-    "increase_not_higher": "Idhini mpya lazima iwe juu ya TZS {approved_amount_tzs}.",
+    "exceeds_approval": "Hiyo ni zaidi ya {approved_amount_tzs} iliyoidhinishwa. Rekodi kwanza ongezeko la idhini.",
+    "increase_not_higher": "Idhini mpya lazima iwe juu ya {approved_amount_tzs}.",
     "counted_matches_provided": "Umehesabu kiasi kilichorekodiwa. Thibitisha upokeaji badala yake."
   }
 }
