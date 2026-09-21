@@ -1185,6 +1185,7 @@
   "imprestErrors": {
     "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",
     "generic": "Hitilafu imetokea na hakuna kilichobadilishwa. Jaribu tena.",
+    "unconfirmed": "Jibu halikurudi, kwa hivyo huenda hili limehifadhiwa au halijahifadhiwa. Bonyeza Jaribu tena ili ujue: ombi lilelile linatumwa tena, na haliwezi kurekodiwa mara mbili.",
     "idempotency_key_conflict": "Ombi hili tayari limetumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
     "amount_invalid": "Andika kiasi kamili cha shilingi.",
     "amount_too_large": "Kiasi hicho ni kikubwa kuliko mfumo unavyokubali.",

@@ -33,6 +33,9 @@ import { useGuardedAction, type GuardedAction } from "@/lib/ui/use-guarded-actio
 
 const TOUCH_FLOOR = "min-h-11 md:min-h-11 xl:min-h-0";
 
+/** Shown for any outcome the server never confirmed either way (review F1 on PR #49). */
+const UNCONFIRMED_KEY = "imprestErrors.unconfirmed";
+
 type FieldSpec = {
   name: string;
   labelKey: string;
@@ -156,6 +159,9 @@ function ActionForm({
 function useFreshKey(onSuccess?: () => void): [string, Controller, () => void] {
   const [key, setKey] = useState(() => crypto.randomUUID());
   const controller = useGuardedAction<string, ImprestActionState>({
+    // A thrown action is a response that never arrived, not a refusal: the command may have
+    // committed, so the message says so, and Try again resends this same key to find out.
+    failureKey: UNCONFIRMED_KEY,
     onSettled: (outcome) => {
       if (outcome.successKey) {
         setKey(crypto.randomUUID());

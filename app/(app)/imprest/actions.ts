@@ -43,6 +43,7 @@ import {
 const KNOWN_ERRORS = new Set([
   "not_permitted",
   "generic",
+  "unconfirmed",
   "idempotency_key_conflict",
   "amount_invalid",
   "reason_required",

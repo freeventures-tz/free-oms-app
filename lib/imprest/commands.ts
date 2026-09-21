@@ -13,8 +13,15 @@ export type ImprestResult =
 
 const CONTEXT_KEYS = ["approved_amount_tzs", "provided_amount_tzs", "status"] as const;
 
-function mapDatabaseError(message: string): string {
-  if (/not a live Director|may not perform this command|authenticated session/i.test(message)) {
+/**
+ * Only an error that carries a code is an answer: PostgREST or PostgreSQL refused the call, and its
+ * transaction rolled back. postgrest-js RETURNS a dropped connection as an error with an empty code,
+ * and a gateway page as one with none, and in both cases the command may already have committed.
+ * That is `unconfirmed`, never "nothing was changed": only a retry with the same key can tell.
+ */
+function mapDatabaseError(error: { message: string; code?: string }): string {
+  if (!error.code) return "unconfirmed";
+  if (/not a live Director|may not perform this command|authenticated session/i.test(error.message)) {
     return "not_permitted";
   }
   return "generic";
@@ -23,7 +30,7 @@ function mapDatabaseError(message: string): string {
 async function call(fn: string, args: Record<string, unknown>): Promise<ImprestResult> {
   const api = await userApi();
   const { data, error } = await api.rpc(fn, args);
-  if (error) return { ok: false, reason: mapDatabaseError(error.message) };
+  if (error) return { ok: false, reason: mapDatabaseError(error) };
 
   const result = (data ?? {}) as Record<string, unknown>;
   if (result.ok === true) return { ok: true, reason: String(result.reason) };

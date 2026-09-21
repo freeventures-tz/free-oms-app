@@ -1185,6 +1185,7 @@
   "imprestErrors": {
     "not_permitted": "Your account may not do this.",
     "generic": "Something went wrong and nothing was changed. Try again.",
+    "unconfirmed": "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which cannot be recorded twice.",
     "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
     "amount_invalid": "Enter a whole number of shillings.",
     "amount_too_large": "That amount is larger than the system accepts.",
