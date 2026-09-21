@@ -75,6 +75,12 @@ const MIGRATION_33_VERSION = "20260822001100";
  */
 const V005_VERSION = "20260822001200";
 
+/**
+ * The 36th and last migration of v0.0.6. Issue #48's imprest funding pair sits after it, so the
+ * v0.0.5 phase stops here: its assertion counts exactly what v0.0.6 brought and nothing later.
+ */
+const V006_VERSION = "20260823000200";
+
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -187,6 +193,8 @@ const PHASES = [
     subject: "migrations 35 and 36",
     what: "the v0.0.5 database",
     version: V005_VERSION,
+    // v0.0.6 AND NO FURTHER, for the same reason the v0.0.4 phase stops at v0.0.5.
+    upTo: V006_VERSION,
     describes: "v0.0.5, before the stock invariant",
     query: V005_PRESERVATION,
     fixtures: [
