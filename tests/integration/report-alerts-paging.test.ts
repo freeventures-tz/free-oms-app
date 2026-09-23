@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { createLiveStaff, ensureDirector, type Fixture } from "@/tests/integration/helpers";
+import {
+  PUBLISHABLE_KEY,
+  SUPABASE_URL,
+  createLiveStaff,
+  ensureDirector,
+  type Fixture,
+} from "@/tests/integration/helpers";
 import { runSql } from "@/tests/support/database";
 
 /**
@@ -122,5 +128,100 @@ describe("reading more unresolved alerts than one API response carries", () => {
     } finally {
       runSql("grant select on public.report_failure_alerts to authenticated;");
     }
+  });
+});
+
+/**
+ * Issue #51 · The same read with the API's ceiling LOWERED on the real server, and a later page
+ * failing over a real session.
+ *
+ * `max_rows` is lowered through PostgREST's in-database configuration — `pgrst.db_max_rows` on the
+ * role PostgREST connects as, then a config reload — so the server itself answers 300 rows to a
+ * request for 1,000, with HTTP 200 and no error. That is the case "a short page is the last page"
+ * gets wrong, proved against the real API rather than a fake client. The setting is removed and
+ * reloaded afterwards, and the wait for each reload is measured rather than slept.
+ */
+async function servedRowsFor(client: SupabaseClient): Promise<number> {
+  const { data } = await client
+    .from("report_failure_alerts")
+    .select("id")
+    .order("business_date", { ascending: false })
+    .limit(1000);
+  return data?.length ?? -1;
+}
+
+async function setServerRowCap(cap: number | null): Promise<void> {
+  runSql(
+    cap === null
+      ? "alter role authenticator reset pgrst.db_max_rows;"
+      : `alter role authenticator set pgrst.db_max_rows = '${cap}';`,
+  );
+  runSql("notify pgrst, 'reload config';");
+  // Measured, not slept: the reload is asynchronous, so wait until the server really answers
+  // with the new ceiling, and fail loudly if it never does.
+  const expected = cap ?? 1000;
+  const deadline = Date.now() + 20_000;
+  let served = await servedRowsFor(director.read);
+  while (served !== expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    served = await servedRowsFor(director.read);
+  }
+  if (served !== expected) {
+    throw new Error(`the API still serves ${served} rows, not ${expected}, after the config reload`);
+  }
+}
+
+describe("reading every alert when the server's own row cap is lower than the page asked for", () => {
+  beforeAll(async () => {
+    await setServerRowCap(300);
+  });
+
+  afterAll(async () => {
+    await setServerRowCap(null);
+  });
+
+  it("really is capped: the server answers 300 rows to a request for 1,000", async () => {
+    expect(await servedRowsFor(director.read)).toBe(300);
+  });
+
+  it("still hands a Director every alert, in order, with none repeated", async () => {
+    session.client = director.read;
+    const alerts = await loadReportFailureAlerts();
+    const ids = alerts.map((alert) => alert.id);
+    expect(ids).toEqual(expectedIds());
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(alerts.filter((alert) => alert.businessDate.startsWith("199"))).toHaveLength(COUNT);
+  });
+
+  it("fails the whole read when a LATER page fails, rather than returning the pages before it", async () => {
+    // The Director's own session over real HTTP. The first page really comes back from the server;
+    // every request after it is answered with a 503 in transport. EVERY one, not only the next:
+    // supabase-js retries a failed GET by itself, so a single injected failure was simply retried
+    // away and the read completed — which proved the client's retry, not the loader's refusal.
+    let alertRequests = 0;
+    const failing = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { Authorization: `Bearer ${director.accessToken}` },
+        fetch: async (input, init) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          if (url.includes("/report_failure_alerts")) {
+            alertRequests += 1;
+            if (alertRequests >= 2) {
+              return new Response(JSON.stringify({ message: "service unavailable" }), {
+                status: 503,
+                headers: { "content-type": "application/json" },
+              });
+            }
+          }
+          return fetch(input, init);
+        },
+      },
+    });
+
+    session.client = failing;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(loadReportFailureAlerts()).rejects.toThrow("data_unavailable: reports.failureAlerts");
+    expect(alertRequests).toBeGreaterThanOrEqual(2);
   });
 });
