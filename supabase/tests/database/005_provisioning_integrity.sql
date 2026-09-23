@@ -244,13 +244,20 @@ select throws_ok(
 --   admin_commands.worker_token     a random claim marker. It authenticates nothing and grants no
 --                                   access: holding it only lets a worker finish the one command it
 --                                   already claimed, and the row is readable by Directors anyway.
+--   report_runs.claim_token         the same kind of marker, for the same kind of reason (issue
+--                                   #19). It is a fencing token for one scheduled report run: the
+--                                   only things that consult it are `private.complete_report_run`
+--                                   and `private.fail_report_run`, which no Data API role may
+--                                   execute, so holding it opens nothing and proves nobody's
+--                                   identity.
 select is(
   (select coalesce(string_agg(table_name || '.' || column_name, ', '), '')
      from information_schema.columns
     where table_schema = 'public'
       and column_name ~ 'password|secret|token|credential'
       and not (table_name = 'profiles'       and column_name = 'must_change_password')
-      and not (table_name = 'admin_commands' and column_name = 'worker_token')),
+      and not (table_name = 'admin_commands' and column_name = 'worker_token')
+      and not (table_name = 'report_runs'    and column_name = 'claim_token')),
   '',
   'no column in public stores a password, secret, token, or credential');
 
