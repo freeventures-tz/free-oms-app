@@ -1,5 +1,19 @@
 #!/usr/bin/env node
 /**
+ * Issue #51 adds two boundaries to the ones below, and both are about the scheduled report:
+ *
+ *   THE v0.1.0 PHASE resets to the 39th and last released migration — the database hosted Supabase
+ *   holds today — builds sales, money, dispatch, production AND imprest funding on it through the
+ *   released commands, and applies the two reporting migrations. Its preservation query compares
+ *   every released row, grant, policy, constraint, trigger and function body; its assertions then
+ *   run the report against that data.
+ *
+ *   THE REPORT BOUNDARY resets to the integrated success migration alone, generates a real report
+ *   with deliveries, and applies the retry migration. It asks whether that migration can RUN AT ALL
+ *   against a database that has already produced a report — issue #19's first backfill was an
+ *   UPDATE, and a snapshot refuses every UPDATE — and whether the report is the same afterwards,
+ *   down to the tuple.
+ *
  * Stage 10 Part C · Does migration 22 preserve a real Part B database?
  *
  * Migration 22 carries its own snapshot-and-abort checks. Those protect the hosted apply, and they
@@ -81,6 +95,15 @@ const V005_VERSION = "20260822001200";
  */
 const V006_VERSION = "20260823000200";
 
+/** The 39th and last RELEASED migration: v0.1.0, exactly what hosted Supabase holds (issue #51). */
+const V010_VERSION = "20260921000300";
+
+/**
+ * The integrated success migration alone (issue #51): the state a hosted apply passes through
+ * between the two reporting files, and the last database that could hold a report written before
+ * the retry machinery existed.
+ */
+const REPORT_SUCCESS_VERSION = "20260923000100";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -94,7 +117,25 @@ const ASSERT_V005 = join(SQL_DIR, "04_assert_v005.sql");
 const ASSERT_MIGRATION_33 = join(SQL_DIR, "05_assert_migration33_boundary.sql");
 const BUILD_V005 = join(SQL_DIR, "11_build_v005_fixture.sql");
 const ASSERT_V006 = join(SQL_DIR, "12_assert_v006.sql");
+const MARK_V010 = join(SQL_DIR, "14_mark_v010_boundary.sql");
+const BUILD_V010_FUNDING = join(SQL_DIR, "15_build_v010_funding.sql");
+const ASSERT_REPORTING = join(SQL_DIR, "16_assert_reporting_upgrade.sql");
 
+/** The success → retry boundary: a database that has already produced a report. */
+const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
+const REPORT_CAPTURE = join(SQL_DIR, "18_report_capture.sql");
+const REPORT_IMMUTABLE = join(SQL_DIR, "19_report_immutable.sql");
+const REPORT_AFTER = join(SQL_DIR, "20_report_after.sql");
+
+/**
+ * The two databases the retry migration has to be able to arrive at. The empty one is the case a
+ * fresh environment meets; the populated one is the case a hosted database that had reported a
+ * single night would meet, and it is the one that used to fail.
+ */
+const REPORT_SCENARIOS = [
+  { name: "the success migration with no report yet — a fresh environment", populated: false },
+  { name: "the success migration with a real generated report and its deliveries", populated: true },
+];
 /**
  * The gate's counterexamples: one same-count rewrite, and two broken links.
  *
@@ -106,7 +147,7 @@ const COUNTEREXAMPLE_CUSTOMER = join(SQL_DIR, "06_counterexample_customer_rename
 const COUNTEREXAMPLE_REVERSAL = join(SQL_DIR, "07_counterexample_reversal_linkage.sql");
 const COUNTEREXAMPLE_SETTLEMENT = join(SQL_DIR, "08_counterexample_settlement_linkage.sql");
 const COUNTEREXAMPLE_PRODUCTION = join(SQL_DIR, "13_counterexample_production_rewrite.sql");
-
+const COUNTEREXAMPLE_FUNDING = join(SQL_DIR, "21_counterexample_funding_history.sql");
 /**
  * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
  *
@@ -123,7 +164,13 @@ const COUNTEREXAMPLE_MASKED = join(SQL_DIR, "10_counterexample_masked_rename.sql
 const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservation.sql");
 const V004_PRESERVATION = join("supabase", "release-checks", "v004_preservation.sql");
 const V005_PRESERVATION = join("supabase", "release-checks", "v005_preservation.sql");
-const MIGRATION_MANIFEST = join("supabase", "release-checks", "v005_migration_manifest.txt");
+const V010_PRESERVATION = join("supabase", "release-checks", "v010_preservation.sql");
+
+/**
+ * All 39 released migrations (issue #51). Its first 34 lines are the v0.0.5 manifest unchanged, so
+ * this checks everything that one did and the five released since.
+ */
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v010_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -213,6 +260,35 @@ const PHASES = [
           {
             name: "what a batch consumed and yielded, rewritten in place",
             file: COUNTEREXAMPLE_PRODUCTION,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the two reporting migrations",
+    what: "the v0.1.0 database",
+    version: V010_VERSION,
+    // Nothing is held back: these two are the whole of what follows v0.1.0, and they are one
+    // release unit, so they are applied together exactly as the release would apply them.
+    describes: "v0.1.0, before the scheduled report",
+    query: V010_PRESERVATION,
+    fixtures: [
+      {
+        name: "sales, money, dispatch, production AND imprest funding with every history shape",
+        setup: [MARK_V010, BUILD_V005, BUILD_V010_FUNDING],
+        assertions: [ASSERT_REPORTING],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "what a batch consumed and yielded, rewritten in place",
+            file: COUNTEREXAMPLE_PRODUCTION,
+          },
+          {
+            name: "a disputed imprest handover's amount rewritten in place",
+            file: COUNTEREXAMPLE_FUNDING,
           },
         ],
       },
@@ -327,7 +403,7 @@ function withMigrationsUpTo(upTo, run) {
 }
 
 /**
- * The 34 released migrations, byte for byte as v0.0.5 applied them.
+ * The 39 released migrations, byte for byte as v0.1.0 applied them.
  *
  * A released migration is HISTORY. The hosted database has already run those exact bytes, so
  * editing one does not change what production did — it only makes this repository disagree with
@@ -335,7 +411,7 @@ function withMigrationsUpTo(upTo, run) {
  * correction for a released migration is always a NEW forward migration.
  *
  * Nothing enforced that. This does: the manifest records the sha256 of each released file at
- * `525418e`, and the run refuses to continue if one has moved.
+ * `4098067` (v0.1.0), and the run refuses to continue if one has moved.
  *
  * LINE ENDINGS ARE NORMALISED FIRST, and that is not a loophole. `core.autocrlf` is on for Windows
  * checkouts, so the working tree holds CRLF where the repository holds LF, and hashing the file as
@@ -527,6 +603,57 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
     log(`\n=== the boundary · migration ${MIGRATION_33_VERSION} alone ===`);
     supabase(["db", "reset", "--version", MIGRATION_33_VERSION]);
     psqlFile(ASSERT_MIGRATION_33);
+
+    // THE SUCCESS → RETRY BOUNDARY (issue #51, from issue #19's harness). A different question from
+    // every phase above: not "did the migration preserve the business", but "can the retry
+    // migration even RUN against a database that has already produced a report, and is that report
+    // the same afterwards?" — and the answer to the first half used to be no.
+    for (const scenario of REPORT_SCENARIOS) {
+      log(`\n=== report boundary: ${scenario.name} ===`);
+
+      log(`--- resetting to migration ${REPORT_SUCCESS_VERSION} (the success path, before the retries) ---`);
+      supabase(["db", "reset", "--version", REPORT_SUCCESS_VERSION]);
+
+      let before = null;
+
+      if (scenario.populated) {
+        log("\n--- generating a real report with the success path's own entry point ---");
+        psqlFile(REPORT_FIXTURE);
+
+        log("\n--- capturing the report, its digest, its tuple, its integrity and its deliveries ---");
+        before = preservation(REPORT_CAPTURE);
+        log(`    ${before}`);
+
+        log("\n--- and confirming a snapshot already refuses UPDATE and DELETE ---");
+        psqlFile(REPORT_IMMUTABLE);
+      }
+
+      log("\n--- applying the retry migration the ordinary way ---");
+      supabase(["migration", "up", "--local"]);
+
+      if (scenario.populated) {
+        log("\n--- the same capture, after ---");
+        const after = preservation(REPORT_CAPTURE);
+
+        if (after !== before) {
+          throw new Error(
+            "the retry migration did not preserve the existing report.\n" +
+              `  before: ${before}\n` +
+              `  after:  ${after}\n` +
+              "  (fields: content_sha256 | md5(content) | schema_version | integrity_ok | xmin | " +
+              "ctid | deliveries | recipients | reports served | runs)",
+          );
+        }
+
+        log("    identical, character for character");
+
+        log("\n--- and a snapshot still refuses UPDATE and DELETE ---");
+        psqlFile(REPORT_IMMUTABLE);
+      }
+
+      log("\n--- asserting the backfill, the dropped default and the new key ---");
+      psqlFile(REPORT_AFTER);
+    }
   } catch (failure) {
     proofFailure = failure;
   }

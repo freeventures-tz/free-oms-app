@@ -161,13 +161,27 @@ describe("the migration-chain command's verdict", () => {
     expect(out).toContain("a reversal repointed at another payment");
     expect(out).toContain("a settlement attributed to somebody else");
     expect(out).toContain("what a batch consumed and yielded, rewritten in place");
-    // EIGHT, not four: the v0.0.6 phase re-runs the three released ones against a populated
-    // v0.0.5 database and adds production to them. An exact count, so a phase that silently
-    // stopped running its counterexamples is a failure rather than a quieter pass.
+    // THIRTEEN: four in the v0.0.4 phase, four in the v0.0.6 phase, and five in the v0.1.0 phase
+    // issue #51 adds — the v0.0.6 four again, on a v0.1.0 database, plus a rewritten imprest
+    // handover. An exact count, so a phase that silently stopped running its counterexamples is a
+    // failure rather than a quieter pass.
+    expect(out).toContain("a disputed imprest handover's amount rewritten in place");
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(8);
+    ).toHaveLength(13);
+
+    // Issue #51: the v0.1.0 phase ran on a populated database, and the success → retry boundary
+    // ran twice — empty, and with a real report whose capture had to survive the retry migration.
+    expect(out).toContain("imprest funding with every history shape");
+    expect(
+      calls.filter(
+        (call) => call.command === "supabase" && call.args.includes("20260923000100"),
+      ),
+      "the success → retry boundary was not visited in both scenarios",
+    ).toHaveLength(2);
+    expect(calls.filter((call) => call.args[0]?.includes("17_report_fixture"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args[0]?.includes("20_report_after"))).toHaveLength(2);
 
     // …and they ran AFTER the assertions, on a fixture that is about to be thrown away. Running
     // them earlier would hand the released-command checks a database somebody had corrupted.

@@ -471,6 +471,18 @@ test.describe.serial("a Cash Customer sale", () => {
   let orderNo: string;
 
   test("the screen warns that nothing is owed and nothing is held", async ({ page }) => {
+    // ITS OWN PRODUCT IF IT HAS TO. `PRODUCT` is module state created by the first block, and
+    // Playwright discards the worker after ANY failure — so one unrelated failure earlier in this
+    // file re-imports the module, resets `PRODUCT` to an empty string, and every test below then
+    // fails looking for an option labelled "". The fixture is rebuilt here so a failure stays one
+    // failure. (Ported from the reviewed issue #19 source at `a34704a` by issue #51, because main
+    // still has the same module-state dependency.)
+    if (!PRODUCT) {
+      PRODUCT = unique("E2E Sale Item");
+      await createPricedProduct(page, PRODUCT, String(UNIT_PRICE_TZS), "400");
+      await page.context().clearCookies();
+    }
+
     await signInAs(page, "salesRep");
     await page.goto(NEW_ORDER_HREF);
 

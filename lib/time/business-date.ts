@@ -133,6 +133,35 @@ export function instantFromBusinessLocal(value: string): Date | null {
 }
 
 /**
+ * `en` and `sw` are the app's locales; these are the regional forms they should read in.
+ *
+ * Exported because a count is formatted the same way a date is — grouped for the reader's region —
+ * and a screen that inlines `locale === "sw" ? "sw-TZ" : "en-GB"` is another place to correct if
+ * the app ever gains a third language. Added for the daily report (issue #51).
+ */
+export function intlLocale(locale: string): string {
+  return locale === "sw" ? "sw-TZ" : "en-GB";
+}
+
+/**
+ * A business DATE — `YYYY-MM-DD`, with no time in it — read as a person in the yard would read it.
+ *
+ * The offset is appended so the answer does not depend on where it is parsed. `new
+ * Date("2026-08-24")` is midnight UTC, which lands on the right day in Dar es Salaam but on the day
+ * BEFORE in a zone west of Greenwich, and a report headed with yesterday's date is a report about
+ * the wrong day. Pinning the instant to 00:00 local makes the answer the same everywhere.
+ */
+export function formatBusinessDate(value: string, locale: string): string {
+  const instant = new Date(`${value}T00:00:00+03:00`);
+  if (Number.isNaN(instant.getTime())) return value;
+
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    timeZone: BUSINESS_TIME_ZONE,
+    dateStyle: "full",
+  }).format(instant);
+}
+
+/**
  * A stored instant, rendered in the yard's zone and the reader's language.
  *
  * The formatter is built once per locale and kept, for the reason the receiving board records:

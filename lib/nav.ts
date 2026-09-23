@@ -40,6 +40,10 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/imprest", labelKey: "nav.imprest" },
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
+    // §18.1 names the recipients of the daily report: both Directors and the Manager, and nobody
+    // else. A Cashier and a Sales Representative are not offered the destination and would be
+    // refused the route and the data underneath it.
+    { href: "/reports", labelKey: "nav.reports" },
   ],
   director: [
     { href: "/dashboard", labelKey: "nav.dashboard" },
@@ -64,6 +68,7 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/suppliers", labelKey: "nav.suppliers" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
+    { href: "/reports", labelKey: "nav.reports" },
     { href: "/admin/accounts", labelKey: "nav.accounts" },
   ],
 };
