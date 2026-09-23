@@ -539,6 +539,14 @@ begin
 
   -- DISCOUNTS AND APPROVALS (§4.3, §12.3). The discount is what was granted on the day's invoices;
   -- the approvals are every authority decision asked for on the day, whatever it was about.
+  --
+  -- WHERE EACH ONE STOOD AT THE CUTOFF, NOT WHERE IT STANDS NOW. `approval_requests.status` is a
+  -- projection of the latest decision, and a request made at 23:55 and approved at 00:02 would
+  -- read as approved in a report the 00:05 retry writes for the day it was still waiting. The
+  -- answer is read from the append-only `approval_decisions` history instead: the last decision
+  -- made before the cutoff, or `pending` if none was. The projection is used only when no decision
+  -- at all came after the cutoff, because then it IS the state at the cutoff and it settles two
+  -- decisions stamped in one transaction without a tie-break.
   select count(*) filter (where i.discount_tzs > 0), coalesce(sum(i.discount_tzs), 0)
     into v_disc_count, v_disc_total
     from public.invoices i
@@ -553,9 +561,24 @@ begin
     into v_appr_requested, v_appr_by_type
     from (select r.approval_type::text as approval_type,
                  count(*)                                        as requested,
-                 count(*) filter (where r.status = 'approved')   as approved,
-                 count(*) filter (where r.status = 'rejected')   as rejected
+                 count(*) filter (where c.status = 'approved')   as approved,
+                 count(*) filter (where c.status = 'rejected')   as rejected
             from public.approval_requests r
+           cross join lateral (
+             select case
+                      when not exists (select 1
+                                         from public.approval_decisions d
+                                        where d.request_id = r.id
+                                          and d.decided_at >= v_to)
+                        then r.status::text
+                      else coalesce((select d.outcome::text
+                                       from public.approval_decisions d
+                                      where d.request_id = r.id
+                                        and d.decided_at < v_to
+                                      order by d.decided_at desc, d.id desc
+                                      limit 1),
+                                    'pending')
+                    end as status) c
            where r.requested_at >= v_from and r.requested_at < v_to
            group by r.approval_type) a;
 
@@ -608,15 +631,22 @@ begin
     join public.stock_receipt_lines l on l.receipt_id = r.id
    where r.entered_at >= v_from and r.entered_at < v_to;
 
-  -- PRODUCTION BATCHES (§11.1). Entered on the day, and shown by the decision each one has reached.
+  -- PRODUCTION BATCHES (§11.1). Entered on the day, and shown by the decision each one had reached
+  -- AT THE CUTOFF. A batch leaves `draft` exactly once, and the command that moves it stamps
+  -- `decided_at` in the same statement, so a batch decided at or after midnight was still a draft
+  -- on the day being reported — whatever it has become since.
   select jsonb_build_object(
            'entered',   count(*),
-           'draft',     count(*) filter (where b.status = 'draft'),
-           'approved',  count(*) filter (where b.status = 'approved'),
-           'rejected',  count(*) filter (where b.status = 'rejected'),
-           'cancelled', count(*) filter (where b.status = 'cancelled'))
+           'draft',     count(*) filter (where c.status = 'draft'),
+           'approved',  count(*) filter (where c.status = 'approved'),
+           'rejected',  count(*) filter (where c.status = 'rejected'),
+           'cancelled', count(*) filter (where c.status = 'cancelled'))
     into v_batches
     from public.production_batches b
+   cross join lateral (
+     select case when b.decided_at < v_to then b.status
+                 else 'draft'::public.production_batch_status
+            end as status) c
    where b.entered_at >= v_from and b.entered_at < v_to;
 
   -- PRODUCTION OUTPUT AND REJECTS (§11.2, §11.5). Two different days are involved and they are not

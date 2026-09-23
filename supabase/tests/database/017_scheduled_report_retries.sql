@@ -46,7 +46,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(89);
+select plan(91);
 
 create schema if not exists tests;
 
@@ -739,6 +739,38 @@ select is(
   'failed',
   'the 00:01 attempt fails again');
 
+-- A RETRY RUNS AFTER MIDNIGHT, SO IT SEES DECISIONS THE DAY IT REPORTS NEVER SAW. A discount and a
+-- batch are asked for five minutes before local midnight and decided at exactly midnight, which
+-- belongs to today and is never later than now whenever this file runs. The 00:05 attempt that
+-- recovers yesterday must still report them as waiting.
+insert into public.approval_requests (id, entity_type, entity_id, approval_type, requested_by,
+                                      requested_role, required_role, requested_at, status,
+                                      approved_by, approved_role, approved_at)
+select v.id, 'order', gen_random_uuid(), 'discount', 'd1000000-0000-0000-0000-000000000005',
+       'sales_rep', 'director', m.midnight - interval '5 minutes', v.now_status,
+       case when v.now_status = 'approved' then 'd1000000-0000-0000-0000-000000000001'::uuid end,
+       case when v.now_status = 'approved' then 'director'::public.app_role end,
+       case when v.now_status = 'approved' then m.midnight end
+  from (select private.business_date()::timestamp at time zone 'Africa/Dar_es_Salaam' as midnight) m,
+       (values ('d5000000-0000-0000-0000-000000000001'::uuid, 'approved'::public.approval_status),
+               ('d5000000-0000-0000-0000-000000000002'::uuid, 'rejected')) v(id, now_status);
+
+insert into public.approval_decisions (request_id, outcome, decided_by, decided_role, decided_at)
+select r.id, r.status::text::public.decision_outcome, 'd1000000-0000-0000-0000-000000000001',
+       'director', r.requested_at + interval '5 minutes'
+  from public.approval_requests r
+ where r.id in ('d5000000-0000-0000-0000-000000000001', 'd5000000-0000-0000-0000-000000000002');
+
+insert into public.production_batches (batch_no, location_code, status, moulded_at, entered_by,
+                                       entered_role, entered_at, decided_by, decided_role,
+                                       decided_at, decision_reason)
+select 'PB-RETRY-' || v.n, 'yard', v.now_status, m.midnight - interval '5 minutes',
+       'd1000000-0000-0000-0000-000000000003', 'manager', m.midnight - interval '5 minutes',
+       'd1000000-0000-0000-0000-000000000003', 'manager', m.midnight,
+       case when v.now_status = 'rejected' then 'Mix too wet' end
+  from (select private.business_date()::timestamp at time zone 'Africa/Dar_es_Salaam' as midnight) m,
+       (values (1, 'approved'::public.production_batch_status), (2, 'rejected')) v(n, now_status);
+
 grant insert on public.report_snapshots to fv_definer_owner;
 
 select set_config('tests.recovered', tests.fire(2)::text, true);
@@ -761,6 +793,19 @@ select is(
   (select status::text from public.report_runs),
   'succeeded',
   'and the run is settled');
+
+select is(
+  (select e from public.report_snapshots s,
+                 jsonb_array_elements(s.content -> 'sections' -> 'discounts_and_approvals' -> 'by_type') e
+    where e ->> 'approval_type' = 'discount'),
+  '{"approval_type": "discount", "requested": 2, "approved": 0, "rejected": 0}'::jsonb,
+  'the retry reports both discounts as asked for yesterday and neither as decided -- the approval '
+  'and the rejection at midnight are today''s');
+
+select is(
+  (select s.content -> 'sections' -> 'production_batches' from public.report_snapshots s),
+  '{"entered": 2, "draft": 2, "approved": 0, "rejected": 0, "cancelled": 0}'::jsonb,
+  'and both batches as drafts, although each was decided before the retry ran');
 
 select is(
   tests.fire(3) ->> 'reason',

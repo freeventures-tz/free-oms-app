@@ -32,7 +32,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(67);
+select plan(75);
 
 create schema if not exists tests;
 
@@ -510,6 +510,135 @@ select is(
      ->> 'outstanding_tzs')::bigint,
   200000::bigint,
   'and once A is cancelled too, only the invoice that was never cancelled is still owed');
+
+-- ---------------------------------------------------------------------------
+-- 3c. A DECISION IS COUNTED ON THE DAY IT WAS MADE, NOT ON THE DAY IT WAS ASKED FOR
+--
+-- The same trap as 3b, in the two sections that report a decision. Every request and batch below
+-- was entered on 10 February 2026; what differs is WHEN it was decided. `status` on both tables is
+-- where the row stands NOW, so a report built from it after midnight would carry a decision the
+-- 10th never saw -- and that report is an immutable snapshot, so the error would be permanent.
+--
+--   Approval requests (all discounts, all asked for on the 10th):
+--     R1  23:55, approved at 00:02 on the 11th     -> pending at the cutoff
+--     R2  23:55, rejected at 00:02 on the 11th     -> pending at the cutoff
+--     R3  10:00, approved at 11:00                 -> approved
+--     R4  10:00, rejected at 11:00                 -> rejected
+--     R5  23:00, approved at exactly 00:00 on 11th -> pending: midnight opens the 11th
+--     R6  23:00, approved at 23:59:59.999999       -> approved: the last instant of the 10th
+--     R7  10:00, approved at 11:00, superseded at 01:00 on the 11th -> approved at the cutoff
+--
+--   Production batches (all entered on the 10th):
+--     B1  approved at 00:03 on the 11th -> draft     B4  rejected at 15:00       -> rejected
+--     B2  rejected at 00:03 on the 11th -> draft     B5  approved at 00:00, 11th -> draft
+--     B3  approved at 15:00             -> approved  B6  never decided           -> draft
+--
+-- R7 is the append-only history read properly: the answer at the cutoff is the LAST decision
+-- before it, not "no later decision, so pending".
+-- ---------------------------------------------------------------------------
+insert into public.approval_requests (id, entity_type, entity_id, approval_type, requested_by,
+                                      requested_role, required_role, requested_at, status,
+                                      approved_by, approved_role, approved_at)
+select ('c5000000-0000-0000-0000-00000000000' || v.n)::uuid, 'order',
+       ('c6000000-0000-0000-0000-00000000000' || v.n)::uuid, 'discount',
+       'c1000000-0000-0000-0000-000000000005', 'sales_rep', 'director', v.asked, v.now_status,
+       case when v.now_status = 'approved' then 'c1000000-0000-0000-0000-000000000001'::uuid end,
+       case when v.now_status = 'approved' then 'director'::public.app_role end,
+       case when v.now_status = 'approved' then v.decided end
+  from (values
+    (1, timestamptz '2026-02-10 23:55+03', 'approved'::public.approval_status, timestamptz '2026-02-11 00:02+03'),
+    (2, timestamptz '2026-02-10 23:55+03', 'rejected',   timestamptz '2026-02-11 00:02+03'),
+    (3, timestamptz '2026-02-10 10:00+03', 'approved',   timestamptz '2026-02-10 11:00+03'),
+    (4, timestamptz '2026-02-10 10:00+03', 'rejected',   timestamptz '2026-02-10 11:00+03'),
+    (5, timestamptz '2026-02-10 23:00+03', 'approved',   timestamptz '2026-02-11 00:00+03'),
+    (6, timestamptz '2026-02-10 23:00+03', 'approved',   timestamptz '2026-02-10 23:59:59.999999+03'),
+    (7, timestamptz '2026-02-10 10:00+03', 'superseded', timestamptz '2026-02-11 01:00+03')
+  ) v(n, asked, now_status, decided);
+
+-- The append-only history the projection above was written from.
+insert into public.approval_decisions (request_id, outcome, decided_by, decided_role, decided_at)
+select ('c5000000-0000-0000-0000-00000000000' || v.n)::uuid, v.outcome,
+       'c1000000-0000-0000-0000-000000000001', 'director', v.decided
+  from (values
+    (1, 'approved'::public.decision_outcome, timestamptz '2026-02-11 00:02+03'),
+    (2, 'rejected',   timestamptz '2026-02-11 00:02+03'),
+    (3, 'approved',   timestamptz '2026-02-10 11:00+03'),
+    (4, 'rejected',   timestamptz '2026-02-10 11:00+03'),
+    (5, 'approved',   timestamptz '2026-02-11 00:00+03'),
+    (6, 'approved',   timestamptz '2026-02-10 23:59:59.999999+03'),
+    (7, 'approved',   timestamptz '2026-02-10 11:00+03'),
+    (7, 'superseded', timestamptz '2026-02-11 01:00+03')
+  ) v(n, outcome, decided);
+
+insert into public.production_batches (batch_no, location_code, status, moulded_at, entered_by,
+                                       entered_role, entered_at, decided_by, decided_role,
+                                       decided_at, decision_reason)
+select 'PB-CUTOFF-' || v.n, 'yard', v.now_status, v.entered, 'c1000000-0000-0000-0000-000000000003',
+       'manager', v.entered,
+       case when v.decided is not null then 'c1000000-0000-0000-0000-000000000003'::uuid end,
+       case when v.decided is not null then 'manager'::public.app_role end,
+       v.decided,
+       case when v.now_status = 'rejected' then 'Mix too wet' end
+  from (values
+    (1, timestamptz '2026-02-10 23:50+03', 'approved'::public.production_batch_status, timestamptz '2026-02-11 00:03+03'),
+    (2, timestamptz '2026-02-10 23:50+03', 'rejected', timestamptz '2026-02-11 00:03+03'),
+    (3, timestamptz '2026-02-10 09:00+03', 'approved', timestamptz '2026-02-10 15:00+03'),
+    (4, timestamptz '2026-02-10 09:00+03', 'rejected', timestamptz '2026-02-10 15:00+03'),
+    (5, timestamptz '2026-02-10 20:00+03', 'approved', timestamptz '2026-02-11 00:00+03'),
+    (6, timestamptz '2026-02-10 20:00+03', 'draft',    null::timestamptz)
+  ) v(n, entered, now_status, decided);
+
+create or replace function tests.discounts_on(p_date date) returns jsonb language sql stable as $$
+  select e
+    from jsonb_array_elements(private.report_content(p_date) -> 'sections'
+                                -> 'discounts_and_approvals' -> 'by_type') e
+   where e ->> 'approval_type' = 'discount';
+$$;
+
+select is(
+  (tests.discounts_on(date '2026-02-10') ->> 'requested')::int,
+  7,
+  'every discount asked for on the 10th is counted as requested on the 10th, whenever it was decided');
+
+select is(
+  (tests.discounts_on(date '2026-02-10') ->> 'approved')::int,
+  3,
+  'approved at the cutoff: R3, R6 at 23:59:59.999999, and R7 whose supersession came later -- '
+  'not R1 or R5, approved at or after midnight');
+
+select is(
+  (tests.discounts_on(date '2026-02-10') ->> 'rejected')::int,
+  1,
+  'rejected at the cutoff: R4 only -- R2 was still waiting when the 10th closed');
+
+select is(
+  (private.report_content(date '2026-02-10') -> 'sections' -> 'production_batches' ->> 'entered')::int,
+  6,
+  'six batches entered on the 10th');
+
+select is(
+  (private.report_content(date '2026-02-10') -> 'sections' -> 'production_batches' ->> 'draft')::int,
+  4,
+  'four were still drafts at midnight: B1, B2, B5 decided at or after it, and B6 never decided');
+
+select is(
+  (private.report_content(date '2026-02-10') -> 'sections' -> 'production_batches' ->> 'approved')::int,
+  1,
+  'one was approved on the day -- B3, not the batches approved after midnight');
+
+select is(
+  (private.report_content(date '2026-02-10') -> 'sections' -> 'production_batches' ->> 'rejected')::int,
+  1,
+  'one was rejected on the day -- B4, not B2 rejected after midnight');
+
+-- The generation-time POSITION is deliberately NOT reconstructed. It says what is waiting as the
+-- report is written, so it follows the requests as they stand now and says so.
+select ok(
+  private.report_content(date '2026-02-10') -> 'sections' -> 'pending_approvals' ->> 'as_at'
+      = 'generation'
+  and (private.report_content(date '2026-02-10') -> 'sections' -> 'pending_approvals' ->> 'count')::int
+      = (select count(*)::int from public.approval_requests where status = 'pending'),
+  'pending approvals stay a generation-time position: none of R1-R7 is waiting now, so none is counted');
 
 -- ---------------------------------------------------------------------------
 -- 4. THE DIGEST
