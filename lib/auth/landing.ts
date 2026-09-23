@@ -23,6 +23,12 @@ export function landingPathFor(role: AppRole): string {
 export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   { prefix: "/admin", roles: ["director"] },
   { prefix: "/dashboard", roles: ["manager", "director"] },
+
+  // Daily reports: both Directors and the Manager, and nobody else (product.md §18.1). Unlike the
+  // catalogue two entries below, this route restriction matches the DATA restriction exactly — the
+  // policies on the report records name the same two roles, so a Cashier who typed the URL is
+  // refused here and would be handed nothing if they were not.
+  { prefix: "/reports", roles: ["manager", "director"] },
   { prefix: "/payments", roles: ["cashier", "manager", "director"] },
   { prefix: "/orders", roles: ["sales_rep", "cashier", "manager", "director"] },
 
