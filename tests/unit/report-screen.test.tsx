@@ -28,7 +28,8 @@ const { loadReport, loadReportSummaries } = await import("@/lib/reports/reports"
 const { ReportList } = await import("@/app/(app)/reports/report-list");
 const { ReportView } = await import("@/app/(app)/reports/[id]/report-view");
 
-type Answer = { data: unknown[] | null; error: { message: string } | null };
+/** `count` is the exact count PostgREST sends when asked; the paged delivery reads require it. */
+type Answer = { data: unknown[] | null; error: { message: string } | null; count?: number | null };
 
 /**
  * A PostgREST query builder that ends in whatever answers the test wants, in order.
@@ -39,7 +40,7 @@ type Answer = { data: unknown[] | null; error: { message: string } | null };
 function answering(...answers: Answer[]) {
   let call = 0;
   const builder: Record<string, unknown> = {};
-  for (const step of ["select", "order", "limit", "eq", "in"]) {
+  for (const step of ["select", "order", "limit", "eq", "in", "or"]) {
     builder[step] = () => builder;
   }
   builder.then = (resolve: (value: unknown) => unknown) =>
@@ -107,10 +108,17 @@ describe("reading the archive", () => {
         },
         {
           data: [
-            { snapshot_id: "22222222-3333-4444-5555-666666666666" },
-            { snapshot_id: "22222222-3333-4444-5555-666666666666" },
+            {
+              snapshot_id: "22222222-3333-4444-5555-666666666666",
+              recipient_id: "aaaaaaaa-0000-0000-0000-000000000001",
+            },
+            {
+              snapshot_id: "22222222-3333-4444-5555-666666666666",
+              recipient_id: "aaaaaaaa-0000-0000-0000-000000000002",
+            },
           ],
           error: null,
+          count: 2,
         },
       ),
     );
@@ -140,12 +148,14 @@ describe("reading the archive", () => {
         {
           data: [
             {
+              snapshot_id: "22222222-3333-4444-5555-666666666666",
               recipient_id: "aaaaaaaa-0000-0000-0000-000000000001",
               recipient_role: "director",
               profiles: { full_name: "Asha Mushi" },
             },
           ],
           error: null,
+          count: 1,
         },
       ),
     );
