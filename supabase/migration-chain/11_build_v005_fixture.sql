@@ -36,8 +36,13 @@ begin
       'to version 20260822001200 before running this fixture';
   end if;
 
+  -- The ONE exception is the v0.1.0 phase added by issue #51, which builds this same ground on the
+  -- released v0.1.0 database and says so first by writing `migration_chain.boundary` in
+  -- `14_mark_v010_boundary.sql` — after asserting that the database really is at v0.1.0. Without
+  -- that marker the guard below is exactly what it was.
   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-              where n.nspname = 'private' and p.proname = 'claim_unpromised_stock') then
+              where n.nspname = 'private' and p.proname = 'claim_unpromised_stock')
+     and to_regclass('migration_chain.boundary') is null then
     raise exception
       'the database is already past migration 35: private.claim_unpromised_stock exists. Reset '
       'to version 20260822001200 before running this fixture, or it proves nothing';
