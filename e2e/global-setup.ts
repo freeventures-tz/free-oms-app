@@ -8,6 +8,7 @@ config({ path: ".env.test.local", quiet: true });
 config({ path: ".env.local", quiet: true });
 
 import { provisionAccountWithApi, provisionBootstrapDirector } from "@/lib/admin/provisioning";
+import { runScheduledReport } from "@/tests/support/scheduled-report";
 import { createClient } from "@supabase/supabase-js";
 import { adminApi, createAdminClient } from "@/lib/supabase/admin";
 import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
@@ -201,4 +202,10 @@ export default async function globalSetup(): Promise<void> {
   };
 
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
+
+  // Yesterday's report, fired the only way anything can fire it: as the database role that owns the
+  // Cron job. It runs LAST, because §18.1 delivers to the Directors and Managers who exist at
+  // generation — and until the lines above ran, that was one Director and nobody else.
+  const report = runScheduledReport();
+  if (!report.ok) throw new Error(`the scheduled report could not be generated: ${report.reason}`);
 }
