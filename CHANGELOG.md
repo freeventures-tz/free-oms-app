@@ -2,6 +2,19 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.2.0] — 2026-09-23
+
+<!-- release-controller:begin version=0.2.0 base=v0.1.0 preparation=53 -->
+Generated from every accepted merge after `v0.1.0`. Each preparation replaces the lines between these markers; write prose above or below them.
+
+Version policy 0.x. Highest change: minor. No breaking change and no deprecation.
+
+### Accepted merges (2)
+
+1. **feat(reports): scheduled daily report with retries and a final-failure alert** — [#52](https://github.com/freeventures-tz/free-oms-app/pull/52) · merge [`364feb5`](https://github.com/freeventures-tz/free-oms-app/commit/364feb5e7a642cd4653bcac1bd21b078770660b0) · `feat` → minor
+2. **chore(release): prepare 0.2.0** — [#53](https://github.com/freeventures-tz/free-oms-app/pull/53) · this release's preparation · `chore` → patch
+<!-- release-controller:end -->
+
 ## [0.1.0] — 2026-09-21
 
 **Imprest funding now runs in the application.** A Manager asks for operating cash, a Director
