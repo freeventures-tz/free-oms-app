@@ -581,9 +581,10 @@ test("Try again stays pending and single until the held refresh settles, then fa
  *
  * `app/(app)/error.tsx` is the shell's one error boundary, so the pending retry changes every screen
  * under it, not only the report archive. This proves it on the imprest funding screen: the read is
- * refused where it really fails (the grant on `imprest_funding_position` is withdrawn, as
- * `imprest-funding.spec.ts` already does), the refresh is held at the network, and the control stays
- * pending, the same size and single until that refresh settles.
+ * refused where it really fails (execute on `api.staff_imprest_spending_position()`, the source of
+ * the figures since issue #55, is withdrawn, as `imprest-funding.spec.ts` already does), the refresh
+ * is held at the network, and the control stays pending, the same size and single until that
+ * refresh settles.
  */
 test("Try again on a non-report screen is pending and single until its held refresh settles", async ({
   page,
@@ -596,7 +597,7 @@ test("Try again on a non-report screen is pending and single until its held refr
     await signIn(page, director.phone, director.password);
     await expectLandsOn(page, "/dashboard");
 
-    runSql("revoke select on public.imprest_funding_position from authenticated;");
+    runSql("revoke execute on function api.staff_imprest_spending_position() from authenticated;");
     await page.goto("/imprest");
 
     const failure = page
@@ -641,17 +642,17 @@ test("Try again on a non-report screen is pending and single until its held refr
     await expect(failure).toBeVisible();
 
     // Restored: the next retry recovers the screen itself.
-    runSql("grant select on public.imprest_funding_position to authenticated;");
+    runSql("grant execute on function api.staff_imprest_spending_position() to authenticated;");
     await retry.click();
     await expect.poll(() => held.length).toBe(2);
     held[1]!();
-    await expect(page.getByRole("heading", { name: /imprest funding/i }).first()).toBeVisible({
+    await expect(page.getByRole("heading", { level: 1, name: "Imprest", exact: true })).toBeVisible({
       timeout: 20_000,
     });
     await expect(failure).toHaveCount(0);
   } finally {
     for (const release of held) release();
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    runSql("grant select on public.imprest_funding_position to authenticated;");
+    runSql("grant execute on function api.staff_imprest_spending_position() to authenticated;");
   }
 });
