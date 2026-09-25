@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { createLiveStaff, ensureDirector, type Fixture } from "@/tests/integration/helpers";
+import {
+  createLiveStaff,
+  ensureDirector,
+  mouldedJustNow,
+  type Fixture,
+} from "@/tests/integration/helpers";
 
 /**
  * How long the stock commands take once the ledger is not empty (issue #7).
@@ -174,7 +179,7 @@ describe.skipIf(!ENABLED)("stock command timings on a loaded ledger", () => {
     for (let index = 0; index < SAMPLES; index++) {
       const { data: batch } = await manager.api.rpc("staff_enter_production_batch", {
         p_location_code: YARD,
-        p_moulded_at: new Date().toISOString(),
+        p_moulded_at: mouldedJustNow(),
         p_inputs: await recipeInputs(1),
         p_outputs: [{ product_id: brickId, quantity_moulded: 22 }],
         p_yield_note: null,
@@ -293,7 +298,7 @@ describe.skipIf(!ENABLED)("stock command timings on a loaded ledger", () => {
     for (let index = 0; index < SAMPLES; index++) {
       const { data: batch } = await manager.api.rpc("staff_enter_production_batch", {
         p_location_code: YARD,
-        p_moulded_at: new Date().toISOString(),
+        p_moulded_at: mouldedJustNow(),
         p_inputs: await recipeInputs(1),
         p_outputs: [{ product_id: brickId, quantity_moulded: 22 }],
         p_yield_note: null,

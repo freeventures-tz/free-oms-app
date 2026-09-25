@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createLiveStaff, ensureDirector, type Fixture } from "@/tests/integration/helpers";
+import {
+  createLiveStaff,
+  ensureDirector,
+  mouldedJustNow,
+  type Fixture,
+} from "@/tests/integration/helpers";
 
 /**
  * One stock-availability rule, over real HTTP and under genuine concurrency (issue #7).
@@ -225,7 +230,7 @@ async function recipeInputs(cementQuantity: number) {
 async function draftBatch(quantity: number, location = YARD): Promise<string> {
   const { data } = await manager.api.rpc("staff_enter_production_batch", {
     p_location_code: location,
-    p_moulded_at: new Date().toISOString(),
+    p_moulded_at: mouldedJustNow(),
     p_inputs: await recipeInputs(quantity),
     p_outputs: [{ product_id: await brickId(), quantity_moulded: 22 }],
     p_yield_note: null,
@@ -318,7 +323,7 @@ async function draftBatchOf(
 
   const { data } = await manager.api.rpc("staff_enter_production_batch", {
     p_location_code: location,
-    p_moulded_at: new Date().toISOString(),
+    p_moulded_at: mouldedJustNow(),
     p_inputs: cachedRecipe!.map((productId) => ({
       product_id: productId,
       actual_quantity: wanted.get(productId) ?? 0,
