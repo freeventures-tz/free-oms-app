@@ -2,6 +2,18 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.2.1] — 2026-09-25
+
+Nothing changes for people using the app. This release makes the automated checks behind it more
+dependable.
+
+### FIXED
+
+- The production checks no longer fail at random after the local database restarts. They recorded
+  batches as moulded "right now" by the test machine's clock, and when the database clock ran a
+  moment behind, the app correctly refused a moulding time in the future. The checks now record
+  batches as moulded a minute earlier. The app's own rule is unchanged.
+
 ## [0.2.0] — 2026-09-23
 
 <!-- release-controller:begin version=0.2.0 base=v0.1.0 preparation=53 -->
