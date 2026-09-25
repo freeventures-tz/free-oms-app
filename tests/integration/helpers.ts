@@ -204,6 +204,18 @@ export async function createGatedStaff(
 export { PUBLISHABLE_KEY, SECRET_KEY, SUPABASE_URL, generateTemporaryPassword };
 
 /**
+ * A moulding time for a batch moulded just now, set a minute back.
+ *
+ * The batch command refuses `p_moulded_at > now()`, and `now()` is the database container's clock,
+ * which can trail this machine's (after a container restart it has lagged by milliseconds). Taking
+ * the host's `Date.now()` as-is then reads as a time in the future. A minute clears any such lag and
+ * is still "moments earlier" against the 72-hour cure.
+ */
+export function mouldedJustNow(): string {
+  return new Date(Date.now() - 60 * 1000).toISOString();
+}
+
+/**
  * What a burst of identical commands actually did.
  *
  * The contract for a repeated request is one committed operation replayed to everybody else, and

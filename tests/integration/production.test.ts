@@ -9,6 +9,7 @@ import {
   createGatedStaff,
   createLiveStaff,
   ensureDirector,
+  mouldedJustNow,
   signInWithPhone,
   clientForToken,
   type Fixture,
@@ -146,7 +147,7 @@ async function enterBatch(
 ) {
   const { data } = await who.api.rpc("staff_enter_production_batch", {
     p_location_code: LOCATION,
-    p_moulded_at: options.mouldedAt ?? new Date().toISOString(),
+    p_moulded_at: options.mouldedAt ?? mouldedJustNow(),
     p_inputs: inputs,
     p_outputs: outputs,
     p_yield_note: options.yieldNote ?? null,
@@ -312,7 +313,7 @@ describe("a batch is recorded, approved, and only then consumes the yard", () =>
     const key = randomUUID();
     const { data: refused } = await manager.api.rpc("staff_enter_production_batch", {
       p_location_code: LOCATION,
-      p_moulded_at: new Date().toISOString(),
+      p_moulded_at: mouldedJustNow(),
       p_inputs: [{ product_id: "not-a-uuid", actual_quantity: 1 }],
       p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
       p_yield_note: null,
@@ -447,7 +448,7 @@ describe("who may run production, decided by the database", () => {
       "staff_enter_production_batch",
       {
         p_location_code: LOCATION,
-        p_moulded_at: new Date().toISOString(),
+        p_moulded_at: mouldedJustNow(),
         p_inputs: recipe(),
         p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
         p_yield_note: null,
@@ -467,7 +468,7 @@ describe("who may run production, decided by the database", () => {
   it("refuses a Sales Representative the same way", async () => {
     const { error } = await salesRep.api.rpc("staff_enter_production_batch", {
       p_location_code: LOCATION,
-      p_moulded_at: new Date().toISOString(),
+      p_moulded_at: mouldedJustNow(),
       p_inputs: recipe(),
       p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
       p_yield_note: null,
@@ -508,7 +509,7 @@ describe("who may run production, decided by the database", () => {
       "staff_enter_production_batch",
       {
         p_location_code: LOCATION,
-        p_moulded_at: new Date().toISOString(),
+        p_moulded_at: mouldedJustNow(),
         p_inputs: recipe(),
         p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
         p_yield_note: null,
@@ -529,7 +530,7 @@ describe("who may run production, decided by the database", () => {
     const gatedApi = clientForToken(session.body.access_token).schema("api");
     const { error } = await gatedApi.rpc("staff_enter_production_batch", {
       p_location_code: LOCATION,
-      p_moulded_at: new Date().toISOString(),
+      p_moulded_at: mouldedJustNow(),
       p_inputs: recipe(),
       p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
       p_yield_note: null,
@@ -551,7 +552,7 @@ describe("who may run production, decided by the database", () => {
     // Their session is still perfectly valid; their authority is not.
     const { error } = await doomed.api.rpc("staff_enter_production_batch", {
       p_location_code: LOCATION,
-      p_moulded_at: new Date().toISOString(),
+      p_moulded_at: mouldedJustNow(),
       p_inputs: recipe(),
       p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
       p_yield_note: null,
@@ -571,7 +572,7 @@ describe("who may run production, decided by the database", () => {
 
     const { error } = await demoted.api.rpc("staff_enter_production_batch", {
       p_location_code: LOCATION,
-      p_moulded_at: new Date().toISOString(),
+      p_moulded_at: mouldedJustNow(),
       p_inputs: recipe(),
       p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
       p_yield_note: null,
@@ -586,7 +587,7 @@ describe("the production tables cannot be reached around the commands", () => {
     const { error } = await manager.read.from("production_batches").insert({
       batch_no: `FV-BAT-FORGED-${randomUUID().slice(0, 8)}`,
       location_code: LOCATION,
-      moulded_at: new Date().toISOString(),
+      moulded_at: mouldedJustNow(),
       entered_by: manager.userId,
       entered_role: "manager",
     });
@@ -621,7 +622,7 @@ describe("the production tables cannot be reached around the commands", () => {
       "staff_enter_production_batch",
       {
         p_location_code: LOCATION,
-        p_moulded_at: new Date().toISOString(),
+        p_moulded_at: mouldedJustNow(),
         p_inputs: recipe(),
         p_outputs: [{ product_id: brick6Id, quantity_moulded: 22 }],
         p_yield_note: null,
@@ -762,7 +763,7 @@ describe("two commands arriving together", () => {
       [1, 2].map(async () => {
         const { data } = await manager.api.rpc("staff_enter_production_batch", {
           p_location_code: OTHER_LOCATION,
-          p_moulded_at: new Date().toISOString(),
+          p_moulded_at: mouldedJustNow(),
           p_inputs: [
             { product_id: cementId, actual_quantity: 0 },
             { product_id: sandId, actual_quantity: each },
