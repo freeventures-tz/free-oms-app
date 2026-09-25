@@ -2,6 +2,30 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.3.0] — 2026-09-25
+
+Cashiers can now propose imprest payments, and the Manager approves or rejects them. Paying out,
+receipts and checking a payment come in a later release; until then an approved payment stays set
+aside until the Manager cancels it. The staff workflows stay closed.
+
+### NEW
+
+- A Cashier can propose a payment out of the imprest fund: pick one of the nine categories, enter
+  the amount in whole shillings, and write a short purpose or pick one used recently. A proposal
+  sets no money aside.
+- The Manager approves a proposal at the amount proposed, or rejects it with a reason. Approving
+  sets the money aside at once, so the same cash can't be approved twice. An approval for more than
+  is free to approve is refused and nothing changes, even when two approvals arrive together.
+- The Cashier can withdraw their own proposal before the Manager decides, with a reason. The
+  Manager can cancel an approval before it is paid, with a reason, which frees the money again.
+  The history keeps the approval and the cancellation.
+- The Imprest screen now shows three figures to the Manager and Directors: posted imprest funding,
+  set aside for approved payments, and free to approve. It lists the proposals waiting for a
+  decision, with a count, and each open approval with how long it has been open. Directors read
+  it without acting.
+- Cashiers reach Imprest from the menu for the first time. They see only what is free to approve
+  and their own proposals with each one's status.
+
 ## [0.2.2] — 2026-09-25
 
 Nothing changes for people using the app.
