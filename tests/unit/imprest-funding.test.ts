@@ -15,10 +15,10 @@ const KEY = "0b7b0a55-0000-4000-8000-000000000001";
 const FUNDING = "0b7b0a55-0000-4000-8000-000000000002";
 
 describe("imprest funding routes", () => {
-  it("open the funding screens to the Manager and the Directors only", () => {
+  it("open the imprest screens to the Manager, the Directors and, for spending, the Cashier", () => {
     expect(roleMayAccess("manager", "/imprest")).toBe(true);
     expect(roleMayAccess("director", "/imprest/" + FUNDING)).toBe(true);
-    expect(roleMayAccess("cashier", "/imprest")).toBe(false);
+    expect(roleMayAccess("cashier", "/imprest")).toBe(true);
     expect(roleMayAccess("sales_rep", "/imprest")).toBe(false);
   });
 
@@ -28,7 +28,7 @@ describe("imprest funding routes", () => {
     expect([has("manager"), has("director"), has("cashier"), has("sales_rep")]).toEqual([
       true,
       true,
-      false,
+      true,
       false,
     ]);
   });
