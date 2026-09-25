@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 
 import {
   approveDisbursementAction,
@@ -48,6 +48,11 @@ export function ProposeDisbursementForm({
     setPurpose("");
   }, SPENDING_UNCONFIRMED_KEY);
   const problems = controller.running === null ? controller.result.fieldErrors : undefined;
+  // Submit shows it is working in the first frame; the fields lock one render later. Locking them in
+  // the same commit wrote ~17 attributes before that frame and cost a slow phone its 100 ms. A
+  // second submit is refused by the controller's own guard either way, and the request is already
+  // captured, so nothing can change what is sent in between.
+  const locked = useDeferredValue(controller.pending);
   const typed = parseTzs(amount);
   const shortfall = typed !== null && typed > freeToApprove ? typed - freeToApprove : 0;
 
@@ -84,20 +89,24 @@ export function ProposeDisbursementForm({
           <legend className="mb-2 text-sm font-medium">{t("imprest.spending.propose.category")}</legend>
           <div className="flex flex-wrap gap-2">
             {IMPREST_CATEGORIES.map((c) => (
-              <label
-                key={c}
-                className={`${TOUCH_FLOOR} inline-flex cursor-pointer items-center rounded-full border border-border px-3 py-1.5 text-sm has-[:checked]:border-foreground has-[:checked]:bg-foreground has-[:checked]:text-background has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2`}
-              >
+              // The chip is styled from its radio with `peer-*`, not `has-[…]`: a `:has()` rule makes
+              // every radio's `disabled` write re-check its label's style, which on a slow phone
+              // pushed Submit's acknowledgement past 100 ms.
+              <label key={c} className="inline-flex cursor-pointer">
                 <input
                   type="radio"
                   name="category"
                   value={c}
-                  className="sr-only"
+                  className="peer sr-only"
                   checked={category === c}
-                  disabled={controller.pending}
+                  disabled={locked}
                   onChange={() => setCategory(c)}
                 />
-                {t(`imprest.spending.category.${c}`)}
+                <span
+                  className={`${TOUCH_FLOOR} inline-flex items-center rounded-full border border-border px-3 py-1.5 text-sm peer-checked:border-foreground peer-checked:bg-foreground peer-checked:text-background peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2`}
+                >
+                  {t(`imprest.spending.category.${c}`)}
+                </span>
               </label>
             ))}
           </div>
@@ -112,7 +121,7 @@ export function ProposeDisbursementForm({
             inputMode="numeric"
             autoComplete="off"
             value={amount}
-            readOnly={controller.pending}
+            readOnly={locked}
             aria-invalid={problems?.amount ? true : undefined}
             aria-describedby={
               [problems?.amount ? "propose-amount-error" : "", shortfall ? "propose-amount-over" : ""]
@@ -137,7 +146,7 @@ export function ProposeDisbursementForm({
             autoComplete="off"
             maxLength={PURPOSE_MAX}
             value={purpose}
-            readOnly={controller.pending}
+            readOnly={locked}
             aria-invalid={problems?.purpose ? true : undefined}
             aria-describedby={problems?.purpose ? "propose-purpose-error" : "propose-purpose-help"}
             onChange={(event) => setPurpose(event.target.value)}
@@ -155,7 +164,7 @@ export function ProposeDisbursementForm({
                     variant="secondary"
                     size="small"
                     className={TOUCH_FLOOR}
-                    disabled={controller.pending}
+                    disabled={locked}
                     onClick={() => setPurpose(p)}
                   >
                     {p}
