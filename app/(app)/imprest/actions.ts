@@ -7,22 +7,29 @@ import type { z } from "zod";
 import { requireRole } from "@/lib/auth/guard";
 import type { AppRole } from "@/lib/auth/roles";
 import {
+  cancelDisbursement,
   confirmReceived,
   correctHandover,
+  decideDisbursement,
   decideFunding,
   increaseApproval,
+  proposeDisbursement,
   provideFunding,
   reportMismatch,
   requestFunding,
+  withdrawDisbursement,
   type ImprestResult,
 } from "@/lib/imprest/commands";
 import { formatTzs } from "@/lib/money";
 import { fieldErrors } from "@/lib/validation/auth";
 import {
+  approveDisbursementSchema,
   approveFundingSchema,
   confirmReceivedSchema,
   correctHandoverSchema,
+  disbursementReasonSchema,
   increaseApprovalSchema,
+  proposeDisbursementSchema,
   provideFundingSchema,
   rejectFundingSchema,
   reportMismatchSchema,
@@ -38,6 +45,9 @@ import {
  *
  * The Manager requests, confirms and reports a mismatch. A Director approves, rejects, increases
  * an approval, provides and corrects a handover. Neither can do the other's part.
+ *
+ * Disbursements (issue #55): the Cashier proposes and withdraws their own; the Manager approves,
+ * rejects and cancels. A Director reads and does neither.
  */
 
 const KNOWN_ERRORS = new Set([
@@ -61,6 +71,32 @@ const KNOWN_ERRORS = new Set([
   "counted_matches_provided",
 ]);
 
+/**
+ * Disbursement refusals have their own messages: the funding ones speak of requests and handovers,
+ * which would mislead on a payment proposal.
+ */
+const SPENDING_ERRORS = new Set([
+  "not_permitted",
+  "generic",
+  "unconfirmed",
+  "idempotency_key_conflict",
+  "amount_invalid",
+  "reason_required",
+  "stale",
+  "not_awaiting_decision",
+  "no_fund",
+  "insufficient_imprest",
+  "category_invalid",
+  "purpose_required",
+  "no_disbursement",
+  "not_approved",
+  "decision_required",
+]);
+
+type Messages = { namespace: "imprestErrors" | "spendingErrors"; known: Set<string> };
+const FUNDING_MESSAGES: Messages = { namespace: "imprestErrors", known: KNOWN_ERRORS };
+const SPENDING_MESSAGES: Messages = { namespace: "spendingErrors", known: SPENDING_ERRORS };
+
 export type ImprestActionState = {
   error?: string;
   fieldErrors?: Record<string, string>;
@@ -68,7 +104,10 @@ export type ImprestActionState = {
   errorValues?: Record<string, string | number>;
 };
 
-async function fromRefusal(result: Extract<ImprestResult, { ok: false }>): Promise<ImprestActionState> {
+async function fromRefusal(
+  result: Extract<ImprestResult, { ok: false }>,
+  messages: Messages,
+): Promise<ImprestActionState> {
   // Shillings in a refusal are shown the way every other amount is: grouped, in the viewer's locale.
   const locale = await getLocale();
   const values = result.context
@@ -80,7 +119,7 @@ async function fromRefusal(result: Extract<ImprestResult, { ok: false }>): Promi
       )
     : undefined;
   return {
-    error: `imprestErrors.${KNOWN_ERRORS.has(result.reason) ? result.reason : "generic"}`,
+    error: `${messages.namespace}.${messages.known.has(result.reason) ? result.reason : "generic"}`,
     errorValues: values,
   };
 }
@@ -91,13 +130,14 @@ async function run<S extends z.ZodTypeAny>(
   raw: Record<string, FormDataEntryValue | null>,
   command: (input: z.output<S>) => Promise<ImprestResult>,
   successKey: string,
+  messages: Messages = FUNDING_MESSAGES,
 ): Promise<ImprestActionState> {
   await requireRole(roles);
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };
 
   const result = await command(parsed.data);
-  if (!result.ok) return await fromRefusal(result);
+  if (!result.ok) return await fromRefusal(result, messages);
 
   revalidatePath("/imprest", "layout");
   return { successKey };
@@ -191,5 +231,71 @@ export async function correctHandoverAction(_p: ImprestActionState, data: FormDa
     { ...target(data), amount: data.get("amount") ?? "", explanation: data.get("explanation") ?? "" },
     correctHandover,
     "imprest.success.corrected",
+  );
+}
+
+const disbursementTarget = (data: FormData) => ({
+  disbursementId: data.get("disbursementId"),
+  expectedVersion: data.get("expectedVersion"),
+  idempotencyKey: data.get("idempotencyKey"),
+});
+
+export async function proposeDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    proposeDisbursementSchema,
+    {
+      amount: data.get("amount") ?? "",
+      category: data.get("category") ?? "",
+      purpose: data.get("purpose") ?? "",
+      idempotencyKey: data.get("idempotencyKey"),
+    },
+    proposeDisbursement,
+    "imprest.spending.success.proposed",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function approveDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    approveDisbursementSchema,
+    disbursementTarget(data),
+    (input) => decideDisbursement({ ...input, approve: true, reason: null }),
+    "imprest.spending.success.approved",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function rejectDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    disbursementReasonSchema,
+    { ...disbursementTarget(data), reason: data.get("reason") ?? "" },
+    (input) => decideDisbursement({ ...input, approve: false }),
+    "imprest.spending.success.rejected",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function withdrawDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    disbursementReasonSchema,
+    { ...disbursementTarget(data), reason: data.get("reason") ?? "" },
+    withdrawDisbursement,
+    "imprest.spending.success.withdrawn",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function cancelDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    disbursementReasonSchema,
+    { ...disbursementTarget(data), reason: data.get("reason") ?? "" },
+    cancelDisbursement,
+    "imprest.spending.success.cancelled",
+    SPENDING_MESSAGES,
   );
 }

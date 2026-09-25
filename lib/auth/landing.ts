@@ -53,10 +53,10 @@ export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   // do not work a mixer and cannot reach the route at all.
   { prefix: "/production", roles: ["manager", "director"] },
 
-  // Imprest funding (issue #48): the Manager requests and confirms, a Director decides and
-  // provides. A Cashier reads imprest under the table policy, but their imprest work is spending,
-  // which is not built, so the route is not offered to them yet.
-  { prefix: "/imprest", roles: ["manager", "director"] },
+  // Imprest (issues #48 and #55): the Manager requests and confirms funding, a Director decides
+  // and provides it. The Cashier proposes and withdraws disbursements, and the Manager approves,
+  // rejects and cancels them. What each role may see and do there is decided by the database.
+  { prefix: "/imprest", roles: ["cashier", "manager", "director"] },
 
   // Suppliers: Director registers, Manager reads (product.md §9 requires the record; who creates
   // one is a derived decision recorded in the Stage 10D plan).

@@ -29,14 +29,17 @@ import { useGuardedAction, type GuardedAction } from "@/lib/ui/use-guarded-actio
  *
  * A new key is drawn only after a success. A retry after a timeout therefore replays the request
  * that may already have committed instead of creating a second one.
+ *
+ * The disbursement controls (issue #55) are built from the same pieces, which is why they are
+ * exported.
  */
 
-const TOUCH_FLOOR = "min-h-11 md:min-h-11 xl:min-h-0";
+export const TOUCH_FLOOR = "min-h-11 md:min-h-11 xl:min-h-0";
 
 /** Shown for any outcome the server never confirmed either way (review F1 on PR #49). */
 const UNCONFIRMED_KEY = "imprestErrors.unconfirmed";
 
-type FieldSpec = {
+export type FieldSpec = {
   name: string;
   labelKey: string;
   kind: "amount" | "text";
@@ -44,9 +47,9 @@ type FieldSpec = {
   helpKey?: string;
 };
 
-type Controller = ReturnType<typeof useGuardedAction<string, ImprestActionState>>;
+export type Controller = ReturnType<typeof useGuardedAction<string, ImprestActionState>>;
 
-function Outcome({ controller }: { controller: Controller }) {
+export function Outcome({ controller }: { controller: Controller }) {
   const t = useTranslations();
   const { result } = controller;
   if (result.successKey) {
@@ -73,7 +76,7 @@ function Outcome({ controller }: { controller: Controller }) {
   );
 }
 
-function ActionForm({
+export function ActionForm({
   id,
   controller,
   name,
@@ -156,7 +159,7 @@ function ActionForm({
 }
 
 /** Draws a fresh key after each success, so a retry after failure replays the same request. */
-function useFreshKey(onSuccess?: () => void): [string, Controller, () => void] {
+export function useFreshKey(onSuccess?: () => void): [string, Controller, () => void] {
   const [key, setKey] = useState(() => crypto.randomUUID());
   const controller = useGuardedAction<string, ImprestActionState>({
     // A thrown action is a response that never arrived, not a refusal: the command may have

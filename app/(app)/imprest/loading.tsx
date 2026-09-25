@@ -3,8 +3,10 @@ import { getTranslations } from "next-intl/server";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 
 /**
- * Shaped like the funding list: header, the posted-funding card, then the list heading, compact
- * request cards and the pager count (design.md §12.7 rule 3; review F2 on PR #49).
+ * Shaped like the imprest screen: header, the figures card (posted funding, set aside and free to
+ * approve; issue #55), then a list heading, compact cards and the pager count (design.md §12.7
+ * rule 3; review F2 on PR #49). A Cashier is sent Free to approve alone, so their card is shorter
+ * than this one; the skeleton cannot know the role without the session lookup it stands in for.
  *
  * Each card is laid out as the real one is: stacked on a phone, and from `md` a row with the
  * number, requester and reason on the left and the status and amounts on the right.
@@ -24,17 +26,27 @@ export default async function ImprestLoading() {
         <TextLines lineClass="h-5" barClass="h-3.5" />
       </div>
 
-      <div
-        className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4 md:p-5 xl:p-6"
-        data-testid="funding-total-skeleton"
-      >
-        <Row className="h-5">
-          <Skeleton className="h-3.5 w-[160px] rounded-sm" />
-        </Row>
-        <Row className="h-8">
-          <Skeleton className="h-7 w-[140px] rounded-md" />
-        </Row>
-        <TextLines lineClass="h-4" barClass="h-3" />
+      <div className="grid grid-cols-1 gap-4 rounded-lg border border-border bg-card p-4 md:grid-cols-3 md:p-5 xl:p-6">
+        {Array.from({ length: 3 }, (_, figure) => (
+          <div
+            key={figure}
+            className="flex flex-col gap-1"
+            data-testid={figure === 0 ? "funding-total-skeleton" : undefined}
+          >
+            <Row className="h-5">
+              <Skeleton className="h-3.5 w-[160px] rounded-sm" />
+            </Row>
+            <Row className="h-8">
+              <Skeleton className="h-7 w-[140px] rounded-md" />
+            </Row>
+            <Row className="h-4">
+              <Skeleton className="h-3 w-[90%] rounded-sm" />
+            </Row>
+            <Row className="h-4">
+              <Skeleton className="h-3 w-[60%] rounded-sm" />
+            </Row>
+          </div>
+        ))}
       </div>
 
       <div className="flex flex-col gap-3">

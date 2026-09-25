@@ -104,7 +104,7 @@
     "dispatch": "Utoaji",
     "storekeepers": "Wahifadhi",
     "production": "Uzalishaji wa tofali",
-    "imprest": "Ufadhili wa imprest",
+    "imprest": "Imprest",
     "reports": "Ripoti za kila siku"
   },
   "unavailable": {
@@ -1097,11 +1097,11 @@
     "inspection_must_account_for_all": "Kila kilichokomaa lazima kihesabiwe."
   },
   "imprest": {
-    "title": "Ufadhili wa imprest",
-    "description": "Maombi ya fedha za uendeshaji, kiasi ambacho Mkurugenzi aliidhinisha na kukabidhi, na kiasi ambacho Meneja alithibitisha kupokea.",
+    "title": "Imprest",
+    "description": "Fedha za uendeshaji na malipo yanayotoka humo: nani aliomba, nani aliamua, na nini kilikabidhiwa na kuthibitishwa.",
     "total": {
       "label": "Ufadhili wa imprest uliothibitishwa",
-      "help": "Jumla ya ufadhili ambao Meneja amethibitisha kuupokea. Si hesabu ya fedha taslimu, na matumizi bado hayarekodiwi hapa.",
+      "help": "Jumla ya ufadhili ambao Meneja amethibitisha kuupokea. Si hesabu ya fedha taslimu, na malipo bado hayarekodiwi hapa.",
       "noFund": "Bado hakuna ombi la ufadhili wa imprest."
     },
     "request": {
@@ -1181,6 +1181,94 @@
       "excess": "Ziada imeripotiwa: imehesabiwa {counted} dhidi ya {provided}",
       "rejected": "Imekataliwa",
       "received": "Upokeaji umethibitishwa: {amount} imewekwa"
+    },
+    "spending": {
+      "cashierDescription": "Pendekeza malipo kutoka mfuko wa imprest na ufuatilie kila moja hadi Meneja aamue.",
+      "figures": {
+        "heading": "Takwimu za imprest",
+        "setAside": "Kilichotengwa kwa malipo yaliyoidhinishwa",
+        "setAsideHelp": "Kimeidhinishwa lakini bado hakijalipwa. Fedha hizi haziwezi kuidhinishwa tena.",
+        "free": "Kinachoweza kuidhinishwa",
+        "freeHelp": "Ufadhili wa imprest uliothibitishwa ukiondoa kilichotengwa. Idhini inayozidi kiasi hiki inakataliwa.",
+        "noFund": "Bado hakuna mfuko wa imprest uliofunguliwa. Malipo yanaweza kupendekezwa ufadhili ukishapokelewa."
+      },
+      "category": {
+        "fuel_and_lubricants": "Mafuta na vilainishi",
+        "labour_and_casual_workers": "Vibarua na wafanyakazi wa muda",
+        "transport_and_delivery": "Usafiri na usambazaji",
+        "meals_and_staff_welfare": "Chakula na ustawi wa wafanyakazi",
+        "materials_and_supplies": "Malighafi na vifaa",
+        "repairs_and_maintenance": "Matengenezo na ukarabati",
+        "utilities": "Huduma za maji na umeme",
+        "fees_and_charges": "Ada na tozo",
+        "other": "Nyingine"
+      },
+      "status": {
+        "proposed": "Inasubiri idhini ya Meneja",
+        "approved": "Imeidhinishwa, bado haijalipwa",
+        "rejected": "Imekataliwa",
+        "withdrawn": "Imeondolewa",
+        "cancelled": "Imefutwa"
+      },
+      "propose": {
+        "title": "Pendekeza malipo",
+        "help": "Pendekezo halihamishi fedha wala halitengi chochote. Usilipe hadi Meneja aidhinishe.",
+        "amount": "Kiasi (TZS)",
+        "category": "Aina",
+        "purpose": "Madhumuni",
+        "purposeHelp": "Maneno machache, hadi herufi 120.",
+        "recent": "Madhumuni ya hivi karibuni",
+        "overFree": "Hiyo ni {shortfall} zaidi ya kinachoweza kuidhinishwa. Meneja hawezi kuiidhinisha hadi ufadhili zaidi uthibitishwe.",
+        "submit": "Tuma kwa idhini"
+      },
+      "lists": {
+        "waiting": "Yanasubiri uamuzi ({count})",
+        "waitingEmpty": "Hakuna mapendekezo yanayosubiri uamuzi.",
+        "open": "Yameidhinishwa, bado hayajalipwa ({count})",
+        "openEmpty": "Hakuna idhini zilizo wazi.",
+        "mine": "Mapendekezo yako",
+        "mineEmpty": "Bado hujapendekeza malipo yoyote.",
+        "openMinutes": "Iko wazi kwa {count, plural, =0 {chini ya dakika moja} other {dakika #}}",
+        "openHours": "Iko wazi kwa {count, plural, other {saa #}}",
+        "openDays": "Iko wazi kwa {count, plural, other {siku #}}"
+      },
+      "fields": {
+        "rejectionReason": "Sababu ya kukataa",
+        "withdrawalReason": "Sababu ya kuondoa",
+        "cancellationReason": "Sababu ya kufuta"
+      },
+      "actions": {
+        "heading": "Hatua",
+        "approve": "Idhinisha {amount}",
+        "reject": "Kataa",
+        "confirmReject": "Kataa pendekezo",
+        "withdraw": "Ondoa",
+        "confirmWithdraw": "Ondoa pendekezo",
+        "cancel": "Futa idhini",
+        "confirmCancel": "Thibitisha kufuta"
+      },
+      "success": {
+        "proposed": "Malipo yamependekezwa. Subiri idhini ya Meneja kabla ya kulipa.",
+        "approved": "Imeidhinishwa. Kiasi kimetengwa na hakiwezi kuidhinishwa tena.",
+        "rejected": "Pendekezo limekataliwa.",
+        "withdrawn": "Pendekezo limeondolewa.",
+        "cancelled": "Idhini imefutwa. Fedha zilizotengwa kwa ajili yake ziko huru tena."
+      },
+      "detail": {
+        "back": "Rudi kwenye imprest",
+        "amount": "Kiasi",
+        "category": "Aina",
+        "proposedBy": "Imependekezwa na",
+        "waitingManager": "Inasubiri Meneja aidhinishe au akatae. Usilipe bado.",
+        "readOnly": "Wakurugenzi wanaweza kusoma malipo hapa. Meneja ndiye anayeidhinisha, kukataa na kufuta."
+      },
+      "history": {
+        "proposed": "Imependekezwa",
+        "approved": "Imeidhinishwa na kutengwa",
+        "rejected": "Imekataliwa",
+        "withdrawn": "Imeondolewa",
+        "cancelled": "Idhini imefutwa na fedha zimeachiliwa"
+      }
     }
   },
   "imprestErrors": {
@@ -1203,6 +1291,24 @@
     "exceeds_approval": "Hiyo ni zaidi ya {approved_amount_tzs} iliyoidhinishwa. Rekodi kwanza ongezeko la idhini.",
     "increase_not_higher": "Idhini mpya lazima iwe juu ya {approved_amount_tzs}.",
     "counted_matches_provided": "Umehesabu kiasi kilichorekodiwa. Thibitisha upokeaji badala yake."
+  },
+  "spendingErrors": {
+    "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",
+    "generic": "Hitilafu imetokea na hakuna kilichobadilishwa. Jaribu tena.",
+    "unconfirmed": "Jibu halikurudi, kwa hivyo huenda hili limehifadhiwa au halijahifadhiwa. Bonyeza Jaribu tena ili ujue: ombi lilelile linatumwa tena, na haliwezi kurekodiwa mara mbili.",
+    "idempotency_key_conflict": "Ombi hili tayari limetumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
+    "amount_invalid": "Andika kiasi kamili cha shilingi.",
+    "amount_too_large": "Kiasi hicho ni kikubwa kuliko mfumo unavyokubali.",
+    "reason_required": "Toa sababu yenye herufi 3 hadi 500.",
+    "stale": "Malipo haya yamebadilika tangu ulipoyafungua. Pakia upya uone yalipofikia.",
+    "not_awaiting_decision": "Pendekezo hili tayari limeamuliwa au limeondolewa.",
+    "no_fund": "Bado hakuna mfuko wa imprest uliofunguliwa, kwa hivyo hakuna kinachoweza kupendekezwa.",
+    "insufficient_imprest": "Ni {free_to_approve_tzs} tu kinachoweza kuidhinishwa, chini ya {amount_tzs} kilichopendekezwa. Hakuna kilichobadilishwa.",
+    "category_invalid": "Chagua mojawapo ya aina.",
+    "purpose_required": "Toa madhumuni yenye herufi 3 hadi 120.",
+    "no_disbursement": "Malipo haya hayapatikani.",
+    "not_approved": "Malipo yaliyoidhinishwa tu ndiyo yanaweza kufutwa, na haya hayajaidhinishwa.",
+    "decision_required": "Chagua kuidhinisha au kukataa."
   },
   "reports": {
     "title": "Ripoti za kila siku",
