@@ -156,7 +156,7 @@ export async function DisbursementList({
                   <div className="flex flex-col items-start gap-1 md:items-end">
                     <DisbursementStatusChip status={d.status} />
                     <span className="fv-numeric text-sm font-medium">{formatTzs(d.amount, locale)}</span>
-                    {showOpenFor && d.approvedAt ? (
+                    {showOpenFor && d.status === "approved" && d.approvedAt ? (
                       <span className="text-xs text-muted-foreground" data-testid="open-for">
                         {age(d.approvedAt)}
                       </span>

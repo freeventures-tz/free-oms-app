@@ -242,6 +242,8 @@ test.describe("imprest disbursements", () => {
     await expect(page.getByTestId("disbursement-history").getByRole("listitem").last()).toContainText(
       /Rejected\s*Manager · /,
     );
+    // Nothing is left for the Cashier to do, so there is no empty actions card.
+    await expect(page.getByTestId("disbursement-actions")).toBeHidden();
   });
 
   test("the Cashier withdraws their own proposal before a decision", async ({ page }, testInfo) => {
@@ -296,6 +298,13 @@ test.describe("imprest disbursements", () => {
       setAside: before.setAside - 9000,
       free: before.free + 9000,
     });
+
+    // A cancelled approval keeps its approval time, but it is no longer open.
+    await as(page, "cashier");
+    await page.goto("/imprest");
+    const mine = page.getByTestId("disbursements-mine").getByRole("link", { name: new RegExp(purpose) });
+    await expect(mine).toContainText("Cancelled");
+    await expect(mine.getByTestId("open-for")).toHaveCount(0);
   });
 
   test("a Director reads the figures and the lists, and is offered no control", async ({ page }, testInfo) => {

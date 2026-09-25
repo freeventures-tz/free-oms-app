@@ -75,7 +75,8 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         ) : null}
       </Card>
 
-      <Card className="flex flex-col gap-3">
+      {/* Hidden when this viewer has nothing to do here and no answer to show (a Cashier's decided row). */}
+      <Card className="flex flex-col gap-3 empty:hidden" data-testid="disbursement-actions">
         <DisbursementActions
           disbursement={{
             id: disbursement.id,
