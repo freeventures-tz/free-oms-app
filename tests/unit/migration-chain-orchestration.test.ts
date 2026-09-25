@@ -161,15 +161,28 @@ describe("the migration-chain command's verdict", () => {
     expect(out).toContain("a reversal repointed at another payment");
     expect(out).toContain("a settlement attributed to somebody else");
     expect(out).toContain("what a batch consumed and yielded, rewritten in place");
-    // THIRTEEN: four in the v0.0.4 phase, four in the v0.0.6 phase, and five in the v0.1.0 phase
+    // TWENTY-ONE: four in the v0.0.4 phase, four in the v0.0.6 phase, five in the v0.1.0 phase
     // issue #51 adds — the v0.0.6 four again, on a v0.1.0 database, plus a rewritten imprest
-    // handover. An exact count, so a phase that silently stopped running its counterexamples is a
-    // failure rather than a quieter pass.
+    // handover — and eight in the v0.2.0 phase issue #55 adds: those five again, a rewritten
+    // report, a label added to a released enum and a widened grant. An exact count, so a phase that
+    // silently stopped running its counterexamples is a failure rather than a quieter pass.
     expect(out).toContain("a disputed imprest handover's amount rewritten in place");
+    expect(out).toContain("a delivered report's content rewritten in place");
+    expect(out).toContain("a label added to a released enum");
+    expect(out).toContain("a released table's grant widened");
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(13);
+    ).toHaveLength(21);
+
+    // Issue #55: the v0.2.0 phase reset to the last released migration, built a real report on
+    // it, and asserted the disbursement upgrade.
+    expect(out).toContain("imprest funding AND a delivered report");
+    expect(calls.filter((call) => call.args[0]?.includes("22_mark_v020_boundary"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.args[0]?.includes("24_assert_disbursement_upgrade")),
+    ).toHaveLength(1);
 
     // Issue #51: the v0.1.0 phase ran on a populated database, and the success → retry boundary
     // ran twice — empty, and with a real report whose capture had to survive the retry migration.

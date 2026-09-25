@@ -96,6 +96,8 @@ select is(
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      join pg_roles o on o.oid = p.proowner
     where n.nspname = 'api' and p.proname like '%imprest%'
+      and p.proname not like '%disbursement%'
+      and p.proname <> 'staff_imprest_spending_position'
       and p.prosecdef and o.rolname = 'fv_definer_owner'),
   7,
   'seven imprest funding commands, every one security definer and owned by fv_definer_owner');

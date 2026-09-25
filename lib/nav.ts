@@ -23,6 +23,8 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/dispatch", labelKey: "nav.dispatch" },
     { href: "/orders", labelKey: "nav.orders" },
     { href: "/inventory/receiving", labelKey: "nav.receiving" },
+    // §13.3: the Cashier proposes imprest disbursements and sees what is free to approve.
+    { href: "/imprest", labelKey: "nav.imprest" },
   ],
   manager: [
     { href: "/dashboard", labelKey: "nav.dashboard" },

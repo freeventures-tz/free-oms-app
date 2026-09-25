@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { IMPREST_CATEGORIES, PURPOSE_MAX } from "@/lib/imprest/spending";
 import { MAX_PRICE_TZS, parseTzs } from "@/lib/money";
 
 /**
@@ -10,7 +11,7 @@ import { MAX_PRICE_TZS, parseTzs } from "@/lib/money";
  */
 
 /** Whole shillings as typed. `allowZero` is for a count, where zero records that nothing arrived. */
-function tzsField(allowZero: boolean) {
+function tzsField(allowZero: boolean, namespace = "imprestErrors") {
   return z.string().transform((value, ctx) => {
     // `parseTzs` is written for prices and refuses zero. A count may be zero.
     const zero = allowZero && /^0+$/.test(value.replace(/[\s ,]/g, ""));
@@ -21,8 +22,8 @@ function tzsField(allowZero: boolean) {
         code: "custom",
         message:
           /^\d+$/.test(digitsOnly) && Number(digitsOnly) > MAX_PRICE_TZS
-            ? "imprestErrors.amount_too_large"
-            : "imprestErrors.amount_invalid",
+            ? `${namespace}.amount_too_large`
+            : `${namespace}.amount_invalid`,
       });
       return z.NEVER;
     }
@@ -30,11 +31,11 @@ function tzsField(allowZero: boolean) {
   });
 }
 
-function textField(required: boolean, message: string) {
+function textField(required: boolean, message: string, max = 500) {
   return z
     .string()
     .transform((value) => value.replace(/\s+/g, " ").trim())
-    .refine((value) => (value.length === 0 ? !required : value.length >= 3 && value.length <= 500), {
+    .refine((value) => (value.length === 0 ? !required : value.length >= 3 && value.length <= max), {
       message,
     });
 }
@@ -101,4 +102,32 @@ export const correctHandoverSchema = z.object({
   amount: tzsField(false),
   explanation: textField(true, "imprestErrors.explanation_required"),
   idempotencyKey,
+});
+
+// Disbursements (issue #55).
+
+// Their messages live in `spendingErrors`, which speaks of payments rather than funding requests.
+const spendingKey = z.string().uuid({ message: "spendingErrors.idempotency_key_conflict" });
+const spendingVersion = z.coerce.number().int().min(1, { message: "spendingErrors.stale" });
+const disbursementId = z.string().uuid({ message: "spendingErrors.no_disbursement" });
+
+export const proposeDisbursementSchema = z.object({
+  amount: tzsField(false, "spendingErrors"),
+  category: z.enum(IMPREST_CATEGORIES, { message: "spendingErrors.category_invalid" }),
+  purpose: textField(true, "spendingErrors.purpose_required", PURPOSE_MAX),
+  idempotencyKey: spendingKey,
+});
+
+export const approveDisbursementSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  idempotencyKey: spendingKey,
+});
+
+/** Reject, withdraw and cancel all take a written reason of 3 to 500 characters. */
+export const disbursementReasonSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  reason: textField(true, "spendingErrors.reason_required"),
+  idempotencyKey: spendingKey,
 });

@@ -104,7 +104,7 @@
     "dispatch": "Dispatch",
     "storekeepers": "Storekeepers",
     "production": "Brick production",
-    "imprest": "Imprest funding",
+    "imprest": "Imprest",
     "reports": "Daily reports"
   },
   "unavailable": {
@@ -1097,11 +1097,11 @@
     "inspection_must_account_for_all": "Everything that cured has to be accounted for."
   },
   "imprest": {
-    "title": "Imprest funding",
-    "description": "Requests for operating cash, what a Director approved and handed over, and what the Manager confirmed receiving.",
+    "title": "Imprest",
+    "description": "Operating cash and the payments made from it: who asked, who decided, and what was handed over and confirmed.",
     "total": {
       "label": "Posted imprest funding",
-      "help": "The sum of funding the Manager has confirmed receiving. It is not a cash count, and spending is not recorded here yet.",
+      "help": "The sum of funding the Manager has confirmed receiving. It is not a cash count, and payments are not recorded here yet.",
       "noFund": "No imprest funding has been requested yet."
     },
     "request": {
@@ -1181,6 +1181,94 @@
       "excess": "Excess reported: counted {counted} against {provided}",
       "rejected": "Rejected",
       "received": "Receipt confirmed: {amount} posted"
+    },
+    "spending": {
+      "cashierDescription": "Propose payments from the imprest fund and follow each one until the Manager decides.",
+      "figures": {
+        "heading": "Imprest figures",
+        "setAside": "Set aside for approved payments",
+        "setAsideHelp": "Approved but not yet paid. This money can't be approved again.",
+        "free": "Free to approve",
+        "freeHelp": "Posted imprest funding minus what is set aside. An approval above this is refused.",
+        "noFund": "No imprest fund is open yet. Payments can be proposed once funding is received."
+      },
+      "category": {
+        "fuel_and_lubricants": "Fuel and lubricants",
+        "labour_and_casual_workers": "Labour and casual workers",
+        "transport_and_delivery": "Transport and delivery",
+        "meals_and_staff_welfare": "Meals and staff welfare",
+        "materials_and_supplies": "Materials and supplies",
+        "repairs_and_maintenance": "Repairs and maintenance",
+        "utilities": "Utilities",
+        "fees_and_charges": "Fees and charges",
+        "other": "Other"
+      },
+      "status": {
+        "proposed": "Awaiting Manager approval",
+        "approved": "Approved, not yet paid",
+        "rejected": "Rejected",
+        "withdrawn": "Withdrawn",
+        "cancelled": "Cancelled"
+      },
+      "propose": {
+        "title": "Propose a payment",
+        "help": "A proposal moves no money and sets nothing aside. Don't pay until the Manager approves it.",
+        "amount": "Amount (TZS)",
+        "category": "Category",
+        "purpose": "Purpose",
+        "purposeHelp": "A few words, up to 120 characters.",
+        "recent": "Recent purposes",
+        "overFree": "That is {shortfall} more than is free to approve. The Manager can't approve it until more funding is posted.",
+        "submit": "Submit for approval"
+      },
+      "lists": {
+        "waiting": "Waiting for a decision ({count})",
+        "waitingEmpty": "No proposals are waiting for a decision.",
+        "open": "Approved, not yet paid ({count})",
+        "openEmpty": "No approvals are open.",
+        "mine": "Your proposals",
+        "mineEmpty": "You haven't proposed any payments yet.",
+        "openMinutes": "Open for {count, plural, =0 {less than a minute} one {# minute} other {# minutes}}",
+        "openHours": "Open for {count, plural, one {# hour} other {# hours}}",
+        "openDays": "Open for {count, plural, one {# day} other {# days}}"
+      },
+      "fields": {
+        "rejectionReason": "Reason for rejecting",
+        "withdrawalReason": "Reason for withdrawing",
+        "cancellationReason": "Reason for cancelling"
+      },
+      "actions": {
+        "heading": "Actions",
+        "approve": "Approve {amount}",
+        "reject": "Reject",
+        "confirmReject": "Reject proposal",
+        "withdraw": "Withdraw",
+        "confirmWithdraw": "Withdraw proposal",
+        "cancel": "Cancel approval",
+        "confirmCancel": "Confirm cancellation"
+      },
+      "success": {
+        "proposed": "Payment proposed. Wait for the Manager's approval before paying.",
+        "approved": "Approved. The amount is set aside and can't be approved again.",
+        "rejected": "Proposal rejected.",
+        "withdrawn": "Proposal withdrawn.",
+        "cancelled": "Approval cancelled. The money set aside for it is free again."
+      },
+      "detail": {
+        "back": "Back to imprest",
+        "amount": "Amount",
+        "category": "Category",
+        "proposedBy": "Proposed by",
+        "waitingManager": "Waiting for the Manager to approve or reject it. Don't pay yet.",
+        "readOnly": "Directors can read payments here. The Manager approves, rejects and cancels them."
+      },
+      "history": {
+        "proposed": "Proposed",
+        "approved": "Approved and set aside",
+        "rejected": "Rejected",
+        "withdrawn": "Withdrawn",
+        "cancelled": "Approval cancelled and money freed"
+      }
     }
   },
   "imprestErrors": {
@@ -1203,6 +1291,24 @@
     "exceeds_approval": "That is more than the approved {approved_amount_tzs}. Record an approval increase first.",
     "increase_not_higher": "The new approval must be higher than {approved_amount_tzs}.",
     "counted_matches_provided": "You counted the recorded amount. Confirm receipt instead."
+  },
+  "spendingErrors": {
+    "not_permitted": "Your account may not do this.",
+    "generic": "Something went wrong and nothing was changed. Try again.",
+    "unconfirmed": "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which can't be recorded twice.",
+    "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
+    "amount_invalid": "Enter a whole number of shillings.",
+    "amount_too_large": "That amount is larger than the system accepts.",
+    "reason_required": "Give a reason of 3 to 500 characters.",
+    "stale": "This payment changed since you opened it. Reload to see where it stands.",
+    "not_awaiting_decision": "This proposal has already been decided or withdrawn.",
+    "no_fund": "No imprest fund is open yet, so nothing can be proposed.",
+    "insufficient_imprest": "Only {free_to_approve_tzs} is free to approve, less than the {amount_tzs} proposed. Nothing was changed.",
+    "category_invalid": "Choose one of the categories.",
+    "purpose_required": "Give a purpose of 3 to 120 characters.",
+    "no_disbursement": "This payment can't be found.",
+    "not_approved": "Only an approved payment can be cancelled, and this one isn't approved.",
+    "decision_required": "Choose to approve or reject."
   },
   "reports": {
     "title": "Daily reports",

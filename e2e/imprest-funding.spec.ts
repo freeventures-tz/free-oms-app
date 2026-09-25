@@ -72,9 +72,9 @@ test.describe("imprest funding", () => {
     for (const who of ["manager", "director"] as const) {
       await as(page, who);
       const nav = await openNavigation(page, testInfo);
-      await nav.getByRole("link", { name: "Imprest funding" }).click();
+      await nav.getByRole("link", { name: "Imprest", exact: true }).click();
       await expect(page).toHaveURL(/\/imprest$/);
-      await expect(page.getByText("Posted imprest funding")).toBeVisible();
+      await expect(page.getByText("Posted imprest funding", { exact: true })).toBeVisible();
     }
   });
 
@@ -210,12 +210,13 @@ test.describe("imprest funding", () => {
 
     // One Playwright worker runs the whole suite, so this grant is taken away from nobody else.
     try {
-      psql("revoke select on public.imprest_funding_position from authenticated;");
+      // The figures come from one database function since issue #55.
+      psql("revoke execute on function api.staff_imprest_spending_position() from authenticated;");
       await page.goto("/imprest");
       await expect(page.getByText(/this page could not be loaded/i)).toBeVisible();
       await expect(page.getByText("Posted imprest funding")).toHaveCount(0);
     } finally {
-      psql("grant select on public.imprest_funding_position to authenticated;");
+      psql("grant execute on function api.staff_imprest_spending_position() to authenticated;");
     }
 
     try {
@@ -386,7 +387,7 @@ test.describe("imprest funding while a page is still loading", () => {
     // Empties the client router cache, so every prefetch for the link happens under the handler.
     await page.reload();
     const nav = await openNavigation(page, testInfo);
-    const link = nav.getByRole("link", { name: "Imprest funding" });
+    const link = nav.getByRole("link", { name: "Imprest", exact: true });
     await expect(link).toBeVisible();
     await awaitPrefetch(page, hold);
     await link.click({ noWaitAfter: true });

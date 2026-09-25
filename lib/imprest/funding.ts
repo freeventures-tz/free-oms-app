@@ -9,8 +9,8 @@ import { pagedQuery, type Page } from "@/lib/settlement/settlement";
  * error boundary says the page could not be loaded, rather than showing no history or a total of
  * zero that nobody could tell from the truth.
  *
- * The total is the sum of confirmed receipts and nothing else. It is not a physical cash count and
- * not an available-to-disburse figure: spending and daily reconciliation are not built.
+ * Posted funding, set aside and Free to approve are read with the disbursements (issue #55), from
+ * `lib/imprest/disbursements.ts`, so all three come from one calculation in the database.
  */
 
 export type FundingStatus =
@@ -47,16 +47,6 @@ export type FundingEvent =
   | { kind: "received"; at: string; by: string; amount: number };
 
 export type FundingDetail = FundingSummary & { events: FundingEvent[] };
-
-/** The posted total, or `null` when no fund has been opened yet. A failed read throws. */
-export async function loadFundingPosition(): Promise<number | null> {
-  const supabase = await createServerSupabase();
-  const rows = requireRows(
-    await supabase.from("imprest_funding_position").select("posted_funding_tzs"),
-    "imprest.position",
-  );
-  return rows.length === 0 ? null : Number(rows[0].posted_funding_tzs);
-}
 
 const SUMMARY_COLUMNS = `
   id, funding_no, status, version, requested_amount_tzs, reason, requested_at,

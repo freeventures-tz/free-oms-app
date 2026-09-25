@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 /**
+ * Issue #55 adds one more phase, THE v0.2.0 PHASE. It resets to the 41st and last released
+ * migration, builds the same sales, money, dispatch, production and imprest funding ground on it,
+ * lets the released scheduler write a real report, and applies the imprest disbursement migration.
+ * Its preservation query adds the report, the four Cron jobs, and enum labels, column shapes, view
+ * bodies and indexes to the released surface. The one released object that migration replaces,
+ * the document numbering constraint, is pinned exactly on both sides instead.
+ *
  * Issue #51 adds two boundaries to the ones below, and both are about the scheduled report:
  *
  *   THE v0.1.0 PHASE resets to the 39th and last released migration — the database hosted Supabase
@@ -104,6 +111,10 @@ const V010_VERSION = "20260921000300";
  * the retry machinery existed.
  */
 const REPORT_SUCCESS_VERSION = "20260923000100";
+/** The 41st and last RELEASED migration: v0.2.0, the scheduled report with its retries. */
+const REPORT_RETRY_VERSION = "20260923000200";
+/** Issue #55: imprest disbursements, the first migration after v0.2.0. */
+const DISBURSEMENT_VERSION = "20260925000100";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -120,6 +131,9 @@ const ASSERT_V006 = join(SQL_DIR, "12_assert_v006.sql");
 const MARK_V010 = join(SQL_DIR, "14_mark_v010_boundary.sql");
 const BUILD_V010_FUNDING = join(SQL_DIR, "15_build_v010_funding.sql");
 const ASSERT_REPORTING = join(SQL_DIR, "16_assert_reporting_upgrade.sql");
+const MARK_V020 = join(SQL_DIR, "22_mark_v020_boundary.sql");
+const BUILD_V020_REPORT = join(SQL_DIR, "23_build_v020_report.sql");
+const ASSERT_DISBURSEMENTS = join(SQL_DIR, "24_assert_disbursement_upgrade.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -148,6 +162,9 @@ const COUNTEREXAMPLE_REVERSAL = join(SQL_DIR, "07_counterexample_reversal_linkag
 const COUNTEREXAMPLE_SETTLEMENT = join(SQL_DIR, "08_counterexample_settlement_linkage.sql");
 const COUNTEREXAMPLE_PRODUCTION = join(SQL_DIR, "13_counterexample_production_rewrite.sql");
 const COUNTEREXAMPLE_FUNDING = join(SQL_DIR, "21_counterexample_funding_history.sql");
+const COUNTEREXAMPLE_REPORT = join(SQL_DIR, "25_counterexample_report_content.sql");
+const COUNTEREXAMPLE_ENUM = join(SQL_DIR, "26_counterexample_released_enum.sql");
+const COUNTEREXAMPLE_GRANT = join(SQL_DIR, "27_counterexample_released_grant.sql");
 /**
  * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
  *
@@ -165,12 +182,13 @@ const PRESERVATION_QUERY = join("supabase", "release-checks", "product_preservat
 const V004_PRESERVATION = join("supabase", "release-checks", "v004_preservation.sql");
 const V005_PRESERVATION = join("supabase", "release-checks", "v005_preservation.sql");
 const V010_PRESERVATION = join("supabase", "release-checks", "v010_preservation.sql");
+const V020_PRESERVATION = join("supabase", "release-checks", "v020_preservation.sql");
 
 /**
- * All 39 released migrations (issue #51). Its first 34 lines are the v0.0.5 manifest unchanged, so
- * this checks everything that one did and the five released since.
+ * All 41 released migrations (issue #55). Its first 39 lines are the v0.1.0 manifest unchanged, so
+ * this checks everything that one did and the two reporting migrations released since.
  */
-const MIGRATION_MANIFEST = join("supabase", "release-checks", "v010_migration_manifest.txt");
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v020_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -269,8 +287,10 @@ const PHASES = [
     subject: "the two reporting migrations",
     what: "the v0.1.0 database",
     version: V010_VERSION,
-    // Nothing is held back: these two are the whole of what follows v0.1.0, and they are one
-    // release unit, so they are applied together exactly as the release would apply them.
+    // These two are one release unit (v0.2.0), so they are applied together exactly as that
+    // release applied them. Anything later is held back: the imprest disbursement migration of
+    // issue #55 is a later release and is not what this phase is about.
+    upTo: REPORT_RETRY_VERSION,
     describes: "v0.1.0, before the scheduled report",
     query: V010_PRESERVATION,
     fixtures: [
@@ -290,6 +310,38 @@ const PHASES = [
             name: "a disputed imprest handover's amount rewritten in place",
             file: COUNTEREXAMPLE_FUNDING,
           },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the imprest disbursement migration",
+    what: "the v0.2.0 database",
+    version: REPORT_RETRY_VERSION,
+    // This release and no further, for the same reason every earlier phase stops at its own.
+    upTo: DISBURSEMENT_VERSION,
+    describes: "v0.2.0, before imprest spending",
+    query: V020_PRESERVATION,
+    fixtures: [
+      {
+        name: "sales, money, dispatch, production, imprest funding AND a delivered report",
+        setup: [MARK_V020, BUILD_V005, BUILD_V010_FUNDING, BUILD_V020_REPORT],
+        assertions: [ASSERT_DISBURSEMENTS],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "what a batch consumed and yielded, rewritten in place",
+            file: COUNTEREXAMPLE_PRODUCTION,
+          },
+          {
+            name: "a disputed imprest handover's amount rewritten in place",
+            file: COUNTEREXAMPLE_FUNDING,
+          },
+          { name: "a delivered report's content rewritten in place", file: COUNTEREXAMPLE_REPORT },
+          { name: "a label added to a released enum", file: COUNTEREXAMPLE_ENUM },
+          { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
         ],
       },
     ],

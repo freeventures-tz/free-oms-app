@@ -23,6 +23,8 @@ export default async function FundingPage({ params }: PageProps<"/imprest/[id]">
   const viewer = await requireAccess("/imprest");
   const { id } = await params;
   if (!UUID.test(id)) notFound();
+  // The Cashier reaches /imprest for spending only (issue #55). Funding is not theirs to follow.
+  if (viewer.role === "cashier") notFound();
 
   const funding = await loadFunding(id);
   if (!funding) notFound();
