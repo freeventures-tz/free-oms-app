@@ -74,7 +74,7 @@ test.describe("imprest funding", () => {
       const nav = await openNavigation(page, testInfo);
       await nav.getByRole("link", { name: "Imprest", exact: true }).click();
       await expect(page).toHaveURL(/\/imprest$/);
-      await expect(page.getByText("Posted imprest funding")).toBeVisible();
+      await expect(page.getByText("Posted imprest funding", { exact: true })).toBeVisible();
     }
   });
 

@@ -219,8 +219,9 @@ test.describe("imprest disbursements", () => {
     const before = await figures(page);
     await openDisbursement(page, purpose);
     await page.getByTestId("approve-disbursement").click();
-    await expect(page.getByRole("alert")).toContainText(
-      `is free to approve, less than the TZS ${(free + 1000).toLocaleString("en-US")} proposed. Nothing was changed.`,
+    // Next's route announcer also carries role="alert", so match the refusal by its text.
+    await expect(page.getByRole("alert").filter({ hasText: "free to approve" })).toContainText(
+      `Only TZS ${free.toLocaleString("en-US")} is free to approve, less than the TZS ${(free + 1000).toLocaleString("en-US")} proposed. Nothing was changed.`,
     );
     expect(await figures(page)).toEqual(before);
 
@@ -323,5 +324,124 @@ test.describe("imprest disbursements", () => {
 
     await page.goto("/imprest");
     await expect(page.getByTestId("disbursements-mine").getByRole("link", { name: new RegExp(purpose) })).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Mobile benchmark, opt-in, the same method as the funding benchmark in imprest-funding.spec.ts:
+//
+//     FV_BENCHMARK=1 npx playwright test --project=mobile e2e/imprest-disbursements.spec.ts -g benchmark
+//
+// Two representative commands: the Cashier proposing, and the Manager approving. A real touch starts
+// the clock inside the page. Acknowledgement is the first animation frame after the touched control
+// reports `aria-busy`; completion is the server-confirmed success status. Seeding is unthrottled.
+// ---------------------------------------------------------------------------------------------
+
+const BENCHMARK = process.env.FV_BENCHMARK === "1";
+const SAMPLES = 20;
+const PROFILES = [
+  { name: "Slow 4G", down: (1.6 * 1024 * 1024) / 8, up: (750 * 1024) / 8, latency: 562.5, cpu: 4 },
+  { name: "Fast 4G", down: (9 * 1024 * 1024) / 8, up: (1.5 * 1024 * 1024) / 8, latency: 85, cpu: 4 },
+] as const;
+
+function summary(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = (q: number) => sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
+  return { n: sorted.length, p50: Math.round(rank(0.5)), p95: Math.round(rank(0.95)), worst: Math.round(sorted.at(-1)!) };
+}
+
+/** Throttles, taps `control`, and returns the acknowledgement and completion times in ms. */
+async function measureTap(page: Page, profile: (typeof PROFILES)[number], control: string, done: string) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.emulateNetworkConditions", {
+    offline: false,
+    downloadThroughput: profile.down,
+    uploadThroughput: profile.up,
+    latency: profile.latency,
+  });
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: profile.cpu });
+  try {
+    const button = page.locator(control);
+    await button.evaluate((el, doneText) => {
+      const w = window as unknown as { __fv: { t0?: number; ack?: number; done?: number } };
+      w.__fv = {};
+      el.addEventListener("pointerdown", () => (w.__fv.t0 = performance.now()), { once: true });
+      new MutationObserver((_, observer) => {
+        if (el.getAttribute("aria-busy") === "true" && w.__fv.t0 !== undefined) {
+          requestAnimationFrame(() => (w.__fv.ack = performance.now() - w.__fv.t0!));
+          observer.disconnect();
+        }
+      }).observe(el, { attributes: true });
+      new MutationObserver((_, observer) => {
+        if (document.querySelector("[role=status]")?.textContent?.includes(doneText)) {
+          w.__fv.done = performance.now() - (w.__fv.t0 ?? performance.now());
+          observer.disconnect();
+        }
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    }, done);
+    await button.tap();
+    await expect(page.getByRole("status").filter({ hasText: done })).toBeVisible({ timeout: 30_000 });
+    const sample = await page.evaluate(() => (window as unknown as { __fv: { ack?: number; done?: number } }).__fv);
+    return { ack: sample.ack ?? Number.POSITIVE_INFINITY, done: sample.done ?? Number.POSITIVE_INFINITY };
+  } finally {
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false, downloadThroughput: -1, uploadThroughput: -1, latency: 0,
+    });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await cdp.detach();
+  }
+}
+
+function report(label: string, ack: number[], done: number[]) {
+  const a = summary(ack);
+  const d = summary(done);
+  console.log(`${label} ack  n=${a.n} p50=${a.p50}ms p95=${a.p95}ms worst=${a.worst}ms`);
+  console.log(`${label} done n=${d.n} p50=${d.p50}ms p95=${d.p95}ms worst=${d.worst}ms`);
+  expect(a.worst, `${label} acknowledgement`).toBeLessThanOrEqual(100);
+  expect(d.p95, `${label} completion p95`).toBeLessThanOrEqual(2500);
+}
+
+(BENCHMARK ? test.describe : test.describe.skip)("imprest disbursements mobile benchmark", () => {
+  test.setTimeout(30 * 60_000);
+
+  test("Propose and Approve: acknowledgement and server-confirmed completion over 4G", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile", "the mobile profile only");
+    await ensureFree(SAMPLES * PROFILES.length * 1000 + 1000);
+
+    await as(page, "cashier");
+    for (const profile of PROFILES) {
+      const ack: number[] = [];
+      const done: number[] = [];
+      for (let i = 0; i < SAMPLES; i += 1) {
+        await page.goto("/imprest");
+        const form = page.getByTestId("propose-disbursement-form");
+        await form.getByText("Fuel and lubricants").click();
+        await form.getByLabel("Amount (TZS)").fill("1000");
+        await form.getByLabel("Purpose").fill(`Bench ${SUFFIX} ${profile.name} ${i}`);
+        const sample = await measureTap(
+          page,
+          profile,
+          "[data-testid=propose-disbursement-form] button[type=submit]",
+          "Payment proposed.",
+        );
+        ack.push(sample.ack);
+        done.push(sample.done);
+      }
+      report(`${profile.name} propose`, ack, done);
+    }
+
+    await as(page, "manager");
+    for (const profile of PROFILES) {
+      const ack: number[] = [];
+      const done: number[] = [];
+      for (let i = 0; i < SAMPLES; i += 1) {
+        const row = await seedProposal(1000, `Bench approve ${SUFFIX} ${profile.name} ${i}`);
+        await page.goto(`/imprest/disbursements/${row.id}`);
+        const sample = await measureTap(page, profile, "[data-testid=approve-disbursement]", "Approved.");
+        ack.push(sample.ack);
+        done.push(sample.done);
+      }
+      report(`${profile.name} approve`, ack, done);
+    }
   });
 });
