@@ -126,8 +126,9 @@ beforeAll(async () => {
 
 describe("concurrent first requests", () => {
   it("open exactly one fund, and every request joins it", async () => {
-    // First in this file on purpose: no other integration file touches imprest, so no fund
-    // exists yet and these requests genuinely race to open it.
+    // First in this file on purpose, and the sequencer in `vitest.config.mts` runs this file
+    // before every other integration file. So no fund exists yet and these requests genuinely
+    // race to open it.
     const results = await Promise.all(
       Array.from({ length: 6 }, (_, i) => request(i % 2 === 0 ? manager : secondManager, 10000 + i)),
     );
