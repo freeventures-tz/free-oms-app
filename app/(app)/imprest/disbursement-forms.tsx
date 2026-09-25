@@ -221,8 +221,12 @@ export function DisbursementActions({
       disabled={controller.pending}
       aria-expanded={open === name}
       onClick={() => {
-        controller.clear();
-        renewKey();
+        // An unconfirmed request may already have committed. Keep it, and its key, until Try again
+        // finds out; a fresh key would turn a committed change into a stale-version refusal.
+        if (!(controller.retry && controller.result.error === SPENDING_UNCONFIRMED_KEY)) {
+          controller.clear();
+          renewKey();
+        }
         setOpen(open === name ? null : name);
       }}
     >

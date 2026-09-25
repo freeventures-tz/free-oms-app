@@ -61,6 +61,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         empty={t("spending.lists.waitingEmpty")}
         page={waiting}
         param="waiting"
+        otherParams={{ open: open.page, page: fundings.page }}
       />
 
       <DisbursementList
@@ -70,6 +71,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         page={open}
         param="open"
         showOpenFor
+        otherParams={{ waiting: waiting.page, page: fundings.page }}
       />
 
       {viewer.role === "manager" ? (
@@ -126,6 +128,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
           param="page"
           basePath="/imprest"
           label={t("list.title")}
+          otherParams={{ waiting: waiting.page, open: open.page }}
         />
       </section>
     </>

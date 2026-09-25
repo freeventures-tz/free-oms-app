@@ -106,6 +106,7 @@ export async function DisbursementList({
   param,
   showOpenFor = false,
   showProposer = true,
+  otherParams = {},
 }: {
   id: string;
   title: string;
@@ -114,6 +115,8 @@ export async function DisbursementList({
   param: string;
   showOpenFor?: boolean;
   showProposer?: boolean;
+  /** The other lists' current pages on this screen, so paging this one keeps their place. */
+  otherParams?: Record<string, number>;
 }) {
   const t = await getTranslations("imprest.spending");
   const locale = await getLocale();
@@ -175,6 +178,7 @@ export async function DisbursementList({
         param={param}
         basePath="/imprest"
         label={title}
+        otherParams={otherParams}
       />
     </section>
   );
