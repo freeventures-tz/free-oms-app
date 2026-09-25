@@ -104,6 +104,8 @@ const V010_VERSION = "20260921000300";
  * the retry machinery existed.
  */
 const REPORT_SUCCESS_VERSION = "20260923000100";
+/** The 41st and last RELEASED migration: v0.2.0, the scheduled report with its retries. */
+const REPORT_RETRY_VERSION = "20260923000200";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -269,8 +271,10 @@ const PHASES = [
     subject: "the two reporting migrations",
     what: "the v0.1.0 database",
     version: V010_VERSION,
-    // Nothing is held back: these two are the whole of what follows v0.1.0, and they are one
-    // release unit, so they are applied together exactly as the release would apply them.
+    // These two are one release unit (v0.2.0), so they are applied together exactly as that
+    // release applied them. Anything later is held back: the imprest disbursement migration of
+    // issue #55 is a later release and is not what this phase is about.
+    upTo: REPORT_RETRY_VERSION,
     describes: "v0.1.0, before the scheduled report",
     query: V010_PRESERVATION,
     fixtures: [
