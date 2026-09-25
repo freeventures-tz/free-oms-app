@@ -62,8 +62,10 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 
 Every merge to `main` is a release: it carries a SemVer tag and a `CHANGELOG.md` entry. A merge without both is unfinished work. Add the changelog entry to the PR before merging, so the tag contains the entry that describes it.
 
+This section is the whole release process. No tool calculates versions, opens preparation PRs or writes tags. When the human says "merge and tag", do steps 3 to 5 for that PR.
+
 1. Pick the version. `v1.0.0` is reserved for the complete app, so stay in `0.x` until then. Before 1.0, a new capability bumps the minor (`v0.2.0`) and a correction to shipped behaviour bumps the patch (`v0.1.1`). After 1.0, ordinary SemVer: breaking change major, capability minor, fix patch.
-2. Write the entry, newest at the top, as a date heading carrying the version, then only the sections that have content: `NEW` for what a person can now do, `IMPROVED` for what already existed and got better, `FIXED` for what was broken. Write each line for someone using the app, in the plain voice the existing entries use, not as a commit subject. `unslop` applies.
+2. Write the entry, newest at the top, as a date heading carrying the version, then only the sections that have content: `NEW` for what a person can now do, `IMPROVED` for what already existed and got better, `FIXED` for what was broken. Write each line for someone using the app, in the plain voice the existing entries use, not as a commit subject. `unslop` applies. Set `version` in `package.json` and `package-lock.json` to the same version.
 3. Merge the PR with a message that says what the change does.
 4. Tag the merge commit on `main`, annotated, message `<version>: <one line>`, then `git push origin <version>`.
 5. Give the human the tag and the release entry alongside the merged PR URL.

@@ -13,8 +13,8 @@ import "@testing-library/jest-dom/vitest";
  * It answers `false` to everything, which is the narrow phone tier — the tier where the collapsing
  * this project cares about actually happens, and the same answer the server renders with.
  *
- * Only where there IS a window. The release-controller suites run under `@vitest-environment node`,
- * where this setup file still loads and `window` does not exist.
+ * Only where there IS a window. A suite that runs under `@vitest-environment node` still loads this
+ * setup file, and there `window` does not exist.
  */
 if (typeof window !== "undefined") Object.defineProperty(window, "matchMedia", {
   writable: true,
