@@ -40,7 +40,6 @@ function textField(required: boolean, message: string, max = 500) {
     });
 }
 
-
 const fundingId = z.string().uuid({ message: "imprestErrors.no_funding" });
 const handoverId = z.string().uuid({ message: "imprestErrors.stale" });
 const expectedVersion = z.coerce.number().int().min(1, { message: "imprestErrors.stale" });

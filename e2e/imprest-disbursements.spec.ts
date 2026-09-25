@@ -235,6 +235,13 @@ test.describe("imprest disbursements", () => {
     // A rejected disbursement names who decided it, and no approver (§4.3).
     await expect(history).not.toContainText("Approved");
     expect(await figures(page)).toEqual(before);
+
+    // The Cashier may not read the Manager's profile, so their history names the role instead.
+    await as(page, "cashier");
+    await openDisbursement(page, purpose);
+    await expect(page.getByTestId("disbursement-history").getByRole("listitem").last()).toContainText(
+      /Rejected\s*Manager · /,
+    );
   });
 
   test("the Cashier withdraws their own proposal before a decision", async ({ page }, testInfo) => {

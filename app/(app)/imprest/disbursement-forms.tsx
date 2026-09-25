@@ -17,6 +17,8 @@ import type { AppRole } from "@/lib/auth/roles";
 import { IMPREST_CATEGORIES, PURPOSE_MAX, type ImprestCategory } from "@/lib/imprest/spending";
 import { formatTzs, parseTzs } from "@/lib/money";
 
+const SPENDING_UNCONFIRMED_KEY = "spendingErrors.unconfirmed";
+
 /**
  * Imprest disbursement controls (issue #55), on the same feedback contract as the funding forms
  * (design.md §12.7): acknowledged at once, one activation at a time, a retry resends the same key,
@@ -44,7 +46,7 @@ export function ProposeDisbursementForm({
     setAmount("");
     setCategory("");
     setPurpose("");
-  });
+  }, SPENDING_UNCONFIRMED_KEY);
   const problems = controller.running === null ? controller.result.fieldErrors : undefined;
   const typed = parseTzs(amount);
   const shortfall = typed !== null && typed > freeToApprove ? typed - freeToApprove : 0;
@@ -197,7 +199,7 @@ export function DisbursementActions({
   const t = useTranslations();
   const locale = useLocale();
   const [open, setOpen] = useState<string | null>(null);
-  const [key, controller, renewKey] = useFreshKey(() => setOpen(null));
+  const [key, controller, renewKey] = useFreshKey(() => setOpen(null), SPENDING_UNCONFIRMED_KEY);
   const hidden = { disbursementId: disbursement.id, expectedVersion: String(disbursement.version) };
   const shared = { controller, idempotencyKey: key, hidden };
 

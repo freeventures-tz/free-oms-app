@@ -34,7 +34,10 @@ export type Disbursement = {
 export type DisbursementEvent = {
   kind: "proposed" | "approved" | "rejected" | "withdrawn" | "cancelled";
   at: string;
+  /** The person's name, or "" when the viewer may not read it (a Cashier reads only their own). */
   by: string;
+  /** Who acts at this step. Only the proposing Cashier proposes and withdraws; only a Manager decides. */
+  role: "cashier" | "manager";
   text: string | null;
 };
 
@@ -221,16 +224,17 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
   const who = (person: string | null) => (person ? (names.get(person) ?? "") : "");
 
   const events: DisbursementEvent[] = [
-    { kind: "proposed", at: row.proposed_at, by: who(row.proposed_by), text: row.purpose },
+    { kind: "proposed", at: row.proposed_at, by: who(row.proposed_by), role: "cashier", text: row.purpose },
   ];
   if (row.approved_at) {
-    events.push({ kind: "approved", at: row.approved_at, by: who(row.approved_by), text: null });
+    events.push({ kind: "approved", at: row.approved_at, by: who(row.approved_by), role: "manager", text: null });
   }
   if (row.rejected_at) {
     events.push({
       kind: "rejected",
       at: row.rejected_at,
       by: who(row.rejected_by),
+      role: "manager",
       text: row.rejection_reason,
     });
   }
@@ -240,6 +244,7 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
       kind: "withdrawn",
       at: row.withdrawn_at,
       by: who(row.proposed_by),
+      role: "cashier",
       text: row.withdrawal_reason,
     });
   }
@@ -248,6 +253,7 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
       kind: "cancelled",
       at: row.cancelled_at,
       by: who(row.cancelled_by),
+      role: "manager",
       text: row.cancellation_reason,
     });
   }

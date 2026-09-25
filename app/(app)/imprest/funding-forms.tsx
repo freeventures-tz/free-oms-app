@@ -158,13 +158,19 @@ export function ActionForm({
   );
 }
 
-/** Draws a fresh key after each success, so a retry after failure replays the same request. */
-export function useFreshKey(onSuccess?: () => void): [string, Controller, () => void] {
+/**
+ * Draws a fresh key after each success, so a retry after failure replays the same request.
+ * `failureKey` names the unconfirmed-outcome message; disbursements pass their own.
+ */
+export function useFreshKey(
+  onSuccess?: () => void,
+  failureKey: string = UNCONFIRMED_KEY,
+): [string, Controller, () => void] {
   const [key, setKey] = useState(() => crypto.randomUUID());
   const controller = useGuardedAction<string, ImprestActionState>({
     // A thrown action is a response that never arrived, not a refusal: the command may have
     // committed, so the message says so, and Try again resends this same key to find out.
-    failureKey: UNCONFIRMED_KEY,
+    failureKey,
     onSettled: (outcome) => {
       if (outcome.successKey) {
         setKey(crypto.randomUUID());

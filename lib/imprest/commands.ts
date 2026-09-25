@@ -1,10 +1,10 @@
 import { userApi } from "@/lib/supabase/api";
 
 /**
- * Imprest funding commands (issue #48) and disbursement commands (issue #55). Each one calls a single `api` function through the
- * caller's own session: the database derives the actor, checks the live role, the version on
- * screen and the idempotency key, and commits any refusal to the audit trail. Nothing here decides
- * anything the database does not decide again.
+ * Imprest funding commands (issue #48) and disbursement commands (issue #55). Each one calls a
+ * single `api` function through the caller's own session: the database derives the actor, checks
+ * the live role, the version on screen and the idempotency key, and commits any refusal to the
+ * audit trail. Nothing here decides anything the database does not decide again.
  */
 
 export type ImprestResult =

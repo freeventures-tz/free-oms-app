@@ -29,6 +29,7 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
   if (!disbursement) notFound();
 
   const t = await getTranslations("imprest.spending");
+  const roles = await getTranslations("admin.roles");
   const locale = await getLocale();
   const isOwn = disbursement.proposedById === viewer.userId;
 
@@ -105,7 +106,8 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
               <Card className="flex flex-col gap-1">
                 <span className="font-medium">{t(`history.${event.kind}`)}</span>
                 <span className="text-sm text-muted-foreground">
-                  {event.by} · {formatBusinessStamp(event.at, locale)}
+                  {/* A Cashier may not read the Manager's profile, so they see the role instead. */}
+                  {event.by || roles(event.role)} · {formatBusinessStamp(event.at, locale)}
                 </span>
                 {event.text ? <span className="text-sm">{event.text}</span> : null}
               </Card>
