@@ -1,6 +1,6 @@
 {
   "name": "free-oms-app",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
+    "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --project unit",
     "test:integration": "supabase db reset && vitest run --project integration",
     "test:e2e": "supabase db reset && playwright test",
@@ -18,14 +19,7 @@
     "test:migration-chain": "node scripts/migration-chain-check.mjs",
     "bootstrap:director": "tsx scripts/bootstrap-director.ts",
     "verify": "npm run lint && npm run typecheck && npm run test:unit && npm run build",
-    "db:advisors": "supabase db lint --level warning && node scripts/run-advisors.mjs",
-    "release:check-title": "node scripts/release/controller.mjs check-pr-title",
-    "release:preview": "node scripts/release/controller.mjs preview",
-    "release:evaluate-build": "node scripts/release/controller.mjs evaluate-build",
-    "release:reconcile-builds": "node scripts/release/controller.mjs reconcile-builds",
-    "release:prepare": "node scripts/release/controller.mjs prepare-release",
-    "release:evaluate-release": "node scripts/release/controller.mjs evaluate-release",
-    "test:release": "vitest run --project unit tests/unit/release"
+    "db:advisors": "supabase db lint --level warning && node scripts/run-advisors.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
@@ -52,17 +46,14 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "conventional-commits-parser": "7.1.2",
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "jsdom": "^30.0.1",
-    "semver": "7.8.5",
     "supabase": "2.113.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5",
-    "vitest": "^4.1.10",
-    "yaml": "2.9.0"
+    "vitest": "^4.1.10"
   }
 }

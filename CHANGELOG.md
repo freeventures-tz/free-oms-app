@@ -2,6 +2,16 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.2.2] — 2026-09-25
+
+Nothing changes for people using the app.
+
+### IMPROVED
+
+- Releases are simpler. The automatic version and tagging system, which was never switched on, is
+  gone, along with its checks on pull request titles. Each change is now versioned, noted here and
+  tagged by hand when it is merged.
+
 ## [0.2.1] — 2026-09-25
 
 Nothing changes for people using the app. This release makes the automated checks behind it more
