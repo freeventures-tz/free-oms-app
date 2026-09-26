@@ -2,6 +2,14 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.3.1] — 2026-09-26
+
+### FIXED
+
+- On a tablet, the menu rail sat above the page instead of beside it, so every screen opened on
+  the menu and you had to scroll past it to reach the page. The rail now runs down the left side
+  with the page next to it.
+
 ## [0.3.0] — 2026-09-25
 
 Cashiers can now propose imprest payments, and the Manager approves or rejects them. Paying out,
