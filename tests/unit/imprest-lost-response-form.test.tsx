@@ -18,12 +18,13 @@ import type { FundingSummary } from "@/lib/imprest/funding";
 
 const requestFundingAction = vi.fn();
 const confirmReceivedAction = vi.fn();
+const rejectFundingAction = vi.fn();
 
 vi.mock("@/app/(app)/imprest/actions", () => ({
   requestFundingAction: (...args: unknown[]) => requestFundingAction(...args),
   confirmReceivedAction: (...args: unknown[]) => confirmReceivedAction(...args),
   approveFundingAction: vi.fn(),
-  rejectFundingAction: vi.fn(),
+  rejectFundingAction: (...args: unknown[]) => rejectFundingAction(...args),
   increaseApprovalAction: vi.fn(),
   provideFundingAction: vi.fn(),
   reportMismatchAction: vi.fn(),
@@ -49,12 +50,22 @@ const PROVIDED: FundingSummary = {
   receivedAmount: null,
 };
 
+const REQUESTED: FundingSummary = {
+  ...PROVIDED,
+  status: "requested",
+  version: 1,
+  approvedAmount: null,
+  handoverId: null,
+  providedAmount: null,
+};
+
 const keyOf = (mock: ReturnType<typeof vi.fn>, call: number) =>
   (mock.mock.calls[call][1] as FormData).get("idempotencyKey");
 
 beforeEach(() => {
   requestFundingAction.mockReset();
   confirmReceivedAction.mockReset();
+  rejectFundingAction.mockReset();
 });
 
 describe("a funding request whose answer was lost", () => {
@@ -109,5 +120,62 @@ describe("a receipt confirmation whose answer was lost", () => {
     await waitFor(() => expect(confirmReceivedAction).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("status")).toHaveTextContent(messages.imprest.success.received);
     expect(keyOf(confirmReceivedAction, 1)).toBe(keyOf(confirmReceivedAction, 0));
+  });
+});
+
+/**
+ * The guard PR #58 gave the disbursement reason forms, applied to funding. Closing and reopening a
+ * form after a lost response must keep the unresolved request and its key: a fresh key would turn a
+ * rejection that did commit into a stale-version refusal.
+ */
+describe("a funding rejection whose answer was lost", () => {
+  it("keeps the unresolved request when the reason form is closed and reopened", async () => {
+    const user = userEvent.setup();
+    rejectFundingAction.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    rejectFundingAction.mockResolvedValueOnce({ successKey: "imprest.success.rejected" });
+
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <FundingActions funding={REQUESTED} role="director" />
+      </NextIntlClientProvider>,
+    );
+    const toggle = () => screen.getByRole("button", { name: en.imprest.actions.reject });
+    await user.click(toggle());
+    await user.type(screen.getByLabelText(en.imprest.fields.rejectionReason), "Not this week");
+    await user.click(screen.getByRole("button", { name: en.imprest.actions.confirmReject }));
+    expect(await screen.findByText(en.imprestErrors.unconfirmed)).toBeVisible();
+
+    // Close the form, then open it again.
+    await user.click(toggle());
+    await user.click(toggle());
+
+    expect(screen.getByText(en.imprestErrors.unconfirmed)).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: en.common.retry }));
+    await waitFor(() => expect(rejectFundingAction).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.success.rejected);
+    expect(keyOf(rejectFundingAction, 1)).toBe(keyOf(rejectFundingAction, 0));
+  });
+
+  it("does not carry the unresolved rejection into another action", async () => {
+    const user = userEvent.setup();
+    rejectFundingAction.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    rejectFundingAction.mockResolvedValueOnce({ successKey: "imprest.success.rejected" });
+
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <FundingActions funding={REQUESTED} role="director" />
+      </NextIntlClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: en.imprest.actions.reject }));
+    await user.type(screen.getByLabelText(en.imprest.fields.rejectionReason), "Not this week");
+    await user.click(screen.getByRole("button", { name: en.imprest.actions.confirmReject }));
+    expect(await screen.findByText(en.imprestErrors.unconfirmed)).toBeVisible();
+
+    // Approving now would send the rejection's key, and Try again beside it would replay the
+    // rejection. Until Try again finds out, the other action stays closed.
+    expect(screen.getByRole("button", { name: en.imprest.actions.approve })).toBeDisabled();
+
+    await user.click(await screen.findByRole("button", { name: en.common.retry }));
+    expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.success.rejected);
   });
 });
