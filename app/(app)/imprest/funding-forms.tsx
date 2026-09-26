@@ -216,7 +216,8 @@ export function FundingActions({ funding, role }: { funding: FundingSummary; rol
   const t = useTranslations();
   const locale = useLocale();
   const [open, setOpen] = useState<string | null>(null);
-  // Opening a different form starts a different operation, so it gets its own key.
+  // Opening a different form starts a different operation, so it gets its own key, unless an
+  // unconfirmed request is still waiting on Try again.
   const [key, controller, renewKey] = useFreshKey(() => setOpen(null));
   const hidden = { fundingId: funding.id, expectedVersion: String(funding.version) };
   const answer = { ...hidden, handoverId: funding.handoverId ?? "" };
@@ -230,8 +231,12 @@ export function FundingActions({ funding, role }: { funding: FundingSummary; rol
       disabled={controller.pending}
       aria-expanded={open === name}
       onClick={() => {
-        controller.clear();
-        renewKey();
+        // An unconfirmed request may already have committed. Keep it, and its key, until Try again
+        // finds out; a fresh key would turn a committed change into a stale-version refusal.
+        if (!(controller.retry && controller.result.error === UNCONFIRMED_KEY)) {
+          controller.clear();
+          renewKey();
+        }
         setOpen(open === name ? null : name);
       }}
     >
