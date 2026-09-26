@@ -9,7 +9,8 @@ What each release of Free Ventures OMS adds, in plain language.
 - When a Director or the Manager acted on imprest funding and no answer came back, closing and
   reopening the form lost the warning and its Try again button. Trying again by hand then drew a
   new request, which could be refused as out of date even though the first one had gone through.
-  The warning and Try again now stay until Try again finds out what happened.
+  The warning and Try again now stay until Try again finds out what happened, and the other
+  actions on that funding wait until then.
 
 ## [0.3.1] — 2026-09-26
 

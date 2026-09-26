@@ -155,4 +155,27 @@ describe("a funding rejection whose answer was lost", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.success.rejected);
     expect(keyOf(rejectFundingAction, 1)).toBe(keyOf(rejectFundingAction, 0));
   });
+
+  it("does not carry the unresolved rejection into another action", async () => {
+    const user = userEvent.setup();
+    rejectFundingAction.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    rejectFundingAction.mockResolvedValueOnce({ successKey: "imprest.success.rejected" });
+
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <FundingActions funding={REQUESTED} role="director" />
+      </NextIntlClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: en.imprest.actions.reject }));
+    await user.type(screen.getByLabelText(en.imprest.fields.rejectionReason), "Not this week");
+    await user.click(screen.getByRole("button", { name: en.imprest.actions.confirmReject }));
+    expect(await screen.findByText(en.imprestErrors.unconfirmed)).toBeVisible();
+
+    // Approving now would send the rejection's key, and Try again beside it would replay the
+    // rejection. Until Try again finds out, the other action stays closed.
+    expect(screen.getByRole("button", { name: en.imprest.actions.approve })).toBeDisabled();
+
+    await user.click(await screen.findByRole("button", { name: en.common.retry }));
+    expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.success.rejected);
+  });
 });

@@ -216,11 +216,15 @@ export function FundingActions({ funding, role }: { funding: FundingSummary; rol
   const t = useTranslations();
   const locale = useLocale();
   const [open, setOpen] = useState<string | null>(null);
-  // Opening a different form starts a different operation, so it gets its own key, unless an
-  // unconfirmed request is still waiting on Try again.
+  // Opening a different form starts a different operation, so it gets its own key.
   const [key, controller, renewKey] = useFreshKey(() => setOpen(null));
   const hidden = { fundingId: funding.id, expectedVersion: String(funding.version) };
   const answer = { ...hidden, handoverId: funding.handoverId ?? "" };
+  // An unconfirmed request may already have committed. Until Try again finds out, it keeps its key:
+  // a fresh key would turn a committed change into a stale-version refusal. Every other action on
+  // this funding waits too, because it would otherwise go out under that same key.
+  const unresolved = controller.result.error === UNCONFIRMED_KEY ? controller.retryName : null;
+  const blocked = (name: string) => controller.pending || (unresolved !== null && unresolved !== name);
 
   const toggle = (name: string, labelKey: string, variant?: "secondary" | "danger") => (
     <Button
@@ -228,12 +232,10 @@ export function FundingActions({ funding, role }: { funding: FundingSummary; rol
       variant={open === name ? "secondary" : (variant ?? "secondary")}
       size="small"
       className={TOUCH_FLOOR}
-      disabled={controller.pending}
+      disabled={blocked(name)}
       aria-expanded={open === name}
       onClick={() => {
-        // An unconfirmed request may already have committed. Keep it, and its key, until Try again
-        // finds out; a fresh key would turn a committed change into a stale-version refusal.
-        if (!(controller.retry && controller.result.error === UNCONFIRMED_KEY)) {
+        if (unresolved === null) {
           controller.clear();
           renewKey();
         }
@@ -397,7 +399,7 @@ export function FundingActions({ funding, role }: { funding: FundingSummary; rol
           data-testid="confirm-received"
           pending={controller.running === "confirm"}
           pendingLabel={t("common.loading")}
-          disabled={controller.pending}
+          disabled={blocked("confirm")}
         >
           {t("imprest.actions.confirm", { amount: formatTzs(funding.providedAmount ?? 0, locale) })}
         </Button>

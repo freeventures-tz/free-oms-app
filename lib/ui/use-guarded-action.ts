@@ -51,6 +51,8 @@ export type GuardedActionController<TName extends string, TResult> = {
   run: (name: TName, action: GuardedAction<TResult>, data: FormData) => void;
   /** Re-run the last attempt with the identical request. `null` when there is nothing to retry. */
   retry: (() => void) | null;
+  /** The control whose attempt `retry` would resend, or `null` when there is nothing to retry. */
+  retryName: TName | null;
   /** The control currently working, or `null`. */
   running: TName | null;
   /** True while any attempt is in flight — for disabling siblings. */
@@ -105,6 +107,7 @@ export function useGuardedAction<TName extends string, TResult extends ActionRes
     run,
     retry:
       result.error && attempt ? () => run(attempt.name, attempt.action, attempt.data) : null,
+    retryName: result.error && attempt ? attempt.name : null,
     running,
     pending,
     result,
