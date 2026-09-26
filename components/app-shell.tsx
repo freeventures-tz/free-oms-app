@@ -91,7 +91,8 @@ export function AppShell({
   );
 
   return (
-    <div className="flex min-h-full flex-1 flex-col xl:flex-row">
+    // A row from `md` up, where the rail appears; only the phone stacks its top bar over the page.
+    <div className="flex min-h-full flex-1 flex-col md:flex-row">
       {/* Mobile: top bar with the hamburger. */}
       <header className="flex items-center justify-between gap-3 bg-sidebar px-4 py-3 md:hidden">
         <button

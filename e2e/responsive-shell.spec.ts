@@ -29,6 +29,30 @@ test("the navigation matches the device tier", async ({ page }, testInfo) => {
   }
 });
 
+test("the rail or sidebar sits beside the page, not above it", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "the phone has a drawer, not a rail");
+
+  const { director } = fixtures();
+  await signIn(page, director.phone, director.password);
+  await expectLandsOn(page, "/dashboard");
+
+  // Checked on the two screens where the tablet rail was seen stacked above the page.
+  for (const path of ["/orders", "/imprest"]) {
+    await page.goto(path);
+    const rail = await page.locator("aside").boundingBox();
+    const main = await page.locator("main").boundingBox();
+    expect(rail, `${path}: rail`).not.toBeNull();
+    expect(main, `${path}: main`).not.toBeNull();
+
+    // Side by side: the page starts where the rail ends, and both start at the top of the screen.
+    expect(main!.x, `${path}: main starts after the rail`).toBeGreaterThanOrEqual(
+      rail!.x + rail!.width - 1,
+    );
+    expect(rail!.y, `${path}: rail starts at the top`).toBeLessThanOrEqual(1);
+    expect(main!.y, `${path}: main is not pushed below the rail`).toBeLessThan(rail!.height);
+  }
+});
+
 test("every destination the role has is reachable on every device", async ({ page }, testInfo) => {
   const { director } = fixtures();
   await signIn(page, director.phone, director.password);
