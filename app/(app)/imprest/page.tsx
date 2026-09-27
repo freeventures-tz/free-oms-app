@@ -97,14 +97,14 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         otherParams={others("out")}
       />
 
-      {/* No verify action yet: part 2b brings it. Directors read the same list. */}
+      {/* The Manager opens one to verify it (issue #64); Directors read the same list. */}
       <DisbursementList
         id="disbursements-settled"
         title={t(viewer.role === "manager" ? "spending.lists.settled" : "spending.lists.settledDirector", {
           count: settled.total,
         })}
         empty={t("spending.lists.settledEmpty")}
-        note={t("spending.lists.verifyLater")}
+        note={t(viewer.role === "manager" ? "spending.lists.settledNote" : "spending.lists.settledNoteDirector")}
         page={settled}
         param="settled"
         otherParams={others("settled")}

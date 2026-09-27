@@ -74,7 +74,7 @@ test.describe("imprest funding", () => {
       const nav = await openNavigation(page, testInfo);
       await nav.getByRole("link", { name: "Imprest", exact: true }).click();
       await expect(page).toHaveURL(/\/imprest$/);
-      await expect(page.getByText("Posted imprest funding", { exact: true })).toBeVisible();
+      await expect(page.getByText("Posted balance", { exact: true })).toBeVisible();
     }
   });
 
@@ -214,7 +214,7 @@ test.describe("imprest funding", () => {
       psql("revoke execute on function api.staff_imprest_spending_position() from authenticated;");
       await page.goto("/imprest");
       await expect(page.getByText(/this page could not be loaded/i)).toBeVisible();
-      await expect(page.getByText("Posted imprest funding")).toHaveCount(0);
+      await expect(page.getByText("Posted balance")).toHaveCount(0);
     } finally {
       psql("grant execute on function api.staff_imprest_spending_position() to authenticated;");
     }

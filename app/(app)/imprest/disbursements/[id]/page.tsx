@@ -104,6 +104,16 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
           }}
           role={viewer.role}
           isOwn={isOwn}
+          settlement={
+            disbursement.status === "settled" && disbursement.settlement
+              ? {
+                  id: disbursement.settlement.id,
+                  used: disbursement.settlement.used,
+                  returned: disbursement.settlement.returned,
+                  unaccounted: disbursement.settlement.unaccounted,
+                }
+              : null
+          }
         />
         {disbursement.status === "proposed" && viewer.role === "cashier" ? (
           <p className="text-sm text-muted-foreground">{t("detail.waitingManager")}</p>
@@ -113,13 +123,20 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
             {t("detail.handedOutNote")}
           </p>
         ) : null}
-        {disbursement.status === "settled" && viewer.role !== "cashier" ? (
-          <p className="text-sm text-muted-foreground" data-testid="verify-later">
-            {t("lists.verifyLater")}
+        {disbursement.status === "settled" && viewer.role === "director" ? (
+          <p className="text-sm text-muted-foreground" data-testid="verify-by-manager">
+            {t("lists.settledNoteDirector")}
           </p>
         ) : null}
         {disbursement.status === "settled" && cashierDue ? (
-          <p className="text-sm text-muted-foreground">{t("detail.waitingVerification")}</p>
+          <p className="text-sm text-muted-foreground" data-testid="waiting-verification">
+            {t("detail.waitingVerification")}
+          </p>
+        ) : null}
+        {disbursement.status === "verified" ? (
+          <p className="text-sm text-muted-foreground" data-testid="verified-note">
+            {t("detail.verifiedNote")}
+          </p>
         ) : null}
         {viewer.role === "director" ? (
           <p className="text-sm text-muted-foreground" data-testid="read-only">
@@ -156,6 +173,40 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
   );
 }
 
+/**
+ * What the Manager's verification posted (issue #64): the imprest expense and, when there was a
+ * remainder, the unexplained loss that waits for a Director. Both are final; there is no control.
+ */
+async function Postings({ disbursement }: { disbursement: DisbursementDetail }) {
+  const t = await getTranslations("imprest.spending");
+  const roles = await getTranslations("admin.roles");
+  const locale = await getLocale();
+  const verification = disbursement.verification!;
+  const verifiedBy = disbursement.events.find((event) => event.kind === "verified")?.by || roles("manager");
+
+  return (
+    <section className="flex flex-col gap-3 border-t border-border pt-3" data-testid="postings">
+      <h3 className="font-semibold">{t("posted.title")}</h3>
+      <dl className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1" data-testid="posting-expense">
+          <dt className="text-xs text-muted-foreground">{t("posted.expense")}</dt>
+          <dd className="fv-numeric font-semibold">{formatTzs(verification.expense, locale)}</dd>
+        </div>
+        {verification.loss !== null ? (
+          <div className="flex flex-col gap-1" data-testid="posting-loss">
+            <dt className="text-xs text-muted-foreground">{t("posted.loss")}</dt>
+            <dd className="fv-numeric font-semibold text-danger">{formatTzs(verification.loss, locale)}</dd>
+            <dd className="text-xs text-muted-foreground">{t("posted.lossNote")}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <p className="text-sm text-muted-foreground" data-testid="verified-by">
+        {t("posted.verifiedBy", { name: verifiedBy, at: formatBusinessStamp(verification.verifiedAt, locale) })}
+      </p>
+    </section>
+  );
+}
+
 /** Approved = Used + Returned + Not accounted for, and every line behind Used. */
 async function Breakdown({ disbursement }: { disbursement: DisbursementDetail }) {
   const t = await getTranslations("imprest.spending");
@@ -186,6 +237,8 @@ async function Breakdown({ disbursement }: { disbursement: DisbursementDetail })
           <span className="font-medium">{t("breakdown.explanation")}</span> {settlement.explanation}
         </p>
       ) : null}
+
+      {disbursement.verification ? <Postings disbursement={disbursement} /> : null}
 
       {disbursement.lines.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="no-lines">

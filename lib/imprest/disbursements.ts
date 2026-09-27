@@ -21,6 +21,7 @@ export type DisbursementStatus =
   | "approved"
   | "handed_out"
   | "settled"
+  | "verified"
   | "rejected"
   | "withdrawn"
   | "cancelled";
@@ -36,6 +37,18 @@ export type SettlementSummary = {
   lineCount: number;
   noReceiptLines: number;
   settledAt: string;
+};
+
+/**
+ * What the Manager's verification posted (issue #64). The expense is Used; the loss is Not
+ * accounted for, which needs a Director's decision. Both are final.
+ */
+export type VerificationSummary = {
+  verifiedAt: string;
+  verifiedById: string;
+  settlementId: string;
+  expense: number;
+  loss: number | null;
 };
 
 export type Disbursement = {
@@ -54,6 +67,7 @@ export type Disbursement = {
   recipient: string | null;
   handedOutAt: string | null;
   settlement: SettlementSummary | null;
+  verification: VerificationSummary | null;
   /**
    * Permanent flags (issue #62 criterion 7). They are true when ANY settlement of this disbursement
    * ever had such a line or remainder, so a later cycle cannot clear them.
@@ -62,7 +76,15 @@ export type Disbursement = {
 };
 
 export type DisbursementEvent = {
-  kind: "proposed" | "approved" | "handed_out" | "settled" | "rejected" | "withdrawn" | "cancelled";
+  kind:
+    | "proposed"
+    | "approved"
+    | "handed_out"
+    | "settled"
+    | "verified"
+    | "rejected"
+    | "withdrawn"
+    | "cancelled";
   at: string;
   /** The person's name, or "" when the viewer may not read it (a Cashier reads only their own). */
   by: string;
@@ -88,9 +110,11 @@ export type DisbursementDetail = Disbursement & {
 /**
  * The figures of the active fund, or `null` when no fund has been opened yet. For a Cashier,
  * everything but Free to approve is `null`: the database does not send it.
+ *
+ * `postedBalance` is confirmed funding minus verified expenses and unexplained losses (issue #64).
  */
 export type SpendingPosition = {
-  posted: number | null;
+  postedBalance: number | null;
   setAside: number | null;
   freeToApprove: number;
   awaitingVerification: number | null;
@@ -104,7 +128,7 @@ export async function loadSpendingPosition(): Promise<SpendingPosition | null> {
     (await api.rpc("staff_imprest_spending_position")) as {
       data:
         | {
-            posted_funding_tzs: number | null;
+            posted_balance_tzs: number | null;
             set_aside_tzs: number | null;
             free_to_approve_tzs: number;
             awaiting_verification_tzs: number | null;
@@ -117,7 +141,7 @@ export async function loadSpendingPosition(): Promise<SpendingPosition | null> {
   const row = rows[0];
   if (!row) return null;
   return {
-    posted: num(row.posted_funding_tzs),
+    postedBalance: num(row.posted_balance_tzs),
     setAside: num(row.set_aside_tzs),
     freeToApprove: Number(row.free_to_approve_tzs),
     awaitingVerification: num(row.awaiting_verification_tzs),
@@ -130,7 +154,9 @@ const COLUMNS = `
   withdrawal_reason, cancelled_by, cancelled_at, cancellation_reason,
   imprest_disbursement_handouts(recipient, handed_out_at),
   imprest_settlements(id, cycle, used_tzs, returned_tzs, unaccounted_tzs, unaccounted_explanation,
-                      line_count, no_receipt_lines, settled_at)
+                      line_count, no_receipt_lines, settled_at),
+  imprest_verifications(settlement_id, verified_by, verified_at),
+  imprest_postings(kind, amount_tzs)
 `;
 
 type SettlementRow = {
@@ -168,6 +194,9 @@ type Row = {
   // One-to-one (the hand-out's disbursement id is unique), so PostgREST embeds an object or null.
   imprest_disbursement_handouts: { recipient: string; handed_out_at: string } | null;
   imprest_settlements: SettlementRow[] | null;
+  // One-to-one (a disbursement is verified once), so PostgREST embeds an object or null.
+  imprest_verifications: { settlement_id: string; verified_by: string; verified_at: string } | null;
+  imprest_postings: { kind: "expense" | "unexplained_loss"; amount_tzs: number }[] | null;
 };
 
 type Counted = PromiseLike<{
@@ -190,6 +219,11 @@ async function namesFor(ids: (string | null)[]): Promise<Map<string, string>> {
 function fromRow(row: Row, names: Map<string, string>): Disbursement {
   const settlements = [...(row.imprest_settlements ?? [])].sort((a, b) => b.cycle - a.cycle);
   const latest = settlements[0];
+  const verified = row.imprest_verifications;
+  const posted = (kind: "expense" | "unexplained_loss") => {
+    const found = (row.imprest_postings ?? []).find((p) => p.kind === kind);
+    return found ? Number(found.amount_tzs) : null;
+  };
   return {
     id: row.id,
     disbursementNo: row.disbursement_no,
@@ -215,6 +249,16 @@ function fromRow(row: Row, names: Map<string, string>): Disbursement {
           lineCount: latest.line_count,
           noReceiptLines: latest.no_receipt_lines,
           settledAt: latest.settled_at,
+        }
+      : null,
+    verification: verified
+      ? {
+          verifiedAt: verified.verified_at,
+          verifiedById: verified.verified_by,
+          settlementId: verified.settlement_id,
+          // NaN when the expense posting did not come back, which `loadDisbursement` refuses.
+          expense: posted("expense") ?? Number.NaN,
+          loss: posted("unexplained_loss"),
         }
       : null,
     flags: {
@@ -362,7 +406,13 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
   const row = rows[0];
   if (!row) return null;
 
-  const names = await namesFor([row.proposed_by, row.approved_by, row.rejected_by, row.cancelled_by]);
+  const names = await namesFor([
+    row.proposed_by,
+    row.approved_by,
+    row.rejected_by,
+    row.cancelled_by,
+    row.imprest_verifications?.verified_by ?? null,
+  ]);
   const who = (person: string | null) => (person ? (names.get(person) ?? "") : "");
   const disbursement = fromRow(row, names);
 
@@ -373,6 +423,20 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
   }
   if ((row.status === "handed_out" || row.status === "settled") && !disbursement.handedOutAt) {
     throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement_handout`);
+  }
+  // A verified row always carries its settlement, hand-out, verification and expense, and a loss
+  // exactly when the settlement left a remainder. Anything less is a failed read, and showing the
+  // rest would present part of the record as the whole of it.
+  const v = disbursement.verification;
+  if (
+    row.status === "verified" &&
+    (!disbursement.settlement ||
+      !disbursement.handedOutAt ||
+      !v ||
+      Number.isNaN(v.expense) ||
+      disbursement.settlement.unaccounted > 0 !== (v.loss !== null))
+  ) {
+    throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement_verification`);
   }
 
   const events: DisbursementEvent[] = [
@@ -399,6 +463,9 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
       role: "cashier",
       text: null,
     });
+  }
+  if (v) {
+    events.push({ kind: "verified", at: v.verifiedAt, by: who(v.verifiedById), role: "manager", text: null });
   }
   if (row.rejected_at) {
     events.push({

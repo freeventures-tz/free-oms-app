@@ -429,14 +429,14 @@ test.describe("imprest hand-out and settlement", () => {
     );
     const waiting = page.getByTestId("disbursements-settled");
     await expect(waiting.getByRole("heading")).toHaveText(/^Settled, waiting for you \(\d+\)$/);
-    await expect(page.getByTestId("disbursements-settled-note")).toContainText("isn't built yet");
+    await expect(page.getByTestId("disbursements-settled-note")).toContainText("then verify it");
     const row = waiting.getByRole("link", { name: new RegExp(settledPurpose) });
     await expect(row.getByTestId("settled-figures")).toContainText("Used TZS 20,000");
     await expect(row.getByTestId("flag-no-receipt")).toBeVisible();
     await expect(row.getByTestId("waiting-for")).toBeVisible();
 
     await row.click();
-    await expect(page.getByTestId("verify-later")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Verify", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /cancel/i })).toHaveCount(0);
     const receipt = page.getByTestId("line-1").getByTestId("line-receipt");
     await receipt.getByTestId("view-receipt").click();

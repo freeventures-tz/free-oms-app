@@ -152,6 +152,17 @@ const recipientField = z
     message: "spendingErrors.recipient_invalid",
   });
 
+/**
+ * Verification (issue #64). There is no amount: the Manager verifies the settlement they were
+ * shown, exactly as the Cashier submitted it, and the database refuses any other settlement.
+ */
+export const verifyDisbursementSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  settlementId: z.string().uuid({ message: "spendingErrors.settlement_not_latest" }),
+  idempotencyKey: spendingKey,
+});
+
 /** There is no amount: the approved amount is always what goes out. */
 export const handOutSchema = z.object({
   disbursementId,
