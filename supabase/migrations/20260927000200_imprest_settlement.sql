@@ -383,6 +383,28 @@ create policy imprest_settlements_definer_owner on public.imprest_settlements
 create policy imprest_settlement_lines_definer_owner on public.imprest_settlement_lines
   for all to fv_definer_owner using (true) with check (true);
 
+-- When a disbursement was last settled, as a column PostgREST can sort the Manager's "Settled,
+-- waiting for you" queue by. Invoker's rights, so it reads settlements under the caller's own
+-- policy and answers nothing a caller could not read directly.
+create or replace function public.imprest_disbursement_settled_at(d public.imprest_disbursements)
+returns timestamptz
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select max(s.settled_at) from public.imprest_settlements s where s.disbursement_id = d.id;
+$$;
+
+comment on function public.imprest_disbursement_settled_at(public.imprest_disbursements) is
+  'When the disbursement was last settled, for ordering the waiting queue (issue #62).';
+
+-- Invoker's rights, so its owner grants nothing; it stays with the migration's own role.
+revoke execute on function public.imprest_disbursement_settled_at(public.imprest_disbursements)
+  from public, anon, service_role;
+grant execute on function public.imprest_disbursement_settled_at(public.imprest_disbursements)
+  to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- The bucket
 --

@@ -511,6 +511,66 @@ describe("reads and direct writes", () => {
     expect(everything.data).toHaveLength(2);
   });
 
+  it("orders the Manager's two queues by when each step began, not by approval", async () => {
+    // Approved first, handed out second: the queue must put the other one first.
+    const first = await handedOut(cashier, 1000);
+    const second = await handedOut(cashier, 1000);
+    const approvedLater = await rpc(cashier, "staff_propose_imprest_disbursement", {
+      p_amount_tzs: 1000,
+      p_category: "other",
+      p_purpose: "Approved later",
+      p_idempotency_key: randomUUID(),
+    });
+    await rpc(manager, "staff_decide_imprest_disbursement", {
+      p_id: approvedLater.disbursement!.id,
+      p_expected_version: 1,
+      p_approve: true,
+      p_reason: null,
+      p_idempotency_key: randomUUID(),
+    });
+    const approvedFirst = await rpc(cashier, "staff_propose_imprest_disbursement", {
+      p_amount_tzs: 1000,
+      p_category: "other",
+      p_purpose: "Approved earlier, handed out last",
+      p_idempotency_key: randomUUID(),
+    });
+    // Its approval is backdated by nothing; it is simply handed out after the other.
+    await rpc(manager, "staff_decide_imprest_disbursement", {
+      p_id: approvedFirst.disbursement!.id,
+      p_expected_version: 1,
+      p_approve: true,
+      p_reason: null,
+      p_idempotency_key: randomUUID(),
+    });
+    for (const d of [approvedFirst.disbursement!, approvedLater.disbursement!].reverse()) {
+      await rpc(cashier, "staff_hand_out_imprest_disbursement", {
+        p_id: d.id,
+        p_expected_version: 2,
+        p_recipient: "Queue driver",
+        p_idempotency_key: randomUUID(),
+      });
+    }
+    // PostgREST sorts by an embedded row only when it is selected, as the loader selects it.
+    const out = await manager.read
+      .from("imprest_disbursements")
+      .select("id, imprest_disbursement_handouts(handed_out_at)")
+      .in("id", [approvedFirst.disbursement!.id, approvedLater.disbursement!.id])
+      .order("imprest_disbursement_handouts(handed_out_at)", { ascending: true });
+    expect(out.error).toBeNull();
+    expect(out.data!.map((row) => row.id)).toEqual([approvedLater.disbursement!.id, approvedFirst.disbursement!.id]);
+
+    // Settled in the opposite order to their hand-outs.
+    await settle(cashier, second, [], 1000);
+    await settle(cashier, first, [], 1000);
+    const waiting = await manager.read
+      .from("imprest_disbursements")
+      .select("id")
+      .in("id", [first.id, second.id])
+      .order("imprest_disbursement_settled_at", { ascending: true });
+    expect(waiting.error).toBeNull();
+    expect(waiting.data!.map((row) => row.id)).toEqual([second.id, first.id]);
+  });
+
   it("never sends a receipt's key to a table read", async () => {
     const { error } = await manager.read.from("imprest_receipts").select("encryption_key").limit(1);
     expect(error).not.toBeNull();

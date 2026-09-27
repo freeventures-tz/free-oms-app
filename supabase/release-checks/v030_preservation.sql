@@ -636,7 +636,8 @@ select
             ('private', 'guard_imprest_evidence_object'),
             ('private', 'imprest_awaiting_verification_tzs'),
             ('private', 'imprest_own_disbursement_open'),
-            ('private', 'imprest_receipt_json'))) as released_functions,
+            ('private', 'imprest_receipt_json'),
+            ('public',  'imprest_disbursement_settled_at'))) as released_functions,
 
   -- Every released enum and its labels in order. `alter type ... add value` on the wrong type is the
   -- one-line mistake that no row count and no function body would show.

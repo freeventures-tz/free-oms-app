@@ -233,13 +233,20 @@ function SettleForm({
         line.key === lineKey ? { ...line, ...(typeof change === "function" ? change(line) : change) } : line,
       ),
     );
-  const updateUpload = (lineKey: string, change: Partial<Upload>) =>
-    update(lineKey, (line) => ({ upload: line.upload ? { ...line.upload, ...change } : null }));
+  /**
+   * Updates the line's upload only while it is still the upload `registerKey` started. A Cashier
+   * may pick a new file while an earlier one is in flight; without this check the earlier upload
+   * would write its ticket and "done" onto the new file, and the line would cite the wrong receipt.
+   */
+  const updateUpload = (lineKey: string, registerKey: string, change: Partial<Upload>) =>
+    update(lineKey, (line) =>
+      line.upload?.registerKey === registerKey ? { upload: { ...line.upload, ...change } } : {},
+    );
 
   async function upload(lineKey: string, pending: Upload) {
     let ticket = pending.ticket;
     if (!ticket) {
-      updateUpload(lineKey, { status: "registering", error: null, progress: 0 });
+      updateUpload(lineKey, pending.registerKey, { status: "registering", error: null, progress: 0 });
       let registered;
       try {
         registered = await registerReceiptAction({
@@ -253,31 +260,32 @@ function SettleForm({
         registered = { error: "spendingErrors.upload_failed" };
       }
       if (!registered.ticket) {
-        updateUpload(lineKey, { status: "failed", error: registered.error ?? "spendingErrors.upload_failed" });
+        updateUpload(lineKey, pending.registerKey, { status: "failed", error: registered.error ?? "spendingErrors.upload_failed" });
         return;
       }
       ticket = registered.ticket;
-      updateUpload(lineKey, { ticket });
+      updateUpload(lineKey, pending.registerKey, { ticket });
     }
 
-    updateUpload(lineKey, { status: "uploading", error: null, progress: 0 });
+    updateUpload(lineKey, pending.registerKey, { status: "uploading", error: null, progress: 0 });
     try {
       const { data } = await createClient().auth.getSession();
       const token = data.session?.access_token;
       if (!token) throw new Error("no session");
       const sealed = await encryptReceipt(await pending.file.arrayBuffer(), ticket.key);
       const sent = await sendToBucket(ticket.objectPath, sealed, token, (progress) =>
-        updateUpload(lineKey, { progress }),
+        updateUpload(lineKey, pending.registerKey, { progress }),
       );
       // A duplicate means an earlier attempt landed and only its answer was lost. Only this
       // Cashier can put a file at this path, so the file there is theirs.
       const landed = sent.status === 200 || /duplicate|already exists/i.test(sent.text);
       updateUpload(
         lineKey,
+        pending.registerKey,
         landed ? { status: "done", progress: 100 } : { status: "failed", error: "spendingErrors.upload_failed" },
       );
     } catch {
-      updateUpload(lineKey, { status: "failed", error: "spendingErrors.upload_failed" });
+      updateUpload(lineKey, pending.registerKey, { status: "failed", error: "spendingErrors.upload_failed" });
     }
   }
 

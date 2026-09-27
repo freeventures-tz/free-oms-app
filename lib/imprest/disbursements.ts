@@ -234,10 +234,21 @@ async function page(
   return { ...result, rows: result.rows.map((row) => fromRow(row, names)) };
 }
 
+/**
+ * What each queue is ordered by, oldest first: the moment its current step began. Handed-out rows
+ * sort by their one-to-one hand-out; settled rows by `imprest_disbursement_settled_at`, a computed
+ * column, because a disbursement may in time carry several settlement cycles.
+ */
+type QueueOrder =
+  | "proposed_at"
+  | "approved_at"
+  | "imprest_disbursement_handouts(handed_out_at)"
+  | "imprest_disbursement_settled_at";
+
 async function byStatus(
   label: string,
   status: DisbursementStatus,
-  order: "proposed_at" | "approved_at",
+  order: QueueOrder,
   pageNo: number,
 ): Promise<Page<Disbursement>> {
   const supabase = await createServerSupabase();
@@ -262,11 +273,11 @@ export const loadOpenApprovals = (pageNo = 1) =>
 
 /** Cash handed out and not yet settled, longest out first (issue #62 criterion 14). */
 export const loadHandedOut = (pageNo = 1) =>
-  byStatus("imprest.handed_out", "handed_out", "approved_at", pageNo);
+  byStatus("imprest.handed_out", "handed_out", "imprest_disbursement_handouts(handed_out_at)", pageNo);
 
 /** Settled and waiting for the Manager to verify, longest waiting first. */
 export const loadSettledWaiting = (pageNo = 1) =>
-  byStatus("imprest.settled_waiting", "settled", "approved_at", pageNo);
+  byStatus("imprest.settled_waiting", "settled", "imprest_disbursement_settled_at", pageNo);
 
 /**
  * The viewer's own disbursements, newest first, in every status. Filtered on the proposer as well

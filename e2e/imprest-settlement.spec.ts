@@ -355,6 +355,47 @@ test.describe("imprest hand-out and settlement", () => {
     await expect(page.getByRole("status")).toHaveText(/^Settled\./);
   });
 
+  test("a file chosen while another is still uploading replaces it, and is the one settled", async ({
+    page,
+  }, testInfo) => {
+    const purpose = `Retake ${SUFFIX} ${testInfo.project.name}`;
+    const row = await seedHandedOut(15000, purpose);
+
+    await as(page, "cashier");
+    await page.goto(`/imprest/disbursements/${row.id}`);
+    const form = page.getByTestId("settle-form");
+
+    // The first upload is held back until after the replacement has finished.
+    let held: (() => void) | null = null;
+    let first = true;
+    await page.route("**/storage/v1/object/imprest-evidence/**", async (route) => {
+      if (first) {
+        first = false;
+        await new Promise<void>((release) => (held = release));
+      }
+      await route.continue();
+    });
+
+    const line = await addLine(form, 1, "15,000", "Diesel", {
+      file: { name: "blurred.png", mimeType: "image/png", buffer: PNG },
+    });
+    await expect(line.getByTestId("upload-status")).toHaveAttribute("data-status", "uploading");
+    await line.getByTestId("choose-file").setInputFiles({ name: "sharp.png", mimeType: "image/png", buffer: PNG });
+    await expect(line.getByTestId("upload-status")).toHaveAttribute("data-status", "done");
+    await expect(line.getByTestId("receipt-name")).toHaveText("sharp.png");
+
+    // The late answer for the first file changes nothing on the line.
+    held!();
+    await page.waitForTimeout(500);
+    await expect(line.getByTestId("receipt-name")).toHaveText("sharp.png");
+
+    await form.getByLabel("Cash returned (TZS)").fill("0");
+    await form.getByTestId("settle-submit").click();
+    await expect(page.getByRole("status")).toHaveText(/^Settled\./);
+    await page.reload();
+    await expect(page.getByTestId("line-1").getByTestId("line-receipt")).toContainText("sharp.png");
+  });
+
   test("the Manager sees both lists, the flags, the fourth figure, and opens a receipt", async ({
     page,
   }, testInfo) => {
