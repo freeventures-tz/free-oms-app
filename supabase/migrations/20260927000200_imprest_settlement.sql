@@ -780,7 +780,7 @@ declare
   v_note        text;
   v_rc          public.imprest_receipts%rowtype;
   v_owner       text;
-  v_seen        uuid[] := '{}';
+  v_seen        uuid[] := '{}'::uuid[];
   v_used        bigint := 0;
   v_none        integer := 0;
   v_remainder   bigint;
