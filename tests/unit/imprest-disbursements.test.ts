@@ -163,12 +163,17 @@ describe("refusal messages", () => {
   it("show the exact help texts the ticket gives for the new figures", () => {
     expect(en.imprest.total.label).toBe("Posted imprest funding");
     expect(en.imprest.spending.figures.setAside).toBe("Set aside for approved payments");
+    // Issue #62: handed-out and settled cash stays set aside, so "not yet paid" no longer holds.
     expect(en.imprest.spending.figures.setAsideHelp).toBe(
-      "Approved but not yet paid. This money can't be approved again.",
+      "Approved, handed out or settled, and not yet verified. This money can't be approved again.",
     );
     expect(en.imprest.spending.figures.free).toBe("Free to approve");
     expect(en.imprest.spending.figures.freeHelp).toBe(
       "Posted imprest funding minus what is set aside. An approval above this is refused.",
+    );
+    expect(en.imprest.spending.figures.awaiting).toBe("Awaiting verification");
+    expect(en.imprest.spending.figures.awaitingHelp).toBe(
+      "Cash that has left the fund and hasn't been checked by the Manager yet.",
     );
   });
 });

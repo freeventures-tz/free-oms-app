@@ -1,6 +1,17 @@
 import { z } from "zod";
 
-import { IMPREST_CATEGORIES, PURPOSE_MAX } from "@/lib/imprest/spending";
+import {
+  IMPREST_CATEGORIES,
+  LINE_PURPOSE_MAX,
+  MAX_LINES,
+  NO_RECEIPT_REASONS,
+  PURPOSE_MAX,
+  REASONS_NEEDING_NOTE,
+  RECEIPT_MAX_BYTES,
+  RECEIPT_TYPES,
+  RECIPIENT_MAX,
+  settlementFigures,
+} from "@/lib/imprest/spending";
 import { MAX_PRICE_TZS, parseTzs } from "@/lib/money";
 
 /**
@@ -131,3 +142,112 @@ export const disbursementReasonSchema = z.object({
   reason: textField(true, "spendingErrors.reason_required"),
   idempotencyKey: spendingKey,
 });
+
+// Hand-out and settlement (issue #62).
+
+const recipientField = z
+  .string()
+  .transform((value) => value.replace(/\s+/g, " ").trim())
+  .refine((value) => value.length >= 2 && value.length <= RECIPIENT_MAX, {
+    message: "spendingErrors.recipient_invalid",
+  });
+
+/** There is no amount: the approved amount is always what goes out. */
+export const handOutSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  recipient: recipientField,
+  idempotencyKey: spendingKey,
+});
+
+export const registerReceiptSchema = z.object({
+  disbursementId,
+  fileName: z
+    .string()
+    .transform((value) => value.replace(/\s+/g, " ").trim().slice(0, 200))
+    .refine((value) => value.length >= 1, { message: "spendingErrors.receipt_name_invalid" }),
+  contentType: z.enum(RECEIPT_TYPES, { message: "spendingErrors.receipt_type_invalid" }),
+  byteSize: z.coerce
+    .number()
+    .int()
+    .min(1, { message: "spendingErrors.receipt_too_large" })
+    .max(RECEIPT_MAX_BYTES, { message: "spendingErrors.receipt_too_large" }),
+  idempotencyKey: spendingKey,
+});
+
+const lineSchema = z
+  .object({
+    amount: tzsField(false, "spendingErrors"),
+    purpose: z
+      .string()
+      .transform((value) => value.replace(/\s+/g, " ").trim())
+      .refine((value) => value.length >= 2 && value.length <= LINE_PURPOSE_MAX, {
+        message: "spendingErrors.line_purpose_invalid",
+      }),
+    receiptId: z.string().uuid().nullable(),
+    reason: z.enum(NO_RECEIPT_REASONS, { message: "spendingErrors.no_receipt_reason_invalid" }).nullable(),
+    note: textField(false, "spendingErrors.no_receipt_note_required"),
+  })
+  .superRefine((line, ctx) => {
+    if (line.receiptId === null && line.reason === null) {
+      ctx.addIssue({ code: "custom", path: ["evidence"], message: "spendingErrors.line_evidence_required" });
+    }
+    if (line.receiptId !== null && (line.reason !== null || line.note !== "")) {
+      ctx.addIssue({ code: "custom", path: ["evidence"], message: "spendingErrors.line_evidence_both" });
+    }
+    if (line.reason && REASONS_NEEDING_NOTE.includes(line.reason) && line.note === "") {
+      ctx.addIssue({ code: "custom", path: ["note"], message: "spendingErrors.no_receipt_note_required" });
+    }
+  });
+
+export type SettlementLineInput = z.input<typeof lineSchema>;
+
+/**
+ * One settlement: its lines (sent as JSON), the cash returned, and an explanation when the figures
+ * leave a remainder. `approved` is only for answering beside the field; the database uses its own.
+ */
+export const settleSchema = z
+  .object({
+    disbursementId,
+    expectedVersion: spendingVersion,
+    approved: z.coerce.number().int().positive(),
+    lines: z
+      .string()
+      .transform((value, ctx) => {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          ctx.addIssue({ code: "custom", message: "spendingErrors.lines_invalid" });
+          return z.NEVER;
+        }
+      })
+      .pipe(z.array(lineSchema).max(MAX_LINES, { message: "spendingErrors.too_many_lines" })),
+    returned: tzsField(true, "spendingErrors"),
+    explanation: textField(false, "spendingErrors.explanation_required"),
+    idempotencyKey: spendingKey,
+  })
+  .superRefine((input, ctx) => {
+    const figures = settlementFigures(
+      input.approved,
+      input.lines.map((line) => line.amount),
+      input.returned,
+    );
+    if (figures.over > 0) {
+      ctx.addIssue({ code: "custom", path: ["returned"], message: "spendingErrors.over_approval_field" });
+    } else if (figures.unexplained > 0 && input.explanation === "") {
+      ctx.addIssue({ code: "custom", path: ["explanation"], message: "spendingErrors.explanation_required" });
+    } else if (figures.unexplained === 0 && input.explanation !== "") {
+      ctx.addIssue({ code: "custom", path: ["explanation"], message: "spendingErrors.explanation_not_needed" });
+    }
+    const seen = new Set<string>();
+    input.lines.forEach((line, i) => {
+      if (line.receiptId && seen.has(line.receiptId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lines", i, "evidence"],
+          message: "spendingErrors.receipt_cited_twice",
+        });
+      }
+      if (line.receiptId) seen.add(line.receiptId);
+    });
+  });

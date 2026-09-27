@@ -10,7 +10,9 @@ import { Card, PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
 import {
   loadAwaitingDecision,
+  loadHandedOut,
   loadOpenApprovals,
+  loadSettledWaiting,
   loadOwnDisbursements,
   loadRecentPurposes,
   loadSpendingPosition,
@@ -42,12 +44,24 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   const locale = await getLocale();
   const page = pageNumber(params.page);
 
-  const [position, waiting, open, fundings] = await Promise.all([
+  const [position, waiting, open, out, settled, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadAwaitingDecision(pageNumber(params.waiting)),
     loadOpenApprovals(pageNumber(params.open)),
+    loadHandedOut(pageNumber(params.out)),
+    loadSettledWaiting(pageNumber(params.settled)),
     loadFundings(page),
   ]);
+  // Each list pages on its own parameter and keeps the others where they were.
+  const pages = {
+    waiting: waiting.page,
+    open: open.page,
+    out: out.page,
+    settled: settled.page,
+    page: fundings.page,
+  };
+  const others = (own: keyof typeof pages) =>
+    Object.fromEntries(Object.entries(pages).filter(([name]) => name !== own));
 
   return (
     <>
@@ -61,7 +75,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         empty={t("spending.lists.waitingEmpty")}
         page={waiting}
         param="waiting"
-        otherParams={{ open: open.page, page: fundings.page }}
+        otherParams={others("waiting")}
       />
 
       <DisbursementList
@@ -71,7 +85,29 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         page={open}
         param="open"
         showOpenFor
-        otherParams={{ waiting: waiting.page, page: fundings.page }}
+        otherParams={others("open")}
+      />
+
+      <DisbursementList
+        id="disbursements-handed-out"
+        title={t("spending.lists.handedOut", { count: out.total })}
+        empty={t("spending.lists.handedOutEmpty")}
+        page={out}
+        param="out"
+        otherParams={others("out")}
+      />
+
+      {/* No verify action yet: part 2b brings it. Directors read the same list. */}
+      <DisbursementList
+        id="disbursements-settled"
+        title={t(viewer.role === "manager" ? "spending.lists.settled" : "spending.lists.settledDirector", {
+          count: settled.total,
+        })}
+        empty={t("spending.lists.settledEmpty")}
+        note={t("spending.lists.verifyLater")}
+        page={settled}
+        param="settled"
+        otherParams={others("settled")}
       />
 
       {viewer.role === "manager" ? (
@@ -128,7 +164,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
           param="page"
           basePath="/imprest"
           label={t("list.title")}
-          otherParams={{ waiting: waiting.page, open: open.page }}
+          otherParams={others("page")}
         />
       </section>
     </>
@@ -164,6 +200,7 @@ async function CashierImprest({ viewerId, mine }: { viewerId: string; mine: numb
         param="mine"
         showOpenFor
         showProposer={false}
+        showNextStep
       />
     </>
   );

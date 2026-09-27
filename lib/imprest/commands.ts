@@ -19,6 +19,11 @@ const CONTEXT_KEYS = [
   "status",
   "free_to_approve_tzs",
   "amount_tzs",
+  // A settlement refusal (issue #62) names the line it met and the figures it compared.
+  "line",
+  "used_tzs",
+  "returned_tzs",
+  "unaccounted_tzs",
 ] as const;
 
 /**
@@ -36,12 +41,21 @@ function mapDatabaseError(error: { message: string; code?: string }): string {
 }
 
 async function call(fn: string, args: Record<string, unknown>): Promise<ImprestResult> {
+  const answer = await callFor(fn, args);
+  return answer.ok ? { ok: true, reason: answer.reason } : answer;
+}
+
+/** `call`, keeping the whole successful answer for the commands that return data. */
+async function callFor(
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<{ ok: true; reason: string; data: Record<string, unknown> } | Extract<ImprestResult, { ok: false }>> {
   const api = await userApi();
   const { data, error } = await api.rpc(fn, args);
   if (error) return { ok: false, reason: mapDatabaseError(error) };
 
   const result = (data ?? {}) as Record<string, unknown>;
-  if (result.ok === true) return { ok: true, reason: String(result.reason) };
+  if (result.ok === true) return { ok: true, reason: String(result.reason), data: result };
 
   const context: Record<string, string | number> = {};
   for (const key of CONTEXT_KEYS) {
@@ -162,5 +176,87 @@ export const cancelDisbursement = (input: DisbursementTarget & { reason: string 
     p_id: input.disbursementId,
     p_expected_version: input.expectedVersion,
     p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+// Hand-out and settlement (issue #62). Only the Cashier who proposed a disbursement does either.
+
+/** There is no amount: the approved amount is what goes out, and change comes back as Returned. */
+export const handOutDisbursement = (input: DisbursementTarget & { recipient: string }) =>
+  call("staff_hand_out_imprest_disbursement", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_recipient: input.recipient,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+/** A receipt as the database filed it. `key` is its AES-256 key, base64. */
+export type ReceiptTicket = {
+  id: string;
+  objectPath: string;
+  fileName: string;
+  contentType: string;
+  key: string;
+};
+
+function ticketFrom(data: Record<string, unknown>): ReceiptTicket {
+  const receipt = data.receipt as Record<string, unknown>;
+  return {
+    id: String(receipt.id),
+    objectPath: String(receipt.object_path),
+    fileName: String(receipt.file_name),
+    contentType: String(receipt.content_type),
+    key: String(receipt.key),
+  };
+}
+
+export async function registerReceipt(input: {
+  disbursementId: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  idempotencyKey: string;
+}): Promise<{ ok: true; ticket: ReceiptTicket } | Extract<ImprestResult, { ok: false }>> {
+  const answer = await callFor("staff_register_imprest_receipt", {
+    p_disbursement_id: input.disbursementId,
+    p_file_name: input.fileName,
+    p_content_type: input.contentType,
+    p_byte_size: input.byteSize,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  return answer.ok ? { ok: true, ticket: ticketFrom(answer.data) } : answer;
+}
+
+/** The key to one receipt, for somebody allowed to see it. A read: nothing is claimed. */
+export async function openReceipt(
+  receiptId: string,
+): Promise<{ ok: true; ticket: ReceiptTicket } | Extract<ImprestResult, { ok: false }>> {
+  const answer = await callFor("staff_open_imprest_receipt", { p_receipt_id: receiptId });
+  return answer.ok ? { ok: true, ticket: ticketFrom(answer.data) } : answer;
+}
+
+export type SettlementLine = {
+  amount: number;
+  purpose: string;
+  receiptId: string | null;
+  reason: string | null;
+  note: string;
+};
+
+export const settleDisbursement = (
+  input: DisbursementTarget & { lines: SettlementLine[]; returned: number; explanation: string },
+) =>
+  call("staff_settle_imprest_disbursement", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_lines: input.lines.map((line) => ({
+      amount_tzs: line.amount,
+      purpose: line.purpose,
+      receipt_id: line.receiptId,
+      no_receipt_reason: line.reason,
+      no_receipt_note: line.note || null,
+    })),
+    p_returned_tzs: input.returned,
+    p_explanation: input.explanation || null,
     p_idempotency_key: input.idempotencyKey,
   });

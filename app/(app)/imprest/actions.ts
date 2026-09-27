@@ -12,15 +12,22 @@ import {
   correctHandover,
   decideDisbursement,
   decideFunding,
+  handOutDisbursement,
   increaseApproval,
+  openReceipt,
   proposeDisbursement,
   provideFunding,
+  registerReceipt,
   reportMismatch,
   requestFunding,
+  settleDisbursement,
   withdrawDisbursement,
   type ImprestResult,
+  type ReceiptTicket,
 } from "@/lib/imprest/commands";
+import { RECEIPT_BUCKET, RECEIPT_LINK_SECONDS } from "@/lib/imprest/spending";
 import { formatTzs } from "@/lib/money";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { fieldErrors } from "@/lib/validation/auth";
 import {
   approveDisbursementSchema,
@@ -28,12 +35,15 @@ import {
   confirmReceivedSchema,
   correctHandoverSchema,
   disbursementReasonSchema,
+  handOutSchema,
   increaseApprovalSchema,
   proposeDisbursementSchema,
   provideFundingSchema,
+  registerReceiptSchema,
   rejectFundingSchema,
   reportMismatchSchema,
   requestFundingSchema,
+  settleSchema,
 } from "@/lib/validation/imprest";
 
 /**
@@ -91,6 +101,32 @@ const SPENDING_ERRORS = new Set([
   "no_disbursement",
   "not_approved",
   "decision_required",
+  // Hand-out and settlement (issue #62).
+  "already_handed_out",
+  "recipient_invalid",
+  "not_handed_out",
+  "over_approval",
+  "returned_invalid",
+  "lines_invalid",
+  "too_many_lines",
+  "line_amount_invalid",
+  "line_purpose_invalid",
+  "line_evidence_required",
+  "line_evidence_both",
+  "no_receipt_reason_invalid",
+  "no_receipt_note_required",
+  "receipt_not_found",
+  "receipt_wrong_disbursement",
+  "receipt_not_yours",
+  "receipt_not_uploaded",
+  "receipt_cited_twice",
+  "explanation_required",
+  "explanation_not_needed",
+  "receipt_type_invalid",
+  "receipt_too_large",
+  "receipt_name_invalid",
+  "too_many_receipts",
+  "no_receipt",
 ]);
 
 type Messages = { namespace: "imprestErrors" | "spendingErrors"; known: Set<string> };
@@ -105,9 +141,16 @@ export type ImprestActionState = {
 };
 
 async function fromRefusal(
-  result: Extract<ImprestResult, { ok: false }>,
+  refusal: Extract<ImprestResult, { ok: false }>,
   messages: Messages,
 ): Promise<ImprestActionState> {
+  // Cancel needs an approval that is still only approved. Once the cash is out the database says
+  // `not_approved` with the status it met, and the Manager is told why in those words.
+  const status = refusal.context?.status;
+  const result =
+    refusal.reason === "not_approved" && (status === "handed_out" || status === "settled")
+      ? { ...refusal, reason: "already_handed_out" }
+      : refusal;
   // Shillings in a refusal are shown the way every other amount is: grouped, in the viewer's locale.
   const locale = await getLocale();
   const values = result.context
@@ -298,4 +341,77 @@ export async function cancelDisbursementAction(_p: ImprestActionState, data: For
     "imprest.spending.success.cancelled",
     SPENDING_MESSAGES,
   );
+}
+
+// Hand-out and settlement (issue #62): the Cashier who proposed the disbursement does both.
+
+export async function handOutDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    handOutSchema,
+    { ...disbursementTarget(data), recipient: data.get("recipient") ?? "" },
+    handOutDisbursement,
+    "imprest.spending.success.handedOut",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function settleDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    settleSchema,
+    {
+      ...disbursementTarget(data),
+      approved: data.get("approved"),
+      lines: data.get("lines") ?? "[]",
+      returned: data.get("returned") ?? "",
+      explanation: data.get("explanation") ?? "",
+    },
+    settleDisbursement,
+    "imprest.spending.success.settled",
+    SPENDING_MESSAGES,
+  );
+}
+
+export type ReceiptTicketState = { ticket?: ReceiptTicket; error?: string };
+
+/**
+ * Files one receipt and returns where to upload it and the key to encrypt it with. The key goes
+ * only to the Cashier who is filing it; the database checks that again.
+ */
+export async function registerReceiptAction(input: {
+  disbursementId: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  idempotencyKey: string;
+}): Promise<ReceiptTicketState> {
+  await requireRole(["cashier"]);
+  const parsed = registerReceiptSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: Object.values(fieldErrors(parsed.error))[0] ?? "spendingErrors.generic" };
+  }
+  const result = await registerReceipt(parsed.data);
+  if (!result.ok) return { error: (await fromRefusal(result, SPENDING_MESSAGES)).error };
+  return { ticket: result.ticket };
+}
+
+export type OpenReceiptState = { ticket?: ReceiptTicket; url?: string; error?: string };
+
+/**
+ * A receipt's key and a signed link to its stored bytes, valid for a minute. Both come through the
+ * viewer's own session, so each is refused to anybody who may not see the receipt.
+ */
+export async function openReceiptAction(receiptId: string): Promise<OpenReceiptState> {
+  await requireRole(["director", "manager", "cashier"]);
+  if (!/^[0-9a-f-]{36}$/i.test(receiptId)) return { error: "spendingErrors.no_receipt" };
+  const opened = await openReceipt(receiptId);
+  if (!opened.ok) return { error: (await fromRefusal(opened, SPENDING_MESSAGES)).error };
+
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase.storage
+    .from(RECEIPT_BUCKET)
+    .createSignedUrl(opened.ticket.objectPath, RECEIPT_LINK_SECONDS);
+  if (error || !data) return { error: "spendingErrors.receipt_unavailable" };
+  return { ticket: opened.ticket, url: data.signedUrl };
 }

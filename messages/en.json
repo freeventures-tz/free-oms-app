@@ -1183,14 +1183,16 @@
       "received": "Receipt confirmed: {amount} posted"
     },
     "spending": {
-      "cashierDescription": "Propose payments from the imprest fund and follow each one until the Manager decides.",
+      "cashierDescription": "Propose payments from the imprest fund. Once the Manager approves one, hand the cash out, then settle it with receipts and any change.",
       "figures": {
         "heading": "Imprest figures",
         "setAside": "Set aside for approved payments",
-        "setAsideHelp": "Approved but not yet paid. This money can't be approved again.",
+        "setAsideHelp": "Approved, handed out or settled, and not yet verified. This money can't be approved again.",
         "free": "Free to approve",
         "freeHelp": "Posted imprest funding minus what is set aside. An approval above this is refused.",
-        "noFund": "No imprest fund is open yet. Payments can be proposed once funding is received."
+        "noFund": "No imprest fund is open yet. Payments can be proposed once funding is received.",
+        "awaiting": "Awaiting verification",
+        "awaitingHelp": "Cash that has left the fund and hasn't been checked by the Manager yet."
       },
       "category": {
         "fuel_and_lubricants": "Fuel and lubricants",
@@ -1208,7 +1210,9 @@
         "approved": "Approved, not yet paid",
         "rejected": "Rejected",
         "withdrawn": "Withdrawn",
-        "cancelled": "Cancelled"
+        "cancelled": "Cancelled",
+        "handed_out": "Handed out, not settled",
+        "settled": "Settled, awaiting verification"
       },
       "propose": {
         "title": "Propose a payment",
@@ -1230,7 +1234,21 @@
         "mineEmpty": "You haven't proposed any payments yet.",
         "openMinutes": "Open for {count, plural, =0 {less than a minute} one {# minute} other {# minutes}}",
         "openHours": "Open for {count, plural, one {# hour} other {# hours}}",
-        "openDays": "Open for {count, plural, one {# day} other {# days}}"
+        "openDays": "Open for {count, plural, one {# day} other {# days}}",
+        "handedOut": "Handed out, not settled ({count})",
+        "handedOutEmpty": "No cash is out waiting to be settled.",
+        "settled": "Settled, waiting for you ({count})",
+        "settledDirector": "Settled, waiting for the Manager ({count})",
+        "settledEmpty": "No settled payments are waiting.",
+        "verifyLater": "Checking a settlement isn't built yet. Settled payments wait here, still set aside, until it is.",
+        "handedOutTo": "To {recipient} · out for {age}",
+        "usedReturned": "Used {used} · Returned {returned}",
+        "waitingFor": "Waiting for {age}",
+        "ageMinutes": "{count, plural, =0 {less than a minute} one {# minute} other {# minutes}}",
+        "ageHours": "{count, plural, one {# hour} other {# hours}}",
+        "ageDays": "{count, plural, one {# day} other {# days}}",
+        "nextHandOut": "Next: hand out the cash",
+        "nextSettle": "Next: settle it"
       },
       "fields": {
         "rejectionReason": "Reason for rejecting",
@@ -1252,7 +1270,9 @@
         "approved": "Approved. The amount is set aside and can't be approved again.",
         "rejected": "Proposal rejected.",
         "withdrawn": "Proposal withdrawn.",
-        "cancelled": "Approval cancelled. The money set aside for it is free again."
+        "cancelled": "Approval cancelled. The money set aside for it is free again.",
+        "handedOut": "Hand-out recorded. Settle it when the spending is done.",
+        "settled": "Settled. It now waits for the Manager to verify it, and stays set aside until then."
       },
       "detail": {
         "back": "Back to imprest",
@@ -1260,14 +1280,83 @@
         "category": "Category",
         "proposedBy": "Proposed by",
         "waitingManager": "Waiting for the Manager to approve or reject it. Don't pay yet.",
-        "readOnly": "Directors can read payments here. The Manager approves, rejects and cancels them."
+        "readOnly": "Directors can read payments here. The Manager approves, rejects and cancels them, and the Cashier hands them out and settles them.",
+        "recipient": "Handed out to",
+        "handedOutAt": "on {at}",
+        "handedOutNote": "The cash has been handed out, so this payment can no longer be cancelled. The Cashier settles it with receipts and any change.",
+        "waitingVerification": "Settled. The Manager will verify it once that step is built.",
+        "receiptAlt": "Receipt {name}",
+        "openPdf": "Open {name}",
+        "saveFile": "Save {name}",
+        "viewReceipt": "View receipt"
       },
       "history": {
         "proposed": "Proposed",
         "approved": "Approved and set aside",
         "rejected": "Rejected",
         "withdrawn": "Withdrawn",
-        "cancelled": "Approval cancelled and money freed"
+        "cancelled": "Approval cancelled and money freed",
+        "handed_out": "Cash handed out",
+        "settled": "Settled"
+      },
+      "flags": {
+        "noReceipt": "No receipt",
+        "notAccounted": "Not accounted for"
+      },
+      "handOut": {
+        "title": "Hand out the cash",
+        "help": "Record that you handed out the approved {amount} and who received it. Anything not spent comes back as returned cash when you settle.",
+        "recipient": "Who received it",
+        "recipientHelp": "A short name, for example the driver, a casual worker or a shop.",
+        "submit": "Record hand-out"
+      },
+      "settle": {
+        "title": "Settle this payment",
+        "help": "Add one line for each thing paid for, with a receipt or the reason there isn't one, and the cash that came back. Settle once, when every receipt is in.",
+        "line": "Line {number}",
+        "removeLine": "Remove",
+        "amount": "Amount (TZS)",
+        "purpose": "What it was for",
+        "purposeExample": "Petrol, Dar to Kibaha",
+        "evidence": "Receipt",
+        "hasReceipt": "Receipt",
+        "noReceipt": "No receipt",
+        "takePhoto": "Take photo",
+        "chooseFile": "Choose file",
+        "thumbnailAlt": "Receipt photo {name}",
+        "uploading": "Uploading {name}",
+        "uploaded": "Uploaded",
+        "uploadProgress": "Uploading, {percent}%",
+        "reason": "Why there is no receipt",
+        "chooseReason": "Choose a reason",
+        "note": "Explain what happened",
+        "addLine": "Add a line",
+        "maxLines": "A settlement has at most {max} lines.",
+        "returned": "Cash returned (TZS)",
+        "returnedHelp": "The change that came back. Enter 0 if none did.",
+        "unexplained": "Still unexplained",
+        "over": "Over the approval by",
+        "overHelp": "Used plus returned is more than was approved. Check the amounts: a settlement can't go above the approval.",
+        "explanation": "Why this is not accounted for",
+        "explanationHelp": "{amount} is not accounted for. It will be recorded and flagged. Explain what happened in 3 to 500 characters.",
+        "submit": "Settle payment"
+      },
+      "breakdown": {
+        "title": "Settlement",
+        "approved": "Approved",
+        "used": "Used",
+        "returned": "Returned",
+        "notAccounted": "Not accounted for",
+        "explanation": "Explanation:",
+        "noLines": "Nothing was spent. The whole amount came back."
+      },
+      "noReceiptReason": {
+        "vendor_did_not_issue": "Vendor did not issue receipt",
+        "informal_or_casual_labour": "Informal or casual labour",
+        "transport_fare": "Transport fare",
+        "emergency_purchase": "Emergency purchase",
+        "receipt_lost_or_damaged": "Receipt lost or damaged",
+        "other": "Other"
       }
     }
   },
@@ -1307,8 +1396,38 @@
     "category_invalid": "Choose one of the categories.",
     "purpose_required": "Give a purpose of 3 to 120 characters.",
     "no_disbursement": "This payment can't be found.",
-    "not_approved": "Only an approved payment can be cancelled, and this one isn't approved.",
-    "decision_required": "Choose to approve or reject."
+    "not_approved": "Only an approved payment can be handed out or cancelled, and this one isn't approved.",
+    "decision_required": "Choose to approve or reject.",
+    "already_handed_out": "The cash for this payment has already been handed out, so it can't be cancelled or handed out again.",
+    "recipient_invalid": "Name who received it, in 2 to 120 characters.",
+    "not_handed_out": "Only a payment whose cash is handed out can be settled or take receipts.",
+    "over_approval": "Used {used_tzs} plus returned {returned_tzs} is more than the {amount_tzs} approved. Nothing was changed.",
+    "over_approval_field": "Used plus returned is more than was approved.",
+    "returned_invalid": "Enter the cash returned as a whole number of shillings, 0 or more.",
+    "lines_invalid": "The lines could not be read. Reload the page and try again.",
+    "too_many_lines": "A settlement has at most 20 lines.",
+    "line_amount_invalid": "Line {line}: enter a whole number of shillings above zero.",
+    "line_purpose_invalid": "Line {line}: say what it was for, in 2 to 120 characters.",
+    "line_evidence_required": "Add a receipt or choose why there isn't one.",
+    "line_evidence_both": "A line has a receipt or a reason, not both.",
+    "no_receipt_reason_invalid": "Choose one of the reasons.",
+    "no_receipt_note_required": "Explain what happened, in 3 to 500 characters.",
+    "receipt_not_found": "Line {line}: that receipt can't be found. Upload it again.",
+    "receipt_wrong_disbursement": "Line {line}: that receipt belongs to another payment.",
+    "receipt_not_yours": "Line {line}: that receipt was uploaded by somebody else.",
+    "receipt_not_uploaded": "Line {line}: that receipt hasn't finished uploading. Try the upload again.",
+    "receipt_cited_twice": "Each receipt goes on one line only.",
+    "explanation_required": "Explain the amount not accounted for, in 3 to 500 characters.",
+    "explanation_not_needed": "Everything is accounted for, so no explanation is needed.",
+    "receipt_type_invalid": "Use a JPEG, PNG, WebP or HEIC photo, or a PDF.",
+    "receipt_too_large": "That file is over 15 MB.",
+    "receipt_name_invalid": "That file has no name. Choose it again.",
+    "too_many_receipts": "This payment already has as many receipts as it can take.",
+    "no_receipt": "This receipt can't be found.",
+    "receipt_unavailable": "The receipt could not be opened. Try again.",
+    "upload_failed": "The upload didn't finish. Everything else you entered is kept.",
+    "receipt_pending": "Wait for the receipts to finish uploading, then settle.",
+    "receipt_not_uploaded_yet": "A receipt didn't upload. Press Try again on it, or remove that line."
   },
   "reports": {
     "title": "Daily reports",
