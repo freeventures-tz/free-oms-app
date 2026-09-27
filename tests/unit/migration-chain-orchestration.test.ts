@@ -164,22 +164,35 @@ describe("the migration-chain command's verdict", () => {
     // TWENTY-ONE: four in the v0.0.4 phase, four in the v0.0.6 phase, five in the v0.1.0 phase
     // issue #51 adds — the v0.0.6 four again, on a v0.1.0 database, plus a rewritten imprest
     // handover — and eight in the v0.2.0 phase issue #55 adds: those five again, a rewritten
-    // report, a label added to a released enum and a widened grant. An exact count, so a phase that
-    // silently stopped running its counterexamples is a failure rather than a quieter pass.
+    // report, a label added to a released enum and a widened grant. Issue #62's v0.3.3 phase adds
+    // nine: those eight again and a rejected disbursement's reason rewritten. An exact count, so a
+    // phase that silently stopped running its counterexamples is a failure rather than a quieter
+    // pass.
     expect(out).toContain("a disputed imprest handover's amount rewritten in place");
     expect(out).toContain("a delivered report's content rewritten in place");
     expect(out).toContain("a label added to a released enum");
     expect(out).toContain("a released table's grant widened");
+    expect(out).toContain("a rejected disbursement's reason rewritten in place");
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(21);
+    ).toHaveLength(30);
+
+    // Issue #62: the v0.3.3 phase reset to the last released migration, built disbursements in
+    // every status, and asserted the settlement upgrade.
+    expect(out).toContain("AND disbursements in every status");
+    expect(calls.filter((call) => call.args[0]?.includes("28_mark_v030_boundary"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args[0]?.includes("29_build_v030_disbursements"))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.args[0]?.includes("30_assert_settlement_upgrade")),
+    ).toHaveLength(1);
 
     // Issue #55: the v0.2.0 phase reset to the last released migration, built a real report on
     // it, and asserted the disbursement upgrade.
     expect(out).toContain("imprest funding AND a delivered report");
     expect(calls.filter((call) => call.args[0]?.includes("22_mark_v020_boundary"))).toHaveLength(1);
-    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(1);
+    // Twice: the v0.3.3 phase issue #62 adds builds the same real report on its own database.
+    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(2);
     expect(
       calls.filter((call) => call.args[0]?.includes("24_assert_disbursement_upgrade")),
     ).toHaveLength(1);
