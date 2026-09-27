@@ -7,7 +7,12 @@ import { CashierStep, ReceiptView } from "@/app/(app)/imprest/settlement-forms";
 import { DisbursementFlags, DisbursementStatusChip } from "@/app/(app)/imprest/spending";
 import { Card, PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
-import { loadDisbursement, type DisbursementDetail } from "@/lib/imprest/disbursements";
+import {
+  earlierReceipts,
+  loadDisbursement,
+  type DisbursementDetail,
+  type SettlementCycle,
+} from "@/lib/imprest/disbursements";
 import { openFor } from "@/lib/imprest/spending";
 import { formatTzs } from "@/lib/money";
 import { formatBusinessStamp } from "@/lib/time/business-date";
@@ -15,11 +20,12 @@ import { formatBusinessStamp } from "@/lib/time/business-date";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * One disbursement and its history (product.md §13.3, issues #55 and #62).
+ * One disbursement and its history (product.md §13.3, issues #55, #62 and #65).
  *
  * A Cashier can read only their own, so another Cashier's disbursement is simply not found. Once
  * settled, it always shows its breakdown: Approved, Used, Returned and, when above zero, Not
- * accounted for, with every line and its receipt or No-receipt reason (criterion 8).
+ * accounted for, with every line and its receipt or No-receipt reason (criterion 8). A settlement
+ * sent back and settled again shows every cycle in order, each with the reason it was returned.
  */
 export default async function DisbursementPage({ params }: PageProps<"/imprest/disbursements/[id]">) {
   const viewer = await requireAccess("/imprest");
@@ -44,6 +50,13 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
   }
 
   const target = { id: disbursement.id, version: disbursement.version };
+  const sentBack = disbursement.sentBack
+    ? {
+        reason: disbursement.sentBack.reason,
+        by: disbursement.sentBack.returnedBy || roles("manager"),
+        at: formatBusinessStamp(disbursement.sentBack.returnedAt, locale),
+      }
+    : null;
 
   return (
     <>
@@ -91,7 +104,9 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         ) : null}
       </Card>
 
-      {disbursement.settlement ? <Breakdown disbursement={disbursement} /> : null}
+      {disbursement.cycles.map((cycle) => (
+        <Breakdown key={cycle.id} disbursement={disbursement} cycle={cycle} />
+      ))}
 
       {/* Hidden when this viewer has nothing to do here and no answer to show (a Cashier's decided row). */}
       <Card className="flex flex-col gap-3 empty:hidden" data-testid="disbursement-actions">
@@ -133,6 +148,11 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
             {t("detail.waitingVerification")}
           </p>
         ) : null}
+        {disbursement.status === "sent_back" && viewer.role !== "cashier" ? (
+          <p className="text-sm text-muted-foreground" data-testid="sent-back-note">
+            {t("detail.sentBackNote")}
+          </p>
+        ) : null}
         {disbursement.status === "verified" ? (
           <p className="text-sm text-muted-foreground" data-testid="verified-note">
             {t("detail.verifiedNote")}
@@ -147,7 +167,14 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
 
       {/* Always in this place for the proposing Cashier, so its confirmation outlives the step. */}
       {cashierDue ? (
-        <CashierStep status={disbursement.status} disbursement={target} amount={disbursement.amount} />
+        <CashierStep
+          status={disbursement.status}
+          disbursement={target}
+          amount={disbursement.amount}
+          sentBack={sentBack}
+          previous={disbursement.status === "sent_back" ? (disbursement.cycles.at(-1) ?? null) : null}
+          earlier={disbursement.status === "sent_back" ? earlierReceipts(disbursement.cycles) : []}
+        />
       ) : null}
 
       <section className="flex flex-col gap-3" aria-labelledby="history-heading">
@@ -155,10 +182,13 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
           {(await getTranslations("imprest"))("history.title")}
         </h2>
         <ol className="flex flex-col gap-2" data-testid="disbursement-history">
-          {disbursement.events.map((event) => (
-            <li key={event.kind}>
+          {disbursement.events.map((event, index) => (
+            <li key={`${event.kind}-${event.cycle ?? 0}-${index}`}>
               <Card className="flex flex-col gap-1">
-                <span className="font-medium">{t(`history.${event.kind}`)}</span>
+                <span className="font-medium">
+                  {t(`history.${event.kind}`)}
+                  {event.cycle && disbursement.cycles.length > 1 ? ` · ${t("history.cycle", { cycle: event.cycle })}` : ""}
+                </span>
                 <span className="text-sm text-muted-foreground">
                   {/* A Cashier may not read the Manager's profile, so they see the role instead. */}
                   {event.by || roles(event.role)} · {formatBusinessStamp(event.at, locale)}
@@ -207,11 +237,18 @@ async function Postings({ disbursement }: { disbursement: DisbursementDetail }) 
   );
 }
 
-/** Approved = Used + Returned + Not accounted for, and every line behind Used. */
-async function Breakdown({ disbursement }: { disbursement: DisbursementDetail }) {
+/**
+ * One settlement cycle: Approved = Used + Returned + Not accounted for, every line behind Used and,
+ * when the Manager sent it back, who did, when and why (issue #65). The latest cycle keeps the
+ * `settlement-breakdown` hook and carries what verification posted.
+ */
+async function Breakdown({ disbursement, cycle }: { disbursement: DisbursementDetail; cycle: SettlementCycle }) {
   const t = await getTranslations("imprest.spending");
+  const roles = await getTranslations("admin.roles");
   const locale = await getLocale();
-  const settlement = disbursement.settlement!;
+  const settlement = cycle;
+  const latest = disbursement.settlement?.id === cycle.id;
+  const several = disbursement.cycles.length > 1;
   const figures = [
     { key: "approved", value: disbursement.amount },
     { key: "used", value: settlement.used },
@@ -220,8 +257,33 @@ async function Breakdown({ disbursement }: { disbursement: DisbursementDetail })
   ];
 
   return (
-    <Card className="flex flex-col gap-4" data-testid="settlement-breakdown">
-      <h2 className="text-lg font-semibold">{t("breakdown.title")}</h2>
+    <Card
+      className="flex flex-col gap-4"
+      data-testid={latest ? "settlement-breakdown" : `settlement-cycle-${cycle.cycle}`}
+      data-cycle={cycle.cycle}
+    >
+      <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
+        {several ? t("breakdown.cycle", { cycle: cycle.cycle }) : t("breakdown.title")}
+        {several && latest ? (
+          <span className="text-xs font-normal text-muted-foreground">· {t("breakdown.latest")}</span>
+        ) : null}
+      </h2>
+      {cycle.sentBack ? (
+        <div
+          className="flex flex-col gap-1 rounded-lg border border-danger/40 bg-danger/5 p-3"
+          data-testid="cycle-returned"
+        >
+          <p className="text-sm">
+            <span className="font-medium">{t("breakdown.returnReason")}</span> {cycle.sentBack.reason}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("breakdown.returnedBy", {
+              name: cycle.sentBack.returnedBy || roles("manager"),
+              at: formatBusinessStamp(cycle.sentBack.returnedAt, locale),
+            })}
+          </p>
+        </div>
+      ) : null}
       <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {figures.map((f) => (
           <div key={f.key} className="flex flex-col gap-1" data-testid={`breakdown-${f.key}`}>
@@ -238,15 +300,15 @@ async function Breakdown({ disbursement }: { disbursement: DisbursementDetail })
         </p>
       ) : null}
 
-      {disbursement.verification ? <Postings disbursement={disbursement} /> : null}
+      {latest && disbursement.verification ? <Postings disbursement={disbursement} /> : null}
 
-      {disbursement.lines.length === 0 ? (
+      {cycle.lines.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="no-lines">
           {t("breakdown.noLines")}
         </p>
       ) : (
         <ol className="flex flex-col gap-3" data-testid="settlement-lines">
-          {disbursement.lines.map((line) => (
+          {cycle.lines.map((line) => (
             <li
               key={line.lineNo}
               className="flex flex-col gap-2 border-t border-border pt-3 md:flex-row md:items-start md:justify-between"

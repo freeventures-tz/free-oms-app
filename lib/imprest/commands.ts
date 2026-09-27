@@ -192,7 +192,21 @@ export const verifyDisbursement = (input: DisbursementTarget & { settlementId: s
     p_idempotency_key: input.idempotencyKey,
   });
 
+/**
+ * Send back (issue #65), the Manager's. There is no amount: the Manager never corrects the Cashier's
+ * figures. The cycle they were shown goes back with a reason, and the Cashier settles again.
+ */
+export const sendBackSettlement = (input: DisbursementTarget & { settlementId: string; reason: string }) =>
+  call("staff_send_back_imprest_settlement", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_settlement_id: input.settlementId,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
 // Hand-out and settlement (issue #62). Only the Cashier who proposed a disbursement does either.
+// Settling again after a send-back (issue #65) is the same command: the database opens the next cycle.
 
 /** There is no amount: the approved amount is what goes out, and change comes back as Returned. */
 export const handOutDisbursement = (input: DisbursementTarget & { recipient: string }) =>

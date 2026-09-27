@@ -1213,7 +1213,8 @@
         "cancelled": "Cancelled",
         "handed_out": "Handed out, not settled",
         "settled": "Settled, awaiting verification",
-        "verified": "Verified"
+        "verified": "Verified",
+        "sent_back": "Sent back to the Cashier"
       },
       "propose": {
         "title": "Propose a payment",
@@ -1252,7 +1253,14 @@
         "settledNote": "Open one to check its lines and receipts, then verify it. The amounts can't be changed here.",
         "settledNoteDirector": "The Manager checks each one and verifies it. Directors read them here.",
         "verified": "Verified, most recent first ({count})",
-        "verifiedEmpty": "No payments have been verified yet."
+        "verifiedEmpty": "No payments have been verified yet.",
+        "sentBack": "Sent back, waiting for the Cashier ({count})",
+        "sentBackDirector": "Sent back, waiting for the Cashier ({count})",
+        "sentBackEmpty": "No settlements are waiting for the Cashier to settle again.",
+        "sentBackNote": "The Cashier corrects each one and settles it again. It stays set aside until you verify it.",
+        "sentBackNoteDirector": "The Cashier corrects each one and settles it again, then the Manager checks it. Directors read them here.",
+        "sentBackReason": "Why: {reason}",
+        "nextSettleAgain": "Next: settle again"
       },
       "fields": {
         "rejectionReason": "Reason for rejecting",
@@ -1277,7 +1285,8 @@
         "cancelled": "Approval cancelled. The money set aside for it is free again.",
         "handedOut": "Hand-out recorded. Settle it when the spending is done.",
         "settled": "Settled. It now waits for the Manager to verify it, and stays set aside until then.",
-        "verified": "Verified. It is posted and no longer set aside."
+        "verified": "Verified. It is posted and no longer set aside.",
+        "sentBack": "Sent back. The Cashier sees your reason and settles it again. It stays set aside until then."
       },
       "detail": {
         "back": "Back to imprest",
@@ -1285,7 +1294,7 @@
         "category": "Category",
         "proposedBy": "Proposed by",
         "waitingManager": "Waiting for the Manager to approve or reject it. Don't pay yet.",
-        "readOnly": "Directors can read payments here. The Manager approves, rejects, cancels and verifies them, and the Cashier hands them out and settles them.",
+        "readOnly": "Directors can read payments here. The Manager approves, rejects, cancels, sends back and verifies them, and the Cashier hands them out and settles them.",
         "recipient": "Handed out to",
         "handedOutAt": "on {at}",
         "handedOutNote": "The cash has been handed out, so this payment can no longer be cancelled. The Cashier settles it with receipts and any change.",
@@ -1294,7 +1303,8 @@
         "openPdf": "Open {name}",
         "saveFile": "Save {name}",
         "viewReceipt": "View receipt",
-        "verifiedNote": "Verified. It is posted and can't be changed."
+        "verifiedNote": "Verified. It is posted and can't be changed.",
+        "sentBackNote": "Sent back. Waiting for the Cashier to settle it again."
       },
       "history": {
         "proposed": "Proposed",
@@ -1304,7 +1314,9 @@
         "cancelled": "Approval cancelled and money freed",
         "handed_out": "Cash handed out",
         "settled": "Settled",
-        "verified": "Verified and posted"
+        "verified": "Verified and posted",
+        "sent_back": "Sent back",
+        "cycle": "Settlement {cycle}"
       },
       "flags": {
         "noReceipt": "No receipt",
@@ -1346,7 +1358,11 @@
         "overHelp": "Used plus returned is more than was approved. Check the amounts: a settlement can't go above the approval.",
         "explanation": "Why this is not accounted for",
         "explanationHelp": "{amount} is not accounted for. It will be recorded and flagged. Explain what happened in 3 to 500 characters.",
-        "submit": "Settle payment"
+        "submit": "Settle payment",
+        "earlier": "Use an uploaded receipt",
+        "chooseEarlier": "Choose a receipt",
+        "earlierOption": "{name} (settlement {cycle})",
+        "preparing": "Making the photo smaller"
       },
       "breakdown": {
         "title": "Settlement",
@@ -1355,7 +1371,11 @@
         "returned": "Returned",
         "notAccounted": "Not accounted for",
         "explanation": "Explanation:",
-        "noLines": "Nothing was spent. The whole amount came back."
+        "noLines": "Nothing was spent. The whole amount came back.",
+        "cycle": "Settlement {cycle}",
+        "latest": "Latest",
+        "returnedBy": "Sent back by {name} on {at}",
+        "returnReason": "Reason:"
       },
       "noReceiptReason": {
         "vendor_did_not_issue": "Vendor did not issue receipt",
@@ -1381,6 +1401,18 @@
         "released": "{amount} came back and is free to approve again",
         "balance": "Only this step lowers the posted balance. It can't be undone.",
         "confirm": "Verify and post {amount}"
+      },
+      "sendBack": {
+        "open": "Send back",
+        "title": "Send this settlement back",
+        "help": "The Cashier sees your reason and settles it again. Nothing is posted, and the money stays set aside. You can't change the Cashier's figures yourself.",
+        "reason": "What the Cashier needs to fix",
+        "confirm": "Send back to the Cashier"
+      },
+      "settleAgain": {
+        "title": "Settle again",
+        "reasonHeading": "Why the Manager sent it back",
+        "help": "Correct the settlement and submit it again. Your earlier settlement stays on the record as it was. The lines below start from it."
       }
     }
   },
@@ -1424,7 +1456,7 @@
     "decision_required": "Choose to approve or reject.",
     "already_handed_out": "The cash for this payment has already been handed out, so it can't be cancelled or handed out again.",
     "recipient_invalid": "Name who received it, in 2 to 120 characters.",
-    "not_handed_out": "Only a payment whose cash is handed out can be settled or take receipts.",
+    "not_handed_out": "Only a payment whose cash is handed out, or one sent back to be settled again, can be settled or take receipts.",
     "over_approval": "Used {used_tzs} plus returned {returned_tzs} is more than the {amount_tzs} approved. Nothing was changed.",
     "over_approval_field": "Used plus returned is more than was approved.",
     "returned_invalid": "Enter the cash returned as a whole number of shillings, 0 or more.",
@@ -1452,7 +1484,7 @@
     "upload_failed": "The upload didn't finish. Everything else you entered is kept.",
     "receipt_pending": "Wait for the receipts to finish uploading, then settle.",
     "receipt_not_uploaded_yet": "A receipt didn't upload. Press Try again on it, or remove that line.",
-    "not_settled": "Only a settled payment can be verified, and this one isn't waiting for that.",
+    "not_settled": "Only a settled payment waiting for the Manager can be verified or sent back, and this one isn't waiting for that.",
     "settlement_not_latest": "The settlement changed since you opened it. Reload to see the latest one."
   },
   "reports": {

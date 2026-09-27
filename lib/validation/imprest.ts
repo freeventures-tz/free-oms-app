@@ -163,6 +163,18 @@ export const verifyDisbursementSchema = z.object({
   idempotencyKey: spendingKey,
 });
 
+/**
+ * Send back (issue #65): the cycle the Manager was shown and a written reason of 3 to 500
+ * characters. There is no amount; the Cashier corrects their own figures in a new cycle.
+ */
+export const sendBackSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  settlementId: z.string().uuid({ message: "spendingErrors.settlement_not_latest" }),
+  reason: textField(true, "spendingErrors.reason_required"),
+  idempotencyKey: spendingKey,
+});
+
 /** There is no amount: the approved amount is always what goes out. */
 export const handOutSchema = z.object({
   disbursementId,

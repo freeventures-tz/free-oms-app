@@ -20,6 +20,7 @@ import {
   registerReceipt,
   reportMismatch,
   requestFunding,
+  sendBackSettlement,
   settleDisbursement,
   verifyDisbursement,
   withdrawDisbursement,
@@ -44,6 +45,7 @@ import {
   rejectFundingSchema,
   reportMismatchSchema,
   requestFundingSchema,
+  sendBackSchema,
   settleSchema,
   verifyDisbursementSchema,
 } from "@/lib/validation/imprest";
@@ -153,7 +155,8 @@ async function fromRefusal(
   // `not_approved` with the status it met, and the Manager is told why in those words.
   const status = refusal.context?.status;
   const result =
-    refusal.reason === "not_approved" && (status === "handed_out" || status === "settled" || status === "verified")
+    refusal.reason === "not_approved" &&
+    (status === "handed_out" || status === "settled" || status === "sent_back" || status === "verified")
       ? { ...refusal, reason: "already_handed_out" }
       : refusal;
   // Shillings in a refusal are shown the way every other amount is: grouped, in the viewer's locale.
@@ -356,6 +359,18 @@ export async function verifyDisbursementAction(_p: ImprestActionState, data: For
     { ...disbursementTarget(data), settlementId: data.get("settlementId") },
     verifyDisbursement,
     "imprest.spending.success.verified",
+    SPENDING_MESSAGES,
+  );
+}
+
+/** The Manager sends the settlement they were shown back to the Cashier, with a reason (issue #65). */
+export async function sendBackSettlementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    sendBackSchema,
+    { ...disbursementTarget(data), settlementId: data.get("settlementId"), reason: data.get("reason") ?? "" },
+    sendBackSettlement,
+    "imprest.spending.success.sentBack",
     SPENDING_MESSAGES,
   );
 }

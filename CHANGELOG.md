@@ -2,6 +2,36 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.6.0] — 2026-09-28
+
+When a settlement is wrong, the Manager can now send it back to the Cashier with a reason instead
+of verifying it. The Cashier corrects it and settles again, and every round stays on the record.
+Receipt photos are also made smaller on the phone, so they upload far faster. The staff workflows
+stay closed.
+
+### NEW
+
+- The Manager sends a settled payment back to the Cashier with a written reason. There is no amount
+  to type: the Manager never changes the Cashier's figures. Nothing is posted, and the money stays
+  set aside.
+- The Cashier sees "Next: settle again" on the payment and opens a Settle again form with the
+  Manager's reason above it. The form starts from the settlement that was sent back, so the Cashier
+  corrects it rather than typing it all again.
+- A settlement sent back can reuse a receipt it already had, and take new receipts uploaded while it
+  waits.
+- The Manager verifies the new settlement, or sends it back again. Only the latest one can ever be
+  verified.
+- The Manager and Directors see "Sent back, waiting for the Cashier", with the reason and how long
+  each has waited.
+
+### IMPROVED
+
+- A payment's page shows every settlement in order, each with its lines, figures and receipts, and
+  for each one sent back, who sent it back, when and why. Nothing from an earlier settlement changes.
+- Receipt photos are made smaller on the phone before they are uploaded: at most 2,048 pixels on the
+  long side, saved as JPEG. A 3 MB photo now uploads at a few hundred KB, and its text stays
+  readable. PDFs, and photos the phone can't read, upload as they are.
+
 ## [0.5.0] — 2026-09-27
 
 The Manager now checks each settled payment and verifies it, which posts it. The imprest fund
