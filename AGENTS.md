@@ -14,7 +14,9 @@
 4. **Prove**: `evidence-driven-testing`. Capture *before* while reproducing, *after* once it works.
 5. **Ship**: `code-review` → cross-review (the human starts the other agent on `code-review` for the PR) → `before-and-after` (production vs PR preview) → PR → `greploop` (`greploop-apps` over the file limit) until **5/5, zero unresolved**. End by presenting the PR URL. **Stop**: merge is the human's.
 6. **Release**: once the human approves the merge, merge, tag and changelog it. See *Releasing*.
+
 End an unfinished session with `handoff`.
+
 **If any Dependency to execute this workflow is missing: Stop and report so that it can be setup before continuing blindly or ignoring any step.** 
 ## What this repo holds
 The repo is complete on its own: everything it needs is committed, and it holds only permanent project material. Transient working files (handoffs, prototypes, scratch notes) go to the workspace `docs/` folder one level above the repo root, never into the repo.
