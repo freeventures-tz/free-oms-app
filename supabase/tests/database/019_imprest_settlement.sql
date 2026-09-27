@@ -20,7 +20,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(111);
+select plan(112);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -353,6 +353,11 @@ select throws_ok(format($$ select tests.upload(%L, %L) $$,
                         'imprest/' || tests.did('trip') || '/by-secret-key',
                         'e6200000-0000-0000-0000-000000000004'),
                  '42501', null, 'the secret key cannot put a file in the bucket');
+-- What the Storage API writes for a secret key: the row as `service_role` and no owner, because no
+-- user is behind the key. Even at a registered path still waiting for its file, it is refused.
+select throws_ok(format($$ insert into storage.objects (bucket_id, name, metadata)
+                            values ('imprest-evidence', %L, '{}') $$, tests.rpath('r-never')),
+                 '42501', null, 'nor fill a registered receipt''s empty path, since it has no owner');
 select throws_ok($$ update storage.objects set metadata = '{}' where bucket_id = 'imprest-evidence' $$,
                  '42501', null, 'nor change one, though it passes row-level security');
 -- Storage lets its own API delete by setting this flag; the bucket's trigger still refuses.

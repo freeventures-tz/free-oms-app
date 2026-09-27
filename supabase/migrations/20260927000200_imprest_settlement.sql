@@ -427,17 +427,32 @@ create policy imprest_evidence_definer_owner on storage.objects
 
 -- No update and no delete policy exists, so a signed-in person reaches no stored receipt to change.
 -- This trigger closes the door row-level security cannot: `service_role` bypasses every policy, so
--- the secret key could otherwise plant, overwrite or delete a file. Only a signed-in session may
--- add one, and nobody may change or remove one.
+-- the secret key could otherwise plant, overwrite or delete a file.
+--
+-- WHAT IT CAN AND CANNOT SEE. The Storage API checks a signed-in upload against the policies above
+-- in a rehearsal it rolls back, then writes the real row as `service_role`, with no user in the
+-- request claims. So the role that writes cannot tell a Cashier from the secret key (measured
+-- against the local Storage API, 27 September 2026). What does tell them apart is the object's
+-- `owner_id`: the Storage API takes it from the uploader's session, and the secret key has no user
+-- behind it. So a new object is accepted only when it is exactly a registered receipt: its path,
+-- uploaded by the Cashier who registered it, while the disbursement is handed out. Nobody may
+-- change or remove one.
 create or replace function private.guard_imprest_evidence_object()
 returns trigger
 language plpgsql
+security definer
 set search_path = ''
 as $$
 begin
   if tg_op = 'INSERT' then
-    if new.bucket_id = 'imprest-evidence' and current_user::text <> 'authenticated' then
-      raise exception 'only a signed-in Cashier may add an imprest receipt, not %', current_user
+    if new.bucket_id = 'imprest-evidence'
+       and not exists (select 1 from public.imprest_receipts rc
+                         join public.imprest_disbursements d on d.id = rc.disbursement_id
+                        where rc.object_path = new.name
+                          and rc.uploaded_by::text = new.owner_id
+                          and new.owner is not distinct from rc.uploaded_by
+                          and d.status = 'handed_out') then
+      raise exception 'only the Cashier who registered this receipt may add it'
         using errcode = 'insufficient_privilege';
     end if;
     return new;
