@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 /**
+ * Issue #65 adds THE v0.5.0 PHASE. It resets to the 46th and last released migration (the second
+ * verification one), builds the v0.4.0 phase's ground plus a real verification with an unexplained
+ * loss, and applies the two send-back migrations. Its preservation query adds every verification
+ * and posting to the business rows and brings the verification objects into the released surface.
+ * The eleven released objects the send-back migrations replace are pinned exactly on both sides
+ * instead, and the new command is run to a committed second cycle, uploaded receipt and all.
+ *
  * Issue #64 adds THE v0.4.0 PHASE. It resets to the 44th and last released migration (the second
  * settlement one), builds the v0.3.3 phase's ground plus hand-outs and settlements with and without
  * a remainder through their own commands, and applies the two verification migrations. Its
@@ -140,8 +147,13 @@ const DISBURSEMENT_VERSION = "20260925000100";
  * RELEASED migration.
  */
 const SETTLEMENT_VERSION = "20260927000200";
-/** Issue #64: the second of the two verification migrations, the last of this release. */
+/**
+ * Issue #64: the second of the two verification migrations. Since v0.5.0 it is also the 46th and
+ * last RELEASED migration.
+ */
 const VERIFICATION_VERSION = "20260928000200";
+/** Issue #65: the second of the two send-back migrations, the last of this release. */
+const SEND_BACK_VERSION = "20260929000200";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -167,6 +179,9 @@ const ASSERT_SETTLEMENT = join(SQL_DIR, "30_assert_settlement_upgrade.sql");
 const MARK_V040 = join(SQL_DIR, "32_mark_v040_boundary.sql");
 const BUILD_V040_SETTLEMENTS = join(SQL_DIR, "33_build_v040_settlements.sql");
 const ASSERT_VERIFICATION = join(SQL_DIR, "34_assert_verification_upgrade.sql");
+const MARK_V050 = join(SQL_DIR, "36_mark_v050_boundary.sql");
+const BUILD_V050_VERIFICATIONS = join(SQL_DIR, "37_build_v050_verifications.sql");
+const ASSERT_SEND_BACK = join(SQL_DIR, "38_assert_send_back_upgrade.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -200,6 +215,7 @@ const COUNTEREXAMPLE_ENUM = join(SQL_DIR, "26_counterexample_released_enum.sql")
 const COUNTEREXAMPLE_GRANT = join(SQL_DIR, "27_counterexample_released_grant.sql");
 const COUNTEREXAMPLE_DISBURSEMENT = join(SQL_DIR, "31_counterexample_disbursement_decision.sql");
 const COUNTEREXAMPLE_SETTLEMENT_LINE = join(SQL_DIR, "35_counterexample_settlement_line.sql");
+const COUNTEREXAMPLE_VERIFICATION = join(SQL_DIR, "39_counterexample_verification.sql");
 /**
  * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
  *
@@ -220,12 +236,13 @@ const V010_PRESERVATION = join("supabase", "release-checks", "v010_preservation.
 const V020_PRESERVATION = join("supabase", "release-checks", "v020_preservation.sql");
 const V030_PRESERVATION = join("supabase", "release-checks", "v030_preservation.sql");
 const V040_PRESERVATION = join("supabase", "release-checks", "v040_preservation.sql");
+const V050_PRESERVATION = join("supabase", "release-checks", "v050_preservation.sql");
 
 /**
- * All 44 released migrations (issue #64). Its first 42 lines are the v0.3.3 manifest unchanged, so
- * this checks everything that one did and the settlement pair v0.4.0 released since.
+ * All 46 released migrations (issue #65). Its first 44 lines are the v0.4.0 manifest unchanged, so
+ * this checks everything that one did and the verification pair v0.5.0 released since.
  */
-const MIGRATION_MANIFEST = join("supabase", "release-checks", "v040_migration_manifest.txt");
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v050_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -455,6 +472,50 @@ const PHASES = [
           { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
           { name: "a rejected disbursement's reason rewritten in place", file: COUNTEREXAMPLE_DISBURSEMENT },
           { name: "a settlement line's purpose rewritten in place", file: COUNTEREXAMPLE_SETTLEMENT_LINE },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the imprest send-back migrations",
+    what: "the v0.5.0 database",
+    version: VERIFICATION_VERSION,
+    // The two send-back migrations are one release unit, applied together as a hosted apply
+    // would, and the phase stops at its own release like every other.
+    upTo: SEND_BACK_VERSION,
+    describes: "v0.5.0, before send-back",
+    query: V050_PRESERVATION,
+    fixtures: [
+      {
+        name: "sales, money, dispatch, production, imprest funding, a delivered report AND disbursements in every status, one verified with an unexplained loss",
+        setup: [
+          MARK_V050,
+          BUILD_V005,
+          BUILD_V010_FUNDING,
+          BUILD_V020_REPORT,
+          BUILD_V030_DISBURSEMENTS,
+          BUILD_V040_SETTLEMENTS,
+          BUILD_V050_VERIFICATIONS,
+        ],
+        assertions: [ASSERT_SEND_BACK],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "what a batch consumed and yielded, rewritten in place",
+            file: COUNTEREXAMPLE_PRODUCTION,
+          },
+          {
+            name: "a disputed imprest handover's amount rewritten in place",
+            file: COUNTEREXAMPLE_FUNDING,
+          },
+          { name: "a delivered report's content rewritten in place", file: COUNTEREXAMPLE_REPORT },
+          { name: "a label added to a released enum", file: COUNTEREXAMPLE_ENUM },
+          { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
+          { name: "a rejected disbursement's reason rewritten in place", file: COUNTEREXAMPLE_DISBURSEMENT },
+          { name: "a settlement line's purpose rewritten in place", file: COUNTEREXAMPLE_SETTLEMENT_LINE },
+          { name: "a verification reattributed to another person", file: COUNTEREXAMPLE_VERIFICATION },
         ],
       },
     ],
