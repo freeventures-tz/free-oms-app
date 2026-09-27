@@ -99,8 +99,9 @@ select is(
      join pg_roles o on o.oid = p.proowner
     where n.nspname = 'api' and p.proname like '%imprest_disbursement%'
       and p.prosecdef and o.rolname = 'fv_definer_owner'),
-  4,
-  'four disbursement commands, each security definer and owned by fv_definer_owner');
+  6,
+  'six disbursement commands (four from #55, hand out and settle from #62), each security '
+  'definer and owned by fv_definer_owner');
 
 select ok(
   not has_function_privilege('service_role',

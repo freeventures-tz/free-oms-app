@@ -20,6 +20,8 @@ import { formatBusinessStamp } from "@/lib/time/business-date";
 const TONES = {
   proposed: "attention",
   approved: "neutral",
+  handed_out: "neutral",
+  settled: "attention",
   rejected: "danger",
   withdrawn: "neutral",
   cancelled: "neutral",
@@ -28,6 +30,36 @@ const TONES = {
 export async function DisbursementStatusChip({ status }: { status: DisbursementStatus }) {
   const t = await getTranslations("imprest.spending.status");
   return <StatusChip tone={TONES[status]}>{t(status)}</StatusChip>;
+}
+
+/**
+ * The two permanent flags (issue #62 criterion 7). Every role that can see a disbursement sees
+ * them, in lists and in detail, and nothing clears them.
+ */
+export async function DisbursementFlags({ flags }: { flags: Disbursement["flags"] }) {
+  const t = await getTranslations("imprest.spending.flags");
+  if (!flags.noReceipt && !flags.notAccounted) return null;
+  return (
+    <span className="flex flex-wrap gap-1" data-testid="disbursement-flags">
+      {flags.noReceipt ? (
+        <StatusChip tone="attention">
+          <span data-testid="flag-no-receipt">{t("noReceipt")}</span>
+        </StatusChip>
+      ) : null}
+      {flags.notAccounted ? (
+        <StatusChip tone="danger">
+          <span data-testid="flag-not-accounted">{t("notAccounted")}</span>
+        </StatusChip>
+      ) : null}
+    </span>
+  );
+}
+
+/** "3 hours", "2 days": the largest whole unit since `since`, for the list lines. */
+async function ageText(since: string, now: Date): Promise<string> {
+  const t = await getTranslations("imprest.spending.lists");
+  const { unit, count } = openFor(since, now);
+  return t(unit === "days" ? "ageDays" : unit === "hours" ? "ageHours" : "ageMinutes", { count });
 }
 
 type Figure = { key: string; label: string; value: number; help: string; testId: string };
@@ -77,11 +109,20 @@ export async function SpendingFigures({ position }: { position: SpendingPosition
     help: t("spending.figures.freeHelp"),
     testId: "free-to-approve",
   });
+  if (position.awaitingVerification !== null) {
+    figures.push({
+      key: "awaiting",
+      label: t("spending.figures.awaiting"),
+      value: position.awaitingVerification,
+      help: t("spending.figures.awaitingHelp"),
+      testId: "awaiting-verification",
+    });
+  }
 
   return (
     <Card data-testid="spending-figures">
       <h2 className="sr-only">{t("spending.figures.heading")}</h2>
-      <dl className={`grid grid-cols-1 gap-4 ${figures.length > 1 ? "md:grid-cols-3" : ""}`}>
+      <dl className={`grid grid-cols-1 gap-4 ${figures.length > 1 ? "md:grid-cols-2 xl:grid-cols-4" : ""}`}>
         {figures.map((f) => (
           <div key={f.key} className="flex flex-col gap-1" data-testid={f.testId}>
             <dt className="text-sm text-muted-foreground">{f.label}</dt>
@@ -106,6 +147,8 @@ export async function DisbursementList({
   param,
   showOpenFor = false,
   showProposer = true,
+  showNextStep = false,
+  note,
   otherParams = {},
 }: {
   id: string;
@@ -115,6 +158,10 @@ export async function DisbursementList({
   param: string;
   showOpenFor?: boolean;
   showProposer?: boolean;
+  /** The Cashier's own list names the step that is theirs to take next (issue #62 criterion 14). */
+  showNextStep?: boolean;
+  /** A line under the heading, such as when verification will arrive. */
+  note?: string;
   /** The other lists' current pages on this screen, so paging this one keeps their place. */
   otherParams?: Record<string, number>;
 }) {
@@ -129,11 +176,50 @@ export async function DisbursementList({
     return t("lists.openMinutes", { count });
   };
 
+  const progress = new Map<string, React.ReactNode>();
+  for (const d of page.rows) {
+    if (d.status === "handed_out" && d.handedOutAt) {
+      progress.set(
+        d.id,
+        <span className="text-xs text-muted-foreground" data-testid="handed-out-to">
+          {t("lists.handedOutTo", { recipient: d.recipient ?? "", age: await ageText(d.handedOutAt, now) })}
+        </span>,
+      );
+    } else if (d.status === "settled" && d.settlement) {
+      progress.set(
+        d.id,
+        <>
+          <span className="fv-numeric text-xs" data-testid="settled-figures">
+            {t("lists.usedReturned", {
+              used: formatTzs(d.settlement.used, locale),
+              returned: formatTzs(d.settlement.returned, locale),
+            })}
+          </span>
+          <span className="text-xs text-muted-foreground" data-testid="waiting-for">
+            {t("lists.waitingFor", { age: await ageText(d.settlement.settledAt, now) })}
+          </span>
+        </>,
+      );
+    }
+  }
+
+  const nextStep = (d: Disbursement) =>
+    showNextStep && (d.status === "approved" || d.status === "handed_out") ? (
+      <span className="text-xs font-medium underline underline-offset-4" data-testid="next-step">
+        {t(d.status === "approved" ? "lists.nextHandOut" : "lists.nextSettle")}
+      </span>
+    ) : null;
+
   return (
     <section className="flex flex-col gap-3" aria-labelledby={`${id}-heading`} data-testid={id}>
       <h2 id={`${id}-heading`} className="text-lg font-semibold">
         {title}
       </h2>
+      {note ? (
+        <p className="text-sm text-muted-foreground" data-testid={`${id}-note`}>
+          {note}
+        </p>
+      ) : null}
       {page.rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">{empty}</p>
       ) : (
@@ -158,12 +244,15 @@ export async function DisbursementList({
                   </div>
                   <div className="flex flex-col items-start gap-1 md:items-end">
                     <DisbursementStatusChip status={d.status} />
+                    <DisbursementFlags flags={d.flags} />
                     <span className="fv-numeric text-sm font-medium">{formatTzs(d.amount, locale)}</span>
                     {showOpenFor && d.status === "approved" && d.approvedAt ? (
                       <span className="text-xs text-muted-foreground" data-testid="open-for">
                         {age(d.approvedAt)}
                       </span>
                     ) : null}
+                    {progress.get(d.id)}
+                    {nextStep(d)}
                   </div>
                 </Card>
               </Link>

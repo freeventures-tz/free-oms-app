@@ -309,6 +309,8 @@ describe("reads", () => {
       posted_funding_tzs: null,
       set_aside_tzs: null,
       free_to_approve_tzs: full.free_to_approve_tzs,
+      // Issue #62's fourth figure is the Manager's and the Directors', and never reaches a Cashier.
+      awaiting_verification_tzs: null,
     });
   });
 

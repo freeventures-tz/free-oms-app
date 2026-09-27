@@ -2,6 +2,41 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.4.0] — 2026-09-27
+
+Once a payment is approved, the Cashier hands the cash out and later settles it with receipts and
+any change, so every approved shilling ends up explained. The Manager checking a settlement comes
+in a later release; until then a settled payment waits, still set aside. The staff workflows stay
+closed.
+
+### NEW
+
+- The Cashier who proposed an approved payment records that they handed out the full approved
+  amount, and to whom: the driver, a casual worker or a shop.
+- When the spending is done, the Cashier settles the payment in one go: one line for each thing
+  paid for, with its amount, what it was for, and a receipt or the reason there isn't one, plus the
+  cash that came back. A running total shows what was used, what came back and what is still
+  unexplained while you type.
+- On a phone, each receipt can be a photo taken on the spot or a file picked from the phone. You
+  see each upload's progress, and a failed upload keeps everything else you entered and offers
+  Try again for that file.
+- Six reasons cover a line without a receipt: vendor did not issue receipt, informal or casual
+  labour, transport fare, emergency purchase, receipt lost or damaged, and other. The last two also
+  need a short explanation.
+- A settlement can't claim more than was approved. If less comes back than it should, the
+  difference is recorded as Not accounted for, with the Cashier's explanation, and the payment is
+  flagged for good. So is any payment with a line that has no receipt.
+- The Manager and Directors see a fourth figure, Awaiting verification: cash that has left the fund
+  and hasn't been checked yet. They also see two new lists, "Handed out, not settled" and
+  "Settled, waiting for you", and each settled payment's full breakdown, with its receipts.
+- Receipts are stored encrypted, and only the Cashier who filed them, the Manager and Directors can
+  open them.
+
+### IMPROVED
+
+- Once the cash is handed out, a payment can no longer be cancelled. If the trip or purchase
+  doesn't happen, the Cashier settles it with everything returned.
+
 ## [0.3.3] — 2026-09-27
 
 ### IMPROVED
