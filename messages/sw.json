@@ -1250,7 +1250,9 @@
         "nextHandOut": "Hatua inayofuata: toa fedha",
         "nextSettle": "Hatua inayofuata: funga hesabu",
         "settledNote": "Fungua moja ukague mistari na risiti zake, kisha uihakiki. Kiasi hakiwezi kubadilishwa hapa.",
-        "settledNoteDirector": "Meneja anakagua kila moja na kuihakiki. Wakurugenzi wanazisoma hapa."
+        "settledNoteDirector": "Meneja anakagua kila moja na kuihakiki. Wakurugenzi wanazisoma hapa.",
+        "verified": "Yaliyohakikiwa, ya karibuni kwanza ({count})",
+        "verifiedEmpty": "Bado hakuna malipo yaliyohakikiwa."
       },
       "fields": {
         "rejectionReason": "Sababu ya kukataa",

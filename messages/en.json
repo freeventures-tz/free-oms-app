@@ -1250,7 +1250,9 @@
         "nextHandOut": "Next: hand out the cash",
         "nextSettle": "Next: settle it",
         "settledNote": "Open one to check its lines and receipts, then verify it. The amounts can't be changed here.",
-        "settledNoteDirector": "The Manager checks each one and verifies it. Directors read them here."
+        "settledNoteDirector": "The Manager checks each one and verifies it. Directors read them here.",
+        "verified": "Verified, most recent first ({count})",
+        "verifiedEmpty": "No payments have been verified yet."
       },
       "fields": {
         "rejectionReason": "Reason for rejecting",

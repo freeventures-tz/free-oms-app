@@ -18,7 +18,8 @@ a settlement back to the Cashier comes in a later release. The staff workflows s
 - Verifying posts what was used as an imprest expense. Anything not accounted for posts as an
   unexplained loss that waits for a Director's decision. Neither can be changed or deleted.
 - A verified payment shows what was posted, who verified it and when, for the Manager, Directors
-  and the Cashier who settled it. Its flags stay.
+  and the Cashier who settled it. Its flags stay. The Manager and Directors find verified payments
+  again in a new "Verified" list, most recent first.
 
 ### IMPROVED
 

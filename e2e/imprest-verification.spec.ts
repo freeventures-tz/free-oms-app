@@ -261,6 +261,10 @@ test.describe("imprest verification", () => {
 
     await page.goto(LAST_SETTLED_PAGE);
     await expect(page.getByTestId("disbursements-settled").getByRole("link", { name: new RegExp(purpose) })).toHaveCount(0);
+    // It can be found again: the verified list shows the most recent first.
+    const verifiedRow = page.getByTestId("disbursements-verified").getByRole("link", { name: new RegExp(purpose) });
+    await expect(verifiedRow).toContainText("Verified");
+    await expect(verifiedRow.getByTestId("settled-figures")).toContainText("Used TZS 47,000");
     expect(money(await page.getByTestId("funding-total").locator(".fv-numeric").innerText())).toBe(
       after.posted_balance_tzs,
     );
@@ -318,6 +322,10 @@ test.describe("imprest verification", () => {
     await expect(page.getByTestId("disbursements-settled-note")).toContainText("The Manager checks each one");
     await page.getByTestId("disbursements-settled").getByRole("link", { name: new RegExp(waitingPurpose) }).click();
     await expect(page.getByTestId("verify-by-manager")).toBeVisible();
+    await page.goBack();
+    await page.getByTestId("disbursements-verified").getByRole("link", { name: new RegExp(donePurpose) }).click();
+    await expect(page.getByTestId("posting-expense")).toBeVisible();
+    await page.goto(`/imprest/disbursements/${waiting.id}`);
     await expect(page.getByRole("button", { name: "Verify", exact: true })).toHaveCount(0);
     await expect(page.getByTestId("verify-form")).toHaveCount(0);
 

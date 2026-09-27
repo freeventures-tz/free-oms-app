@@ -287,13 +287,15 @@ type QueueOrder =
   | "proposed_at"
   | "approved_at"
   | "imprest_disbursement_handouts(handed_out_at)"
-  | "imprest_disbursement_settled_at";
+  | "imprest_disbursement_settled_at"
+  | "imprest_verifications(verified_at)";
 
 async function byStatus(
   label: string,
   status: DisbursementStatus,
   order: QueueOrder,
   pageNo: number,
+  ascending = true,
 ): Promise<Page<Disbursement>> {
   const supabase = await createServerSupabase();
   return page(label, pageNo, (from, to) =>
@@ -301,7 +303,7 @@ async function byStatus(
       .from("imprest_disbursements")
       .select(COLUMNS, { count: "exact" })
       .eq("status", status)
-      .order(order, { ascending: true })
+      .order(order, { ascending })
       .order("id")
       .range(from, to) as unknown as Counted,
   );
@@ -322,6 +324,13 @@ export const loadHandedOut = (pageNo = 1) =>
 /** Settled and waiting for the Manager to verify, longest waiting first. */
 export const loadSettledWaiting = (pageNo = 1) =>
   byStatus("imprest.settled_waiting", "settled", "imprest_disbursement_settled_at", pageNo);
+
+/**
+ * Verified payments, most recently verified first (issue #64), so the Manager and Directors can
+ * find a posted payment again once it has left the settled queue.
+ */
+export const loadVerified = (pageNo = 1) =>
+  byStatus("imprest.verified", "verified", "imprest_verifications(verified_at)", pageNo, false);
 
 /**
  * The viewer's own disbursements, newest first, in every status. Filtered on the proposer as well
