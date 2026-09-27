@@ -434,22 +434,38 @@ type LineRow = {
   imprest_receipts: { id: string; file_name: string; content_type: string } | null;
 };
 
+/**
+ * Cycles per read of their lines. A cycle has at most 20 lines, so a batch returns at most 800
+ * rows, under the API's 1,000-row cap however many times a payment was sent back.
+ */
+const CYCLES_PER_READ = 40;
+
 /** The lines of every cycle named, keyed by settlement, each in line order. */
 async function loadLines(settlementIds: string[]): Promise<Map<string, SettlementLineView[]>> {
   const byCycle = new Map<string, SettlementLineView[]>(settlementIds.map((id) => [id, []]));
   if (settlementIds.length === 0) return byCycle;
   const supabase = await createServerSupabase();
-  const rows = requireRows(
-    (await supabase
-      .from("imprest_settlement_lines")
-      .select(
-        "settlement_id, line_no, amount_tzs, purpose, no_receipt_reason, no_receipt_note, imprest_receipts(id, file_name, content_type)",
-      )
-      .in("settlement_id", settlementIds)
-      .order("settlement_id")
-      .order("line_no")) as unknown as { data: LineRow[] | null; error: { message: string } | null },
-    "imprest.settlement_lines",
-  );
+  const batches: string[][] = [];
+  for (let i = 0; i < settlementIds.length; i += CYCLES_PER_READ) {
+    batches.push(settlementIds.slice(i, i + CYCLES_PER_READ));
+  }
+  const rows = (
+    await Promise.all(
+      batches.map(async (ids) =>
+        requireRows(
+          (await supabase
+            .from("imprest_settlement_lines")
+            .select(
+              "settlement_id, line_no, amount_tzs, purpose, no_receipt_reason, no_receipt_note, imprest_receipts(id, file_name, content_type)",
+            )
+            .in("settlement_id", ids)
+            .order("settlement_id")
+            .order("line_no")) as unknown as { data: LineRow[] | null; error: { message: string } | null },
+          "imprest.settlement_lines",
+        ),
+      ),
+    )
+  ).flat();
   for (const row of rows) {
     byCycle.get(row.settlement_id)?.push({
       lineNo: row.line_no,
