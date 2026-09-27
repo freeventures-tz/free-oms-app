@@ -4,12 +4,10 @@ What each release of Free Ventures OMS adds, in plain language.
 
 ## [0.3.3] — 2026-09-27
 
-Nothing changes for people using the app.
-
 ### IMPROVED
 
-- The instructions for the agents that build the app are shorter. The blank lines between their
-  sections are gone, and the rules are unchanged.
+- Nothing changes for people using the app. The instructions for the agents that build it are
+  shorter to read, and the rules in them are the same.
 
 ## [0.3.2] — 2026-09-26
 
