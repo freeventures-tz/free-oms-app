@@ -11,7 +11,9 @@ import {
 } from "@/app/(app)/imprest/actions";
 import { ActionForm, Outcome, TOUCH_FLOOR, useFreshKey } from "@/app/(app)/imprest/funding-forms";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FormError, Help, Input, Label } from "@/components/ui/field";
+import { Field, FieldError, FormError, FormSuccess, Help, Input, Label } from "@/components/ui/field";
+import { Card } from "@/components/ui/surface";
+import { publicEnv } from "@/lib/env";
 import type { ReceiptTicket } from "@/lib/imprest/commands";
 import { decryptReceipt, encryptReceipt } from "@/lib/imprest/receipt-crypto";
 import {
@@ -25,7 +27,6 @@ import {
   settlementFigures,
   type NoReceiptReason,
 } from "@/lib/imprest/spending";
-import { publicEnv } from "@/lib/env";
 import { formatTzs, parseTzs } from "@/lib/money";
 import { createClient } from "@/lib/supabase/client";
 
@@ -44,10 +45,21 @@ const SPENDING_UNCONFIRMED_KEY = "spendingErrors.unconfirmed";
 type Target = { id: string; version: number };
 
 /** The Cashier records that the approved amount went out, and to whom. There is no amount field. */
-export function HandOutForm({ disbursement, amount }: { disbursement: Target; amount: number }) {
+function HandOutForm({
+  disbursement,
+  amount,
+  onDone,
+}: {
+  disbursement: Target;
+  amount: number;
+  onDone: (successKey: string) => void;
+}) {
   const t = useTranslations();
   const locale = useLocale();
-  const [key, controller] = useFreshKey(undefined, SPENDING_UNCONFIRMED_KEY);
+  const [key, controller] = useFreshKey(
+    () => onDone("imprest.spending.success.handedOut"),
+    SPENDING_UNCONFIRMED_KEY,
+  );
   return (
     <div className="flex flex-col gap-3" data-testid="hand-out">
       <Help>{t("imprest.spending.handOut.help", { amount: formatTzs(amount, locale) })}</Help>
@@ -69,8 +81,51 @@ export function HandOutForm({ disbursement, amount }: { disbursement: Target; am
         testId="hand-out-form"
         idempotencyKey={key}
       />
-      <Outcome controller={controller} />
+      {/* Success is shown by CashierStep, which outlives this form. */}
+      {controller.result.successKey ? null : <Outcome controller={controller} />}
     </div>
+  );
+}
+
+/**
+ * The step that is the proposing Cashier's to take: hand out an approved payment, then settle it.
+ *
+ * The page renders this in the same place whatever the status, so it stays mounted when a success
+ * refreshes the page and the status moves on. The form that succeeded goes, and its confirmation
+ * stays until the Cashier leaves (design.md §12.7: success is shown once the server confirms it).
+ */
+export function CashierStep({
+  status,
+  disbursement,
+  amount,
+}: {
+  status: string;
+  disbursement: Target;
+  amount: number;
+}) {
+  const t = useTranslations();
+  const [done, setDone] = useState<string | null>(null);
+
+  const form =
+    status === "approved" ? (
+      <>
+        <h2 className="text-lg font-semibold">{t("imprest.spending.handOut.title")}</h2>
+        <HandOutForm disbursement={disbursement} amount={amount} onDone={setDone} />
+      </>
+    ) : status === "handed_out" ? (
+      <>
+        <h2 className="text-lg font-semibold">{t("imprest.spending.settle.title")}</h2>
+        <SettleForm disbursement={disbursement} approved={amount} onDone={setDone} />
+      </>
+    ) : null;
+
+  if (!form && !done) return null;
+  return (
+    <Card className="flex flex-col gap-3" data-testid="cashier-step">
+      {/* The confirmation of the step just taken, above the next step's form. */}
+      {done ? <FormSuccess role="status">{t(done)}</FormSuccess> : null}
+      {form}
+    </Card>
   );
 }
 
@@ -143,14 +198,22 @@ function sendToBucket(
  * Settles a handed-out disbursement in one submission (approved default 5): every line, the cash
  * that came back, and an explanation when something is unaccounted for.
  */
-export function SettleForm({ disbursement, approved }: { disbursement: Target; approved: number }) {
+function SettleForm({
+  disbursement,
+  approved,
+  onDone,
+}: {
+  disbursement: Target;
+  approved: number;
+  onDone: (successKey: string) => void;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const [lines, setLines] = useState<Line[]>([]);
   const [returned, setReturned] = useState("");
   const [explanation, setExplanation] = useState("");
   const [submitProblem, setSubmitProblem] = useState<string | null>(null);
-  const [key, controller] = useFreshKey(undefined, SPENDING_UNCONFIRMED_KEY);
+  const [key, controller] = useFreshKey(() => onDone("imprest.spending.success.settled"), SPENDING_UNCONFIRMED_KEY);
   const locked = useDeferredValue(controller.pending);
   const problems = controller.running === null ? controller.result.fieldErrors : undefined;
   const previews = useRef(new Set<string>());
@@ -433,7 +496,7 @@ export function SettleForm({ disbursement, approved }: { disbursement: Target; a
                                 aria-label={t("imprest.spending.settle.uploading", { name: current.file.name })}
                               />
                             ) : null}
-                            <span className="text-xs text-muted-foreground" role="status">
+                            <span className="text-xs text-muted-foreground" aria-live="polite">
                               {current.status === "done"
                                 ? t("imprest.spending.settle.uploaded")
                                 : current.status === "failed"
@@ -609,7 +672,7 @@ export function SettleForm({ disbursement, approved }: { disbursement: Target; a
           {t("imprest.spending.settle.submit")}
         </Button>
       </form>
-      <Outcome controller={controller} />
+      {controller.result.successKey ? null : <Outcome controller={controller} />}
     </div>
   );
 

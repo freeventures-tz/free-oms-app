@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { DisbursementActions } from "@/app/(app)/imprest/disbursement-forms";
-import { HandOutForm, ReceiptView, SettleForm } from "@/app/(app)/imprest/settlement-forms";
+import { CashierStep, ReceiptView } from "@/app/(app)/imprest/settlement-forms";
 import { DisbursementFlags, DisbursementStatusChip } from "@/app/(app)/imprest/spending";
 import { Card, PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
@@ -128,18 +128,9 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         ) : null}
       </Card>
 
-      {cashierDue && disbursement.status === "approved" ? (
-        <Card className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">{t("handOut.title")}</h2>
-          <HandOutForm disbursement={target} amount={disbursement.amount} />
-        </Card>
-      ) : null}
-
-      {cashierDue && disbursement.status === "handed_out" ? (
-        <Card className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">{t("settle.title")}</h2>
-          <SettleForm disbursement={target} approved={disbursement.amount} />
-        </Card>
+      {/* Always in this place for the proposing Cashier, so its confirmation outlives the step. */}
+      {cashierDue ? (
+        <CashierStep status={disbursement.status} disbursement={target} amount={disbursement.amount} />
       ) : null}
 
       <section className="flex flex-col gap-3" aria-labelledby="history-heading">

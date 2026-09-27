@@ -314,7 +314,7 @@ test.describe("imprest disbursements", () => {
     await as(page, "director");
     await page.goto("/imprest");
     await expect(page.getByTestId("funding-total")).toBeVisible();
-    await expect(page.getByTestId("set-aside-total")).toContainText("Approved but not yet paid.");
+    await expect(page.getByTestId("set-aside-total")).toContainText("and not yet verified.");
     await expect(page.getByTestId("free-to-approve")).toContainText("An approval above this is refused.");
     await openDisbursement(page, purpose);
     await expect(page.getByTestId("read-only")).toBeVisible();
