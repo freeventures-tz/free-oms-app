@@ -170,6 +170,12 @@ async function as(page: Page, who: Who) {
 
 const money = (text: string) => Number(text.replace(/\D/g, ""));
 
+/**
+ * The settled queue lists the longest waiting first, 25 to a page, and the whole suite shares one
+ * database, so a payment settled just now is on the last page. A page past the end shows the last.
+ */
+const LAST_SETTLED_PAGE = "/imprest?settled=9999";
+
 function psql(sql: string) {
   const url = process.env.SUPABASE_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
   try {
@@ -198,7 +204,7 @@ test.describe("imprest verification", () => {
     const before = await position();
 
     await as(page, "manager");
-    await page.goto("/imprest");
+    await page.goto(LAST_SETTLED_PAGE);
     await expect(page.getByTestId("funding-total").locator("dt")).toHaveText("Posted balance");
     await expect(page.getByTestId("funding-total")).toContainText(
       "Confirmed funding minus verified spending and losses.",
@@ -253,7 +259,7 @@ test.describe("imprest verification", () => {
     await expect(page.getByTestId("flag-no-receipt")).toBeVisible();
     await expect(page.getByRole("button", { name: "Verify", exact: true })).toHaveCount(0);
 
-    await page.goto("/imprest");
+    await page.goto(LAST_SETTLED_PAGE);
     await expect(page.getByTestId("disbursements-settled").getByRole("link", { name: new RegExp(purpose) })).toHaveCount(0);
     expect(money(await page.getByTestId("funding-total").locator(".fv-numeric").innerText())).toBe(
       after.posted_balance_tzs,
@@ -307,7 +313,7 @@ test.describe("imprest verification", () => {
     await verifyByCommand(done);
 
     await as(page, "director");
-    await page.goto("/imprest");
+    await page.goto(LAST_SETTLED_PAGE);
     await expect(page.getByTestId("funding-total").locator("dt")).toHaveText("Posted balance");
     await expect(page.getByTestId("disbursements-settled-note")).toContainText("The Manager checks each one");
     await page.getByTestId("disbursements-settled").getByRole("link", { name: new RegExp(waitingPurpose) }).click();
