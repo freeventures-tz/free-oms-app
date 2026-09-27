@@ -718,6 +718,13 @@ begin
   values (v_id, p_disbursement_id, 'imprest/' || p_disbursement_id::text || '/' || v_id::text,
           v_name, p_content_type, p_byte_size, extensions.gen_random_bytes(32), v_actor);
 
+  -- The key never goes into the audit trail: the trail is readable more widely than a receipt.
+  perform private.imprest_disbursement_audit(v_actor, 'imprest_receipt_registered', p_disbursement_id,
+    null,
+    jsonb_build_object('receipt_id', v_id, 'file_name', v_name, 'content_type', p_content_type,
+                       'byte_size', p_byte_size),
+    'api.staff_register_imprest_receipt');
+
   return jsonb_build_object('ok', true, 'reason', 'registered',
                             'receipt', private.imprest_receipt_json(v_id, true));
 end;
@@ -776,6 +783,7 @@ declare
   v_amount      bigint;
   v_purpose     text;
   v_receipt     uuid;
+  v_given       boolean;
   v_reason      text;
   v_note        text;
   v_rc          public.imprest_receipts%rowtype;
@@ -841,20 +849,26 @@ begin
 
     v_reason := nullif(v_line ->> 'no_receipt_reason', '');
     v_note := v_line ->> 'no_receipt_note';
-    if jsonb_typeof(v_line -> 'receipt_id') = 'string' then
+    -- A receipt is GIVEN when the key holds anything but null, whatever its type, so a number
+    -- cannot slip past the receipt-or-reason rule and then fail a cast at insert.
+    v_given := coalesce(jsonb_typeof(v_line -> 'receipt_id'), 'null') <> 'null';
+
+    if not v_given and v_reason is null then
+      return jsonb_build_object('ok', false, 'reason', 'line_evidence_required', 'line', v_i);
+    elsif v_given and (v_reason is not null or v_note is not null) then
+      return jsonb_build_object('ok', false, 'reason', 'line_evidence_both', 'line', v_i);
+    end if;
+
+    v_receipt := null;
+    if v_given then
+      if jsonb_typeof(v_line -> 'receipt_id') <> 'string' then
+        return jsonb_build_object('ok', false, 'reason', 'receipt_not_found', 'line', v_i);
+      end if;
       begin
         v_receipt := (v_line ->> 'receipt_id')::uuid;
       exception when invalid_text_representation then
         return jsonb_build_object('ok', false, 'reason', 'receipt_not_found', 'line', v_i);
       end;
-    else
-      v_receipt := null;
-    end if;
-
-    if v_receipt is null and v_reason is null then
-      return jsonb_build_object('ok', false, 'reason', 'line_evidence_required', 'line', v_i);
-    elsif v_receipt is not null and (v_reason is not null or v_note is not null) then
-      return jsonb_build_object('ok', false, 'reason', 'line_evidence_both', 'line', v_i);
     end if;
 
     if v_reason is not null then

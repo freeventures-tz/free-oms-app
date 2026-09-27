@@ -20,7 +20,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(112);
+select plan(114);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -296,6 +296,12 @@ select tests.cashier();
 select is(tests.keep('r1', api.staff_register_imprest_receipt(
             tests.did('trip'), 'petrol.jpg', 'image/jpeg', 3000000, 'rr-1')),
           'registered', 'the Cashier registers the petrol receipt');
+select ok(exists (select 1 from public.audit_events
+                   where action = 'imprest_receipt_registered' and entity_id = tests.did('trip')
+                     and actor_id = 'e6200000-0000-0000-0000-000000000004'
+                     and actor_role = 'cashier'
+                     and after_state ->> 'receipt_id' = tests.rid('r1')::text),
+          'registering a receipt is on the audit trail, with the Cashier and the receipt');
 select ok(tests.rpath('r1') = 'imprest/' || tests.did('trip') || '/' || tests.rid('r1'),
           'its path is tied to the disbursement and the receipt');
 select is(length(decode((select res -> 'receipt' ->> 'key' from r where name = 'r1'), 'base64')), 32,
@@ -405,6 +411,12 @@ select is(api.staff_settle_imprest_disbursement(tests.did('trip'), 3,
             jsonb_build_array(tests.line(35000, 'Petrol', null, 'other', 'x')),
             25000, null, 's-other') ->> 'reason',
           'no_receipt_note_required', '"Other" with an explanation under three characters is refused');
+select is(api.staff_settle_imprest_disbursement(tests.did('trip'), 3,
+            jsonb_build_array(jsonb_build_object('amount_tzs', 35000, 'purpose', 'Petrol',
+                                                 'receipt_id', 12345,
+                                                 'no_receipt_reason', 'transport_fare')),
+            25000, null, 's-number') ->> 'reason',
+          'line_evidence_both', 'a receipt id that is not text is refused, not cast');
 select is(api.staff_settle_imprest_disbursement(tests.did('trip'), 3,
             jsonb_build_array(tests.line(35000, 'Petrol', null, 'forgot')),
             25000, null, 's-reason') ->> 'reason',
