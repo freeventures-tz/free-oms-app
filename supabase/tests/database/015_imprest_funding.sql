@@ -97,6 +97,7 @@ select is(
      join pg_roles o on o.oid = p.proowner
     where n.nspname = 'api' and p.proname like '%imprest%'
       and p.proname not like '%disbursement%' and p.proname not like '%receipt%'
+      and p.proname not like '%settlement%'
       and p.proname <> 'staff_imprest_spending_position'
       and p.prosecdef and o.rolname = 'fv_definer_owner'),
   7,
