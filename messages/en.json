@@ -1318,7 +1318,7 @@
         "amount": "Amount (TZS)",
         "purpose": "What it was for",
         "purposeExample": "Petrol, Dar to Kibaha",
-        "evidence": "Receipt",
+        "evidence": "Receipt or reason",
         "hasReceipt": "Receipt",
         "noReceipt": "No receipt",
         "takePhoto": "Take photo",

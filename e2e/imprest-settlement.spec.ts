@@ -483,3 +483,155 @@ test.describe("imprest hand-out and settlement", () => {
     await expect(out).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Mobile benchmark, opt-in, the method of the funding and disbursement benchmarks:
+//
+//     FV_BENCHMARK=1 npx playwright test --project=mobile e2e/imprest-settlement.spec.ts -g benchmark
+//
+// Hand-out and Settle: a real touch starts the clock inside the page, acknowledgement is the first
+// animation frame after the touched control reports `aria-busy`, and completion is the server's
+// confirmation. The receipt upload is timed on its own, from choosing a 3 MB photo to the file
+// being stored, because it is bound by the uplink rather than by the command.
+// ---------------------------------------------------------------------------------------------
+
+const BENCHMARK = process.env.FV_BENCHMARK === "1";
+const SAMPLES = 20;
+const UPLOAD_SAMPLES = 5;
+const PHOTO_BYTES = 3 * 1024 * 1024;
+const PROFILES = [
+  { name: "Slow 4G", down: (1.6 * 1024 * 1024) / 8, up: (750 * 1024) / 8, latency: 562.5, cpu: 4 },
+  { name: "Fast 4G", down: (9 * 1024 * 1024) / 8, up: (1.5 * 1024 * 1024) / 8, latency: 85, cpu: 4 },
+] as const;
+type Profile = (typeof PROFILES)[number];
+
+function summary(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = (q: number) => sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
+  return { n: sorted.length, p50: Math.round(rank(0.5)), p95: Math.round(rank(0.95)), worst: Math.round(sorted.at(-1)!) };
+}
+
+async function throttled<T>(page: Page, profile: Profile, run: () => Promise<T>): Promise<T> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.emulateNetworkConditions", {
+    offline: false,
+    downloadThroughput: profile.down,
+    uploadThroughput: profile.up,
+    latency: profile.latency,
+  });
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: profile.cpu });
+  try {
+    return await run();
+  } finally {
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false, downloadThroughput: -1, uploadThroughput: -1, latency: 0,
+    });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await cdp.detach();
+  }
+}
+
+/** Taps `control` under `profile` and returns the acknowledgement and completion times in ms. */
+async function measureTap(page: Page, profile: Profile, control: string, done: string) {
+  return throttled(page, profile, async () => {
+    const button = page.locator(control);
+    await button.evaluate((el, doneText) => {
+      const w = window as unknown as { __fv: { t0?: number; ack?: number; done?: number } };
+      w.__fv = {};
+      el.addEventListener("pointerdown", () => (w.__fv.t0 = performance.now()), { once: true });
+      new MutationObserver((_, observer) => {
+        if (el.getAttribute("aria-busy") === "true" && w.__fv.t0 !== undefined) {
+          requestAnimationFrame(() => (w.__fv.ack = performance.now() - w.__fv.t0!));
+          observer.disconnect();
+        }
+      }).observe(el, { attributes: true });
+      new MutationObserver((_, observer) => {
+        if ([...document.querySelectorAll("[role=status]")].some((s) => s.textContent?.includes(doneText))) {
+          w.__fv.done = performance.now() - (w.__fv.t0 ?? performance.now());
+          observer.disconnect();
+        }
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    }, done);
+    await button.tap();
+    await expect(page.getByRole("status").filter({ hasText: done })).toBeVisible({ timeout: 30_000 });
+    const sample = await page.evaluate(() => (window as unknown as { __fv: { ack?: number; done?: number } }).__fv);
+    return { ack: sample.ack ?? Number.POSITIVE_INFINITY, done: sample.done ?? Number.POSITIVE_INFINITY };
+  });
+}
+
+function report(label: string, ack: number[], done: number[]) {
+  const a = summary(ack);
+  const d = summary(done);
+  console.log(`${label} ack  n=${a.n} p50=${a.p50}ms p95=${a.p95}ms worst=${a.worst}ms`);
+  console.log(`${label} done n=${d.n} p50=${d.p50}ms p95=${d.p95}ms worst=${d.worst}ms`);
+  expect(a.worst, `${label} acknowledgement`).toBeLessThanOrEqual(100);
+  expect(d.p95, `${label} completion p95`).toBeLessThanOrEqual(2500);
+}
+
+(BENCHMARK ? test.describe : test.describe.skip)("imprest settlement mobile benchmark", () => {
+  test.setTimeout(60 * 60_000);
+
+  test("Hand out and Settle: acknowledgement and server-confirmed completion over 4G", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile", "the mobile profile only");
+    await ensureFree(SAMPLES * PROFILES.length * 2 * 1000 + 1000);
+    await as(page, "cashier");
+
+    for (const profile of PROFILES) {
+      const ack: number[] = [];
+      const done: number[] = [];
+      for (let i = 0; i < SAMPLES; i += 1) {
+        const row = await seedApproved(1000, `Bench hand-out ${SUFFIX} ${profile.name} ${i}`);
+        await page.goto(`/imprest/disbursements/${row.id}`);
+        await page.getByTestId("hand-out-form").getByLabel("Who received it").fill("Bench driver");
+        const sample = await measureTap(page, profile, "[data-testid=hand-out-form] button[type=submit]", "Hand-out recorded.");
+        ack.push(sample.ack);
+        done.push(sample.done);
+      }
+      report(`${profile.name} hand-out`, ack, done);
+    }
+
+    for (const profile of PROFILES) {
+      const ack: number[] = [];
+      const done: number[] = [];
+      for (let i = 0; i < SAMPLES; i += 1) {
+        const row = await seedHandedOut(1000, `Bench settle ${SUFFIX} ${profile.name} ${i}`);
+        await page.goto(`/imprest/disbursements/${row.id}`);
+        const form = page.getByTestId("settle-form");
+        await addLine(form, 1, "800", "Bajaji", { reason: "Transport fare" });
+        await form.getByLabel("Cash returned (TZS)").fill("200");
+        const sample = await measureTap(page, profile, "[data-testid=settle-submit]", "Settled.");
+        ack.push(sample.ack);
+        done.push(sample.done);
+      }
+      report(`${profile.name} settle`, ack, done);
+    }
+  });
+
+  test("a 3 MB phone photo: from choosing it to stored, over 4G", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile", "the mobile profile only");
+    await ensureFree(UPLOAD_SAMPLES * PROFILES.length * 1000 + 1000);
+    await as(page, "cashier");
+    // Random bytes the size of a phone photo. Encryption makes every file look like this anyway.
+    const photo = { name: "photo.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(PHOTO_BYTES, 7) };
+
+    for (const profile of PROFILES) {
+      const times: number[] = [];
+      for (let i = 0; i < UPLOAD_SAMPLES; i += 1) {
+        const row = await seedHandedOut(1000, `Bench upload ${SUFFIX} ${profile.name} ${i}`);
+        await page.goto(`/imprest/disbursements/${row.id}`);
+        const form = page.getByTestId("settle-form");
+        await form.getByTestId("add-line").click();
+        const line = form.getByTestId("settle-line-1");
+        const elapsed = await throttled(page, profile, async () => {
+          const start = Date.now();
+          await line.getByTestId("choose-file").setInputFiles(photo);
+          await expect(line.getByTestId("upload-status")).toHaveAttribute("data-status", "done", { timeout: 180_000 });
+          return Date.now() - start;
+        });
+        times.push(elapsed);
+      }
+      const s = summary(times);
+      console.log(`${profile.name} upload ${PHOTO_BYTES} bytes n=${s.n} p50=${s.p50}ms p95=${s.p95}ms worst=${s.worst}ms`);
+    }
+  });
+});
