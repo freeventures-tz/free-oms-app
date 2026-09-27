@@ -2,6 +2,33 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.5.0] — 2026-09-27
+
+The Manager now checks each settled payment and verifies it, which posts it. The imprest fund
+finally shows what was actually spent, and the money a settled payment held back is freed. Sending
+a settlement back to the Cashier comes in a later release. The staff workflows stay closed.
+
+### NEW
+
+- The Manager opens a payment from "Settled, waiting for you", reads its lines and receipts, and
+  verifies it with one confirmation. There is no amount to type: the payment is verified exactly as
+  the Cashier settled it.
+- Before confirming, the Manager sees what will happen: what posts as imprest expense, what posts as
+  an unexplained loss, and what came back and is free to approve again.
+- Verifying posts what was used as an imprest expense. Anything not accounted for posts as an
+  unexplained loss that waits for a Director's decision. Neither can be changed or deleted.
+- A verified payment shows what was posted, who verified it and when, for the Manager, Directors
+  and the Cashier who settled it. Its flags stay. The Manager and Directors find verified payments
+  again in a new "Verified" list, most recent first.
+
+### IMPROVED
+
+- The first imprest figure is now the posted balance: confirmed funding minus verified spending and
+  losses. It goes down only when the Manager verifies a payment.
+- Verifying takes the whole approved amount out of what is set aside, so only the cash that came
+  back is free to approve again. Money not accounted for never came back to the tin, so it stays
+  spent.
+
 ## [0.4.0] — 2026-09-27
 
 Once a payment is approved, the Cashier hands the cash out and later settles it with receipts and

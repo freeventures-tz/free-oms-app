@@ -21,6 +21,7 @@ import {
   reportMismatch,
   requestFunding,
   settleDisbursement,
+  verifyDisbursement,
   withdrawDisbursement,
   type ImprestResult,
   type ReceiptTicket,
@@ -44,6 +45,7 @@ import {
   reportMismatchSchema,
   requestFundingSchema,
   settleSchema,
+  verifyDisbursementSchema,
 } from "@/lib/validation/imprest";
 
 /**
@@ -127,6 +129,9 @@ const SPENDING_ERRORS = new Set([
   "receipt_name_invalid",
   "too_many_receipts",
   "no_receipt",
+  // Verification (issue #64).
+  "not_settled",
+  "settlement_not_latest",
 ]);
 
 type Messages = { namespace: "imprestErrors" | "spendingErrors"; known: Set<string> };
@@ -148,7 +153,7 @@ async function fromRefusal(
   // `not_approved` with the status it met, and the Manager is told why in those words.
   const status = refusal.context?.status;
   const result =
-    refusal.reason === "not_approved" && (status === "handed_out" || status === "settled")
+    refusal.reason === "not_approved" && (status === "handed_out" || status === "settled" || status === "verified")
       ? { ...refusal, reason: "already_handed_out" }
       : refusal;
   // Shillings in a refusal are shown the way every other amount is: grouped, in the viewer's locale.
@@ -339,6 +344,18 @@ export async function cancelDisbursementAction(_p: ImprestActionState, data: For
     { ...disbursementTarget(data), reason: data.get("reason") ?? "" },
     cancelDisbursement,
     "imprest.spending.success.cancelled",
+    SPENDING_MESSAGES,
+  );
+}
+
+/** The Manager verifies a settlement as it stands (issue #64). */
+export async function verifyDisbursementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    verifyDisbursementSchema,
+    { ...disbursementTarget(data), settlementId: data.get("settlementId") },
+    verifyDisbursement,
+    "imprest.spending.success.verified",
     SPENDING_MESSAGES,
   );
 }

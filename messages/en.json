@@ -1100,8 +1100,8 @@
     "title": "Imprest",
     "description": "Operating cash and the payments made from it: who asked, who decided, and what was handed over and confirmed.",
     "total": {
-      "label": "Posted imprest funding",
-      "help": "The sum of funding the Manager has confirmed receiving. It is not a cash count, and payments are not recorded here yet.",
+      "label": "Posted balance",
+      "help": "Confirmed funding minus verified spending and losses. It is not a cash count.",
       "noFund": "No imprest funding has been requested yet."
     },
     "request": {
@@ -1189,7 +1189,7 @@
         "setAside": "Set aside for approved payments",
         "setAsideHelp": "Approved, handed out or settled, and not yet verified. This money can't be approved again.",
         "free": "Free to approve",
-        "freeHelp": "Posted imprest funding minus what is set aside. An approval above this is refused.",
+        "freeHelp": "The posted balance minus what is set aside. An approval above this is refused.",
         "noFund": "No imprest fund is open yet. Payments can be proposed once funding is received.",
         "awaiting": "Awaiting verification",
         "awaitingHelp": "Cash that has left the fund and hasn't been checked by the Manager yet."
@@ -1212,7 +1212,8 @@
         "withdrawn": "Withdrawn",
         "cancelled": "Cancelled",
         "handed_out": "Handed out, not settled",
-        "settled": "Settled, awaiting verification"
+        "settled": "Settled, awaiting verification",
+        "verified": "Verified"
       },
       "propose": {
         "title": "Propose a payment",
@@ -1240,7 +1241,6 @@
         "settled": "Settled, waiting for you ({count})",
         "settledDirector": "Settled, waiting for the Manager ({count})",
         "settledEmpty": "No settled payments are waiting.",
-        "verifyLater": "Checking a settlement isn't built yet. Settled payments wait here, still set aside, until it is.",
         "handedOutTo": "To {recipient} · out for {age}",
         "usedReturned": "Used {used} · Returned {returned}",
         "waitingFor": "Waiting for {age}",
@@ -1248,7 +1248,11 @@
         "ageHours": "{count, plural, one {# hour} other {# hours}}",
         "ageDays": "{count, plural, one {# day} other {# days}}",
         "nextHandOut": "Next: hand out the cash",
-        "nextSettle": "Next: settle it"
+        "nextSettle": "Next: settle it",
+        "settledNote": "Open one to check its lines and receipts, then verify it. The amounts can't be changed here.",
+        "settledNoteDirector": "The Manager checks each one and verifies it. Directors read them here.",
+        "verified": "Verified, most recent first ({count})",
+        "verifiedEmpty": "No payments have been verified yet."
       },
       "fields": {
         "rejectionReason": "Reason for rejecting",
@@ -1272,7 +1276,8 @@
         "withdrawn": "Proposal withdrawn.",
         "cancelled": "Approval cancelled. The money set aside for it is free again.",
         "handedOut": "Hand-out recorded. Settle it when the spending is done.",
-        "settled": "Settled. It now waits for the Manager to verify it, and stays set aside until then."
+        "settled": "Settled. It now waits for the Manager to verify it, and stays set aside until then.",
+        "verified": "Verified. It is posted and no longer set aside."
       },
       "detail": {
         "back": "Back to imprest",
@@ -1280,15 +1285,16 @@
         "category": "Category",
         "proposedBy": "Proposed by",
         "waitingManager": "Waiting for the Manager to approve or reject it. Don't pay yet.",
-        "readOnly": "Directors can read payments here. The Manager approves, rejects and cancels them, and the Cashier hands them out and settles them.",
+        "readOnly": "Directors can read payments here. The Manager approves, rejects, cancels and verifies them, and the Cashier hands them out and settles them.",
         "recipient": "Handed out to",
         "handedOutAt": "on {at}",
         "handedOutNote": "The cash has been handed out, so this payment can no longer be cancelled. The Cashier settles it with receipts and any change.",
-        "waitingVerification": "Settled. The Manager will verify it once that step is built.",
+        "waitingVerification": "Settled. It waits for the Manager to check and verify it.",
         "receiptAlt": "Receipt {name}",
         "openPdf": "Open {name}",
         "saveFile": "Save {name}",
-        "viewReceipt": "View receipt"
+        "viewReceipt": "View receipt",
+        "verifiedNote": "Verified. It is posted and can't be changed."
       },
       "history": {
         "proposed": "Proposed",
@@ -1297,7 +1303,8 @@
         "withdrawn": "Withdrawn",
         "cancelled": "Approval cancelled and money freed",
         "handed_out": "Cash handed out",
-        "settled": "Settled"
+        "settled": "Settled",
+        "verified": "Verified and posted"
       },
       "flags": {
         "noReceipt": "No receipt",
@@ -1357,6 +1364,23 @@
         "emergency_purchase": "Emergency purchase",
         "receipt_lost_or_damaged": "Receipt lost or damaged",
         "other": "Other"
+      },
+      "posted": {
+        "title": "Posted",
+        "expense": "Imprest expense",
+        "loss": "Unexplained loss",
+        "lossNote": "Awaiting a Director's decision",
+        "verifiedBy": "Verified by {name} on {at}"
+      },
+      "verify": {
+        "open": "Verify",
+        "title": "Verify this settlement",
+        "help": "You verify it exactly as the Cashier settled it. If something is wrong, don't verify it.",
+        "expense": "{amount} posts as imprest expense",
+        "loss": "{amount} posts as an unexplained loss for a Director to decide on",
+        "released": "{amount} came back and is free to approve again",
+        "balance": "Only this step lowers the posted balance. It can't be undone.",
+        "confirm": "Verify and post {amount}"
       }
     }
   },
@@ -1427,7 +1451,9 @@
     "receipt_unavailable": "The receipt could not be opened. Try again.",
     "upload_failed": "The upload didn't finish. Everything else you entered is kept.",
     "receipt_pending": "Wait for the receipts to finish uploading, then settle.",
-    "receipt_not_uploaded_yet": "A receipt didn't upload. Press Try again on it, or remove that line."
+    "receipt_not_uploaded_yet": "A receipt didn't upload. Press Try again on it, or remove that line.",
+    "not_settled": "Only a settled payment can be verified, and this one isn't waiting for that.",
+    "settlement_not_latest": "The settlement changed since you opened it. Reload to see the latest one."
   },
   "reports": {
     "title": "Daily reports",

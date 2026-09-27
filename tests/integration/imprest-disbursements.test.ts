@@ -40,6 +40,7 @@ type Result = {
 type Position = {
   fund_id: string;
   posted_funding_tzs: number | null;
+  posted_balance_tzs: number | null;
   set_aside_tzs: number | null;
   free_to_approve_tzs: number;
 };
@@ -301,12 +302,16 @@ describe("reads", () => {
   it("shows a Director and the Manager every figure, and a Cashier only Free to approve", async () => {
     const full = await position(director);
     expect(full.posted_funding_tzs).toBeGreaterThan(0);
-    expect(full.free_to_approve_tzs).toBe(full.posted_funding_tzs! - full.set_aside_tzs!);
+    // Issue #64: Free to approve is the posted balance, which verified spending and losses lower,
+    // minus what is set aside.
+    expect(full.posted_balance_tzs!).toBeLessThanOrEqual(full.posted_funding_tzs!);
+    expect(full.free_to_approve_tzs).toBe(full.posted_balance_tzs! - full.set_aside_tzs!);
     expect(await position(manager)).toEqual(full);
 
     expect(await position(cashier)).toEqual({
       fund_id: full.fund_id,
       posted_funding_tzs: null,
+      posted_balance_tzs: null,
       set_aside_tzs: null,
       free_to_approve_tzs: full.free_to_approve_tzs,
       // Issue #62's fourth figure is the Manager's and the Directors', and never reaches a Cashier.

@@ -1100,8 +1100,8 @@
     "title": "Imprest",
     "description": "Fedha za uendeshaji na malipo yanayotoka humo: nani aliomba, nani aliamua, na nini kilikabidhiwa na kuthibitishwa.",
     "total": {
-      "label": "Ufadhili wa imprest uliothibitishwa",
-      "help": "Jumla ya ufadhili ambao Meneja amethibitisha kuupokea. Si hesabu ya fedha taslimu, na malipo bado hayarekodiwi hapa.",
+      "label": "Salio lililothibitishwa",
+      "help": "Ufadhili uliothibitishwa ukiondoa matumizi na hasara zilizohakikiwa. Si hesabu ya fedha taslimu.",
       "noFund": "Bado hakuna ombi la ufadhili wa imprest."
     },
     "request": {
@@ -1189,7 +1189,7 @@
         "setAside": "Kilichotengwa kwa malipo yaliyoidhinishwa",
         "setAsideHelp": "Kimeidhinishwa, kimetolewa au hesabu yake imefungwa, na bado hakijahakikiwa. Fedha hizi haziwezi kuidhinishwa tena.",
         "free": "Kinachoweza kuidhinishwa",
-        "freeHelp": "Ufadhili wa imprest uliothibitishwa ukiondoa kilichotengwa. Idhini inayozidi kiasi hiki inakataliwa.",
+        "freeHelp": "Salio lililothibitishwa ukiondoa kilichotengwa. Idhini inayozidi kiasi hiki inakataliwa.",
         "noFund": "Bado hakuna mfuko wa imprest uliofunguliwa. Malipo yanaweza kupendekezwa ufadhili ukishapokelewa.",
         "awaiting": "Kinasubiri uhakiki",
         "awaitingHelp": "Fedha zilizotoka kwenye mfuko ambazo Meneja bado hajazikagua."
@@ -1212,7 +1212,8 @@
         "withdrawn": "Imeondolewa",
         "cancelled": "Imefutwa",
         "handed_out": "Imetolewa, hesabu bado",
-        "settled": "Hesabu imefungwa, inasubiri uhakiki"
+        "settled": "Hesabu imefungwa, inasubiri uhakiki",
+        "verified": "Imehakikiwa"
       },
       "propose": {
         "title": "Pendekeza malipo",
@@ -1240,7 +1241,6 @@
         "settled": "Hesabu zimefungwa, zinakusubiri ({count})",
         "settledDirector": "Hesabu zimefungwa, zinamsubiri Meneja ({count})",
         "settledEmpty": "Hakuna malipo yaliyofungwa hesabu yanayosubiri.",
-        "verifyLater": "Uhakiki wa hesabu bado haujajengwa. Malipo yaliyofungwa hesabu yanasubiri hapa, bado yametengwa, hadi utakapojengwa.",
         "handedOutTo": "Kwa {recipient} · imetoka kwa {age}",
         "usedReturned": "Kilichotumika {used} · Kilichorudishwa {returned}",
         "waitingFor": "Inasubiri kwa {age}",
@@ -1248,7 +1248,11 @@
         "ageHours": "{count, plural, other {saa #}}",
         "ageDays": "{count, plural, other {siku #}}",
         "nextHandOut": "Hatua inayofuata: toa fedha",
-        "nextSettle": "Hatua inayofuata: funga hesabu"
+        "nextSettle": "Hatua inayofuata: funga hesabu",
+        "settledNote": "Fungua moja ukague mistari na risiti zake, kisha uihakiki. Kiasi hakiwezi kubadilishwa hapa.",
+        "settledNoteDirector": "Meneja anakagua kila moja na kuihakiki. Wakurugenzi wanazisoma hapa.",
+        "verified": "Yaliyohakikiwa, ya karibuni kwanza ({count})",
+        "verifiedEmpty": "Bado hakuna malipo yaliyohakikiwa."
       },
       "fields": {
         "rejectionReason": "Sababu ya kukataa",
@@ -1272,7 +1276,8 @@
         "withdrawn": "Pendekezo limeondolewa.",
         "cancelled": "Idhini imefutwa. Fedha zilizotengwa kwa ajili yake ziko huru tena.",
         "handedOut": "Utoaji umeandikwa. Funga hesabu matumizi yakikamilika.",
-        "settled": "Hesabu imefungwa. Sasa inasubiri Meneja aihakiki, na inabaki imetengwa hadi hapo."
+        "settled": "Hesabu imefungwa. Sasa inasubiri Meneja aihakiki, na inabaki imetengwa hadi hapo.",
+        "verified": "Imehakikiwa. Imeandikwa na haijatengwa tena."
       },
       "detail": {
         "back": "Rudi kwenye imprest",
@@ -1280,15 +1285,16 @@
         "category": "Aina",
         "proposedBy": "Imependekezwa na",
         "waitingManager": "Inasubiri Meneja aidhinishe au akatae. Usilipe bado.",
-        "readOnly": "Wakurugenzi wanaweza kusoma malipo hapa. Meneja ndiye anayeidhinisha, kukataa na kufuta, na Keshia ndiye anayetoa fedha na kufunga hesabu.",
+        "readOnly": "Wakurugenzi wanaweza kusoma malipo hapa. Meneja ndiye anayeidhinisha, kukataa, kufuta na kuhakiki, na Keshia ndiye anayetoa fedha na kufunga hesabu.",
         "recipient": "Imetolewa kwa",
         "handedOutAt": "tarehe {at}",
         "handedOutNote": "Fedha zimeshatolewa, kwa hivyo malipo haya hayawezi kufutwa tena. Keshia anafunga hesabu yake kwa risiti na chenji.",
-        "waitingVerification": "Hesabu imefungwa. Meneja ataihakiki hatua hiyo ikishajengwa.",
+        "waitingVerification": "Hesabu imefungwa. Inasubiri Meneja aikague na kuihakiki.",
         "receiptAlt": "Risiti {name}",
         "openPdf": "Fungua {name}",
         "saveFile": "Hifadhi {name}",
-        "viewReceipt": "Angalia risiti"
+        "viewReceipt": "Angalia risiti",
+        "verifiedNote": "Imehakikiwa. Imeandikwa na haiwezi kubadilishwa."
       },
       "history": {
         "proposed": "Imependekezwa",
@@ -1297,7 +1303,8 @@
         "withdrawn": "Imeondolewa",
         "cancelled": "Idhini imefutwa na fedha zimeachiliwa",
         "handed_out": "Fedha zimetolewa",
-        "settled": "Hesabu imefungwa"
+        "settled": "Hesabu imefungwa",
+        "verified": "Imehakikiwa na kuandikwa"
       },
       "flags": {
         "noReceipt": "Hakuna risiti",
@@ -1357,6 +1364,23 @@
         "emergency_purchase": "Ununuzi wa dharura",
         "receipt_lost_or_damaged": "Risiti imepotea au kuharibika",
         "other": "Nyingine"
+      },
+      "posted": {
+        "title": "Kilichoandikwa",
+        "expense": "Matumizi ya imprest",
+        "loss": "Hasara isiyoelezwa",
+        "lossNote": "Inasubiri uamuzi wa Mkurugenzi",
+        "verifiedBy": "Imehakikiwa na {name} tarehe {at}"
+      },
+      "verify": {
+        "open": "Hakiki",
+        "title": "Hakiki hesabu hii",
+        "help": "Unaihakiki kama Keshia alivyoifunga. Kama kuna kosa, usiihakiki.",
+        "expense": "{amount} kinaandikwa kama matumizi ya imprest",
+        "loss": "{amount} kinaandikwa kama hasara isiyoelezwa, Mkurugenzi aamue",
+        "released": "{amount} kilirudi na kinaweza kuidhinishwa tena",
+        "balance": "Hatua hii pekee ndiyo inapunguza salio lililothibitishwa. Haiwezi kutenduliwa.",
+        "confirm": "Hakiki na uandike {amount}"
       }
     }
   },
@@ -1427,7 +1451,9 @@
     "receipt_unavailable": "Risiti haikuweza kufunguliwa. Jaribu tena.",
     "upload_failed": "Upakiaji haukukamilika. Kila kitu kingine ulichoandika kimehifadhiwa.",
     "receipt_pending": "Subiri risiti zimalize kupakiwa, kisha funga hesabu.",
-    "receipt_not_uploaded_yet": "Risiti moja haikupakiwa. Bonyeza Jaribu tena juu yake, au ondoa mstari huo."
+    "receipt_not_uploaded_yet": "Risiti moja haikupakiwa. Bonyeza Jaribu tena juu yake, au ondoa mstari huo.",
+    "not_settled": "Malipo yaliyofungwa hesabu pekee ndiyo yanaweza kuhakikiwa, na haya hayasubiri hilo.",
+    "settlement_not_latest": "Hesabu imebadilika tangu uifungue. Pakia upya uone ya karibuni."
   },
   "reports": {
     "title": "Ripoti za kila siku",

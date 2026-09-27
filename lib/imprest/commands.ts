@@ -179,6 +179,19 @@ export const cancelDisbursement = (input: DisbursementTarget & { reason: string 
     p_idempotency_key: input.idempotencyKey,
   });
 
+/**
+ * Verification (issue #64), the Manager's. There is no amount: the settlement the Manager was shown
+ * is verified exactly as the Cashier submitted it. Used posts as the imprest expense and Not
+ * accounted for as an unexplained loss.
+ */
+export const verifyDisbursement = (input: DisbursementTarget & { settlementId: string }) =>
+  call("staff_verify_imprest_disbursement", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_settlement_id: input.settlementId,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
 // Hand-out and settlement (issue #62). Only the Cashier who proposed a disbursement does either.
 
 /** There is no amount: the approved amount is what goes out, and change comes back as Returned. */

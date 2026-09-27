@@ -8,6 +8,7 @@ import {
   cancelDisbursementAction,
   proposeDisbursementAction,
   rejectDisbursementAction,
+  verifyDisbursementAction,
   withdrawDisbursementAction,
 } from "@/app/(app)/imprest/actions";
 import { ActionForm, Outcome, TOUCH_FLOOR, useFreshKey } from "@/app/(app)/imprest/funding-forms";
@@ -192,18 +193,24 @@ export function ProposeDisbursementForm({
 
 type Target = { id: string; version: number; status: string; amount: number };
 
+/** The settlement the Manager is shown, and verifies exactly as it stands (issue #64). */
+export type SettlementToVerify = { id: string; used: number; returned: number; unaccounted: number };
+
 /**
  * The controls the viewer may use on this disbursement now, and no others (design.md §4.3). The
- * Manager approves the proposed amount as it stands: there is no field for another figure.
+ * Manager approves the proposed amount as it stands, and verifies a settlement as it stands: there
+ * is no field for another figure in either.
  */
 export function DisbursementActions({
   disbursement,
   role,
   isOwn,
+  settlement = null,
 }: {
   disbursement: Target;
   role: AppRole;
   isOwn: boolean;
+  settlement?: SettlementToVerify | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -303,6 +310,22 @@ export function DisbursementActions({
     toggles = toggle("reject", "imprest.spending.actions.reject", "danger");
   } else if (role === "manager" && disbursement.status === "approved") {
     toggles = toggle("cancel", "imprest.spending.actions.cancel", "danger");
+  } else if (role === "manager" && disbursement.status === "settled" && settlement) {
+    forms.verify = (
+      <VerifyPanel
+        settlement={settlement}
+        onSubmit={() => {
+          const data = new FormData();
+          for (const [k, v] of Object.entries(hidden)) data.set(k, v);
+          data.set("settlementId", settlement.id);
+          data.set("idempotencyKey", key);
+          controller.run("verify", verifyDisbursementAction, data);
+        }}
+        pending={controller.running === "verify"}
+        disabled={controller.pending}
+      />
+    );
+    toggles = toggle("verify", "imprest.spending.verify.open");
   } else if (role === "cashier" && isOwn && disbursement.status === "proposed") {
     toggles = toggle("withdraw", "imprest.spending.actions.withdraw", "danger");
   }
@@ -323,5 +346,64 @@ export function DisbursementActions({
       {open && forms[open] ? <div key={`${open}-${disbursement.version}`}>{forms[open]}</div> : null}
       <Outcome controller={controller} />
     </section>
+  );
+}
+
+/**
+ * The one confirmation before a verification (design.md §7B.8). It says what will be posted, what
+ * comes back to Free to approve, and that nothing can be changed afterwards. There is no field: the
+ * figures are the Cashier's, shown above in the breakdown with every line.
+ */
+function VerifyPanel({
+  settlement,
+  onSubmit,
+  pending,
+  disabled,
+}: {
+  settlement: SettlementToVerify;
+  onSubmit: () => void;
+  pending: boolean;
+  disabled: boolean;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const tzs = (value: number) => formatTzs(value, locale);
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-lg border border-border p-4"
+      data-testid="verify-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <h3 className="font-semibold">{t("imprest.spending.verify.title")}</h3>
+      <Help>{t("imprest.spending.verify.help")}</Help>
+      <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
+        <li className="fv-numeric" data-testid="verify-expense">
+          {t("imprest.spending.verify.expense", { amount: tzs(settlement.used) })}
+        </li>
+        {settlement.unaccounted > 0 ? (
+          <li className="fv-numeric text-danger" data-testid="verify-loss">
+            {t("imprest.spending.verify.loss", { amount: tzs(settlement.unaccounted) })}
+          </li>
+        ) : null}
+        <li className="fv-numeric" data-testid="verify-released">
+          {t("imprest.spending.verify.released", { amount: tzs(settlement.returned) })}
+        </li>
+      </ul>
+      <p className="text-sm font-medium">{t("imprest.spending.verify.balance")}</p>
+      <Button
+        type="submit"
+        className={`${TOUCH_FLOOR} self-start`}
+        data-testid="confirm-verify"
+        pending={pending}
+        pendingLabel={t("common.loading")}
+        disabled={disabled}
+      >
+        {t("imprest.spending.verify.confirm", { amount: tzs(settlement.used + settlement.unaccounted) })}
+      </Button>
+    </form>
   );
 }

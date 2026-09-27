@@ -13,6 +13,7 @@ import {
   loadHandedOut,
   loadOpenApprovals,
   loadSettledWaiting,
+  loadVerified,
   loadOwnDisbursements,
   loadRecentPurposes,
   loadSpendingPosition,
@@ -44,12 +45,13 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   const locale = await getLocale();
   const page = pageNumber(params.page);
 
-  const [position, waiting, open, out, settled, fundings] = await Promise.all([
+  const [position, waiting, open, out, settled, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadAwaitingDecision(pageNumber(params.waiting)),
     loadOpenApprovals(pageNumber(params.open)),
     loadHandedOut(pageNumber(params.out)),
     loadSettledWaiting(pageNumber(params.settled)),
+    loadVerified(pageNumber(params.verified)),
     loadFundings(page),
   ]);
   // Each list pages on its own parameter and keeps the others where they were.
@@ -58,6 +60,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     open: open.page,
     out: out.page,
     settled: settled.page,
+    verified: verified.page,
     page: fundings.page,
   };
   const others = (own: keyof typeof pages) =>
@@ -97,17 +100,27 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         otherParams={others("out")}
       />
 
-      {/* No verify action yet: part 2b brings it. Directors read the same list. */}
+      {/* The Manager opens one to verify it (issue #64); Directors read the same list. */}
       <DisbursementList
         id="disbursements-settled"
         title={t(viewer.role === "manager" ? "spending.lists.settled" : "spending.lists.settledDirector", {
           count: settled.total,
         })}
         empty={t("spending.lists.settledEmpty")}
-        note={t("spending.lists.verifyLater")}
+        note={t(viewer.role === "manager" ? "spending.lists.settledNote" : "spending.lists.settledNoteDirector")}
         page={settled}
         param="settled"
         otherParams={others("settled")}
+      />
+
+      {/* Once verified a payment leaves the queue above; this is where it can be found again. */}
+      <DisbursementList
+        id="disbursements-verified"
+        title={t("spending.lists.verified", { count: verified.total })}
+        empty={t("spending.lists.verifiedEmpty")}
+        page={verified}
+        param="verified"
+        otherParams={others("verified")}
       />
 
       {viewer.role === "manager" ? (

@@ -22,6 +22,7 @@ const TONES = {
   approved: "neutral",
   handed_out: "neutral",
   settled: "attention",
+  verified: "success",
   rejected: "danger",
   withdrawn: "neutral",
   cancelled: "neutral",
@@ -65,9 +66,9 @@ async function ageText(since: string, now: Date): Promise<string> {
 type Figure = { key: string; label: string; value: number; help: string; testId: string };
 
 /**
- * Posted imprest funding keeps its released label and its `funding-total` hook; the two new
- * figures sit beside it. With no fund open there is nothing to calculate, which is said in words
- * rather than shown as zeros.
+ * The posted balance comes first (issue #64): confirmed funding minus verified spending and losses.
+ * It keeps the `funding-total` hook the first figure has always had. With no fund open there is
+ * nothing to calculate, which is said in words rather than shown as zeros.
  */
 export async function SpendingFigures({ position }: { position: SpendingPosition | null }) {
   const t = await getTranslations("imprest");
@@ -84,11 +85,11 @@ export async function SpendingFigures({ position }: { position: SpendingPosition
   }
 
   const figures: Figure[] = [];
-  if (position.posted !== null) {
+  if (position.postedBalance !== null) {
     figures.push({
       key: "posted",
       label: t("total.label"),
-      value: position.posted,
+      value: position.postedBalance,
       help: t("total.help"),
       testId: "funding-total",
     });
@@ -183,6 +184,16 @@ export async function DisbursementList({
         d.id,
         <span className="text-xs text-muted-foreground" data-testid="handed-out-to">
           {t("lists.handedOutTo", { recipient: d.recipient ?? "", age: await ageText(d.handedOutAt, now) })}
+        </span>,
+      );
+    } else if (d.status === "verified" && d.settlement) {
+      progress.set(
+        d.id,
+        <span className="fv-numeric text-xs" data-testid="settled-figures">
+          {t("lists.usedReturned", {
+            used: formatTzs(d.settlement.used, locale),
+            returned: formatTzs(d.settlement.returned, locale),
+          })}
         </span>,
       );
     } else if (d.status === "settled" && d.settlement) {
