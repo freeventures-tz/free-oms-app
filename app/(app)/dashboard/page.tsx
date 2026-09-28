@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
-import { CountFlags } from "@/app/(app)/imprest/daily-count";
+import { CountAlerts, CountFlags } from "@/app/(app)/imprest/daily-count";
 import { Card, PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
-import { loadCountFlags } from "@/lib/imprest/counts";
+import { loadCountFlags, loadOpenDays } from "@/lib/imprest/counts";
 
 /**
  * Manager and Director landing (design.md §4.1): the same information architecture, with
@@ -14,7 +14,12 @@ export default async function DashboardPage() {
   const viewer = await requireAccess("/dashboard");
   const t = await getTranslations();
   // A confirmed imprest shortage or excess is flagged to the Directors at once (issue #68, AC-58).
-  const flags = viewer.role === "director" ? await loadCountFlags(5) : null;
+  // A day Not counted or waiting for the Manager alerts both Directors and the Manager (issue #69,
+  // AC-113), and stays here until the day has a confirmed count.
+  const [flags, openDays] = await Promise.all([
+    viewer.role === "director" ? loadCountFlags(5) : null,
+    viewer.role === "director" || viewer.role === "manager" ? loadOpenDays(1) : null,
+  ]);
 
   return (
     <>
@@ -22,6 +27,8 @@ export default async function DashboardPage() {
         title={t("landing.dashboard.title")}
         description={t("landing.dashboard.description")}
       />
+
+      {openDays ? <CountAlerts days={openDays} /> : null}
 
       <Card>
         <p className="text-sm text-muted-foreground">{t("landing.dashboard.empty")}</p>

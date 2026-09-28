@@ -1,10 +1,19 @@
+import { TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { CountControls } from "@/app/(app)/imprest/count-forms";
+import { CountControls, LateCountControl } from "@/app/(app)/imprest/count-forms";
 import { Pager } from "@/components/ui/pager";
 import { Card, StatusChip } from "@/components/ui/surface";
 import type { AppRole } from "@/lib/auth/roles";
-import { dayState, type DailyCount, type DayState } from "@/lib/imprest/counting";
+import {
+  dayState,
+  waitedFor,
+  type DailyCount,
+  type DayState,
+  type OpenDay,
+  type ResolvedCountAlert,
+} from "@/lib/imprest/counting";
 import type { CountFlag } from "@/lib/imprest/counts";
 import type { Page } from "@/lib/settlement/settlement";
 import { formatTzs } from "@/lib/money";
@@ -20,8 +29,10 @@ import { formatBusinessDate, formatBusinessStamp } from "@/lib/time/business-dat
  * cash counted.
  */
 
+// Not counted is a missed control, so it takes the danger tone; today, before it closes, is only due.
 const STATE_TONES: Record<DayState, "neutral" | "success" | "attention" | "danger"> = {
-  not_counted: "neutral",
+  due: "neutral",
+  not_counted: "danger",
   awaiting_confirmation: "attention",
   sent_back: "attention",
   balanced: "success",
@@ -84,7 +95,12 @@ async function CountRecord({ count }: { count: DailyCount }) {
   return (
     <ul className="flex flex-col gap-1 text-sm">
       <li>{t("counted", { name: count.countedBy, when: stamp(count.countedAt) })}</li>
-      {count.note ? <li className="text-muted-foreground">{t("note", { note: count.note })}</li> : null}
+      {count.lateReason ? (
+        <li className="font-medium" data-testid="count-late">
+          {t("late", { reason: count.lateReason })}
+        </li>
+      ) : null}
+      {count.note ?<li className="text-muted-foreground">{t("note", { note: count.note })}</li> : null}
       {count.postedBalance !== null && count.awaitingVerification !== null ? (
         <li className="fv-numeric text-muted-foreground" data-testid="count-basis">
           {t("basis", {
@@ -124,8 +140,11 @@ export async function DailyCountSection({
   todays,
   history,
   otherParams = {},
+  children,
 }: {
   role: AppRole;
+  /** What must be seen before the history: the days not closed (issue #69). */
+  children?: React.ReactNode;
   /** Today's business date, `YYYY-MM-DD` in Africa/Dar_es_Salaam. */
   today: string;
   /** The counts that decide today's state: the first page, most recent first. */
@@ -144,7 +163,8 @@ export async function DailyCountSection({
   const toDecide = earlier ?? (state === "awaiting_confirmation" ? latest : null);
 
   const help: Record<DayState, string> = {
-    not_counted: t(`help.not_counted.${role === "cashier" ? "cashier" : "other"}`),
+    due: t(`help.due.${role === "cashier" ? "cashier" : "other"}`),
+    not_counted: t("help.not_counted"),
     awaiting_confirmation: t(`help.awaiting_confirmation.${role === "manager" ? "manager" : "other"}`),
     sent_back: t(`help.sent_back.${role === "cashier" ? "cashier" : "other"}`),
     balanced: t("help.balanced"),
@@ -188,7 +208,7 @@ export async function DailyCountSection({
           <CountControls
             role={role}
             businessDate={today}
-            mayCount={!earlier && (state === "not_counted" || state === "sent_back")}
+            mayCount={!earlier && (state === "due" || state === "sent_back")}
             replaces={
               state === "sent_back" && latest ? { id: latest.id, reason: latest.returnReason ?? "" } : null
             }
@@ -206,6 +226,8 @@ export async function DailyCountSection({
           />
         ) : null}
       </Card>
+
+      {children}
 
       <section className="flex flex-col gap-3" aria-labelledby="count-history-heading" data-testid="count-history">
         <h3 id="count-history-heading" className="font-semibold">
@@ -241,6 +263,215 @@ export async function DailyCountSection({
           otherParams={otherParams}
         />
       </section>
+    </section>
+  );
+}
+
+/** "Waiting 3 days", in the viewer's words, from when the day started waiting to now. */
+async function waitedText(since: string): Promise<string> {
+  const t = await getTranslations("imprest.count.open.waited");
+  const { unit, count } = waitedFor(since);
+  return t(unit, { count });
+}
+
+/** Why one open day waits, and since when. */
+async function OpenDayLine({ day }: { day: OpenDay }) {
+  const t = await getTranslations("imprest.count.open");
+  const locale = await getLocale();
+  const stamp = (iso: string) => formatBusinessStamp(iso, locale);
+  return (
+    <span className="flex flex-col gap-0.5 text-sm">
+      {day.notCountedSince ? <span>{t("notCountedSince", { when: stamp(day.notCountedSince) })}</span> : null}
+      {day.awaitingSince ? <span>{t("awaitingSince", { when: stamp(day.awaitingSince) })}</span> : null}
+      <span className="font-medium" data-testid="open-day-waited">
+        {await waitedText(day.waitingSince)}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The days that are not closed, oldest first (issue #69, §15.2a): Not counted, or a count waiting
+ * for the Manager. For Directors and the Manager these are the open alerts, and they stay here until
+ * the day has a confirmed count. The Cashier counts a Not counted day late from here, unless a count
+ * already waits, since the fund holds one at a time. Every page says how many there are.
+ */
+export async function OpenCountDays({
+  role,
+  days,
+  mayCountLate,
+  otherParams = {},
+}: {
+  role: AppRole;
+  days: Page<OpenDay>;
+  /** No count waits for the Manager anywhere in the fund. */
+  mayCountLate: boolean;
+  otherParams?: Record<string, number>;
+}) {
+  const t = await getTranslations("imprest.count.open");
+  const locale = await getLocale();
+  return (
+    <section
+      id="count-open-days"
+      className="flex scroll-mt-4 flex-col gap-3"
+      aria-labelledby="open-days-heading"
+      data-testid="count-open-days"
+    >
+      <h3 id="open-days-heading" className="font-semibold">
+        {t("title", { count: days.total })}
+      </h3>
+      <p className="text-sm text-muted-foreground">{t(role === "cashier" ? "helpCashier" : "help")}</p>
+      {days.rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {days.rows.map((day) => {
+            const date = formatBusinessDate(day.businessDate, locale);
+            return (
+              <li key={day.businessDate} data-testid={`open-day-${day.businessDate}`}>
+                <Card className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                    <span className="font-medium">{date}</span>
+                    <CountStateChip state={day.state} />
+                  </div>
+                  <OpenDayLine day={day} />
+                  {/* Mounted whatever the day's state, so the server's answer stays on screen when
+                      a late count moves the day to Awaiting Manager confirmation. */}
+                  {role === "cashier" ? (
+                    <LateCountControl
+                      businessDate={day.businessDate}
+                      dateLabel={date}
+                      mayOpen={day.state === "not_counted" && mayCountLate}
+                      replaces={
+                        day.latestStatus === "sent_back" && day.latestCountId
+                          ? { id: day.latestCountId, reason: day.latestReturnReason ?? "" }
+                          : null
+                      }
+                    />
+                  ) : null}
+                  {role === "cashier" && day.state === "not_counted" && !mayCountLate ? (
+                    <p className="text-sm text-muted-foreground">{t("lateBlocked")}</p>
+                  ) : null}
+                </Card>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <Pager
+        page={days.page}
+        pageSize={days.pageSize}
+        total={days.total}
+        param="missed"
+        basePath="/imprest"
+        label={t("title", { count: days.total })}
+        otherParams={otherParams}
+      />
+    </section>
+  );
+}
+
+/**
+ * The open count alerts on the dashboard of both Directors and the Manager (issue #69, §15.2a,
+ * AC-113): days Not counted or waiting for the Manager, oldest first. It says how many there are in
+ * all and links to the imprest screen, where every one is listed. Nothing here dismisses an alert:
+ * it goes when the day has a confirmed count.
+ */
+export async function CountAlerts({ days }: { days: Page<OpenDay> }) {
+  if (days.total === 0) return null;
+  const t = await getTranslations("imprest.count.alerts");
+  const locale = await getLocale();
+  const waited = await Promise.all(days.rows.map((day) => waitedText(day.waitingSince)));
+  return (
+    <section
+      role="alert"
+      aria-labelledby="count-alerts-heading"
+      data-testid="count-alerts"
+      className="flex flex-col gap-3 rounded-lg border border-danger/40 bg-danger/10 p-4 md:p-5 xl:p-6"
+    >
+      <div className="flex items-start gap-3">
+        <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-danger" />
+        <div className="flex flex-col gap-1">
+          <h2 id="count-alerts-heading" className="font-semibold text-danger">
+            {t("heading", { count: days.total })}
+          </h2>
+          <p className="text-sm text-foreground">{t("notZero")}</p>
+        </div>
+      </div>
+      <ul className="flex flex-col gap-3">
+        {days.rows.map((day, i) => (
+          <li
+            key={day.businessDate}
+            data-testid={`count-alert-${day.businessDate}`}
+            className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between"
+          >
+            <span className="font-medium">
+              {t(day.state, { date: formatBusinessDate(day.businessDate, locale) })}
+            </span>
+            <span className="text-sm text-muted-foreground">{waited[i]}</span>
+          </li>
+        ))}
+      </ul>
+      <Link
+        href="/imprest#count-open-days"
+        className="inline-flex min-h-11 items-center self-start font-medium text-bronze-text underline-offset-4 hover:underline xl:min-h-8"
+      >
+        {t(days.total > days.rows.length ? "seeAll" : "open", { count: days.total })}
+      </Link>
+    </section>
+  );
+}
+
+/**
+ * Resolved count alerts, most recently resolved first (issue #69): a Not counted day counted late,
+ * and every count that waited for the Manager until confirmed or sent back. Directors and the
+ * Manager, to whom the alerts were raised.
+ */
+export async function CountAlertHistory({
+  history,
+  otherParams = {},
+}: {
+  history: Page<ResolvedCountAlert>;
+  otherParams?: Record<string, number>;
+}) {
+  const t = await getTranslations("imprest.count.alertHistory");
+  const locale = await getLocale();
+  const stamp = (iso: string) => formatBusinessStamp(iso, locale);
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="alert-history-heading" data-testid="count-alert-history">
+      <h3 id="alert-history-heading" className="font-semibold">
+        {t("title")}
+      </h3>
+      {history.rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {history.rows.map((a) => (
+            <li
+              key={`${a.kind}-${a.businessDate}-${a.countId ?? "day"}`}
+              data-testid={`alert-history-${a.kind}-${a.businessDate}${a.attempt ? `-${a.attempt}` : ""}`}
+            >
+              <Card className="flex flex-col gap-1">
+                <span className="text-sm font-medium">
+                  {t(a.kind, { date: formatBusinessDate(a.businessDate, locale), attempt: a.attempt ?? 0 })}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {t(`resolved.${a.resolution}`, { raised: stamp(a.raisedAt), resolved: stamp(a.resolvedAt) })}
+                </span>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Pager
+        page={history.page}
+        pageSize={history.pageSize}
+        total={history.total}
+        param="alerts"
+        basePath="/imprest"
+        label={t("title")}
+        otherParams={otherParams}
+      />
     </section>
   );
 }

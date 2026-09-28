@@ -1,7 +1,14 @@
-import type { CountExplanation, CountOutcome, CountStatus, DailyCount } from "@/lib/imprest/counting";
+import type {
+  CountExplanation,
+  CountOutcome,
+  CountStatus,
+  DailyCount,
+  OpenDay,
+  ResolvedCountAlert,
+} from "@/lib/imprest/counting";
 import type { Page } from "@/lib/settlement/settlement";
 import { userApi } from "@/lib/supabase/api";
-import { requireRows } from "@/lib/supabase/query";
+import { DATA_UNAVAILABLE, requireRows } from "@/lib/supabase/query";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 /**
@@ -39,6 +46,7 @@ type CountRow = {
   returned_by: string | null;
   returned_at: string | null;
   needs_director_decision: boolean | null;
+  late_reason: string | null;
   total: number;
 };
 
@@ -68,6 +76,7 @@ function fromRow(row: CountRow): DailyCount {
     returnedBy: row.returned_by,
     returnedAt: row.returned_at,
     needsDirectorDecision: row.needs_director_decision,
+    lateReason: row.late_reason,
   };
 }
 
@@ -126,4 +135,110 @@ export async function loadCountFlags(limit = 10): Promise<CountFlag[]> {
     amount: Number(r.amount_tzs),
     raisedAt: r.raised_at,
   }));
+}
+
+/** The most open days or resolved alerts one page shows. Every page says how many there are. */
+export const OPEN_DAY_PAGE_SIZE = 10;
+
+type OpenDayRow = {
+  business_date: string;
+  state: string;
+  waiting_since: string;
+  not_counted_since: string | null;
+  awaiting_since: string | null;
+  latest_count_id: string | null;
+  latest_status: CountStatus | null;
+  latest_return_reason: string | null;
+  total: number;
+};
+
+/**
+ * A row this build cannot place is a failed read, never a dropped one: dropping it would hide the
+ * very day the list exists to name (§15.2a).
+ */
+function unreadable(what: string, field: string): never {
+  console.error(`[data] ${what} returned a row this build cannot render; unusable field: ${field}`);
+  throw new Error(`${DATA_UNAVAILABLE}: ${what}`);
+}
+
+/**
+ * One page of the days that are not closed, oldest first (issue #69, §15.2a): Not counted, or a
+ * count waiting for the Manager. Directors and the Manager read them as open alerts; the Cashier
+ * reads them to count a missed day late.
+ */
+export async function loadOpenDays(page: number): Promise<Page<OpenDay>> {
+  const api = await userApi();
+  const rows = requireRows(
+    (await api.rpc("staff_imprest_open_count_days", {
+      p_limit: OPEN_DAY_PAGE_SIZE,
+      p_offset: (page - 1) * OPEN_DAY_PAGE_SIZE,
+    })) as { data: OpenDayRow[] | null; error: { message: string } | null },
+    "imprest.open_count_days",
+  );
+  return {
+    rows: rows.map((row) => {
+      if (row.state !== "not_counted" && row.state !== "awaiting_confirmation") {
+        unreadable("imprest.open_count_days", "state");
+      }
+      if (typeof row.waiting_since !== "string") unreadable("imprest.open_count_days", "waiting_since");
+      return {
+        businessDate: row.business_date,
+        state: row.state,
+        waitingSince: row.waiting_since,
+        notCountedSince: row.not_counted_since,
+        awaitingSince: row.awaiting_since,
+        latestCountId: row.latest_count_id,
+        latestStatus: row.latest_status,
+        latestReturnReason: row.latest_return_reason,
+      };
+    }),
+    page,
+    pageSize: OPEN_DAY_PAGE_SIZE,
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+  };
+}
+
+type AlertRow = {
+  kind: string;
+  business_date: string;
+  count_id: string | null;
+  attempt: number | null;
+  raised_at: string;
+  resolved_at: string;
+  resolution: string;
+  total: number;
+};
+
+const RESOLUTIONS = new Set(["counted_late", "confirmed", "sent_back"]);
+
+/** One page of resolved count alerts, most recently resolved first. Directors and the Manager. */
+export async function loadAlertHistory(page: number): Promise<Page<ResolvedCountAlert>> {
+  const api = await userApi();
+  const rows = requireRows(
+    (await api.rpc("staff_imprest_count_alert_history", {
+      p_limit: OPEN_DAY_PAGE_SIZE,
+      p_offset: (page - 1) * OPEN_DAY_PAGE_SIZE,
+    })) as { data: AlertRow[] | null; error: { message: string } | null },
+    "imprest.count_alert_history",
+  );
+  return {
+    rows: rows.map((row) => {
+      if (row.kind !== "not_counted" && row.kind !== "awaiting_confirmation") {
+        unreadable("imprest.count_alert_history", "kind");
+      }
+      if (!RESOLUTIONS.has(row.resolution)) unreadable("imprest.count_alert_history", "resolution");
+      return {
+        kind: row.kind,
+        businessDate: row.business_date,
+        countId: row.count_id,
+        attempt: row.attempt,
+        raisedAt: row.raised_at,
+        resolvedAt: row.resolved_at,
+        resolution: row.resolution as ResolvedCountAlert["resolution"],
+      };
+    }),
+    page,
+    pageSize: OPEN_DAY_PAGE_SIZE,
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+  };
 }

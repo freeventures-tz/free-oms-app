@@ -19,6 +19,7 @@ vi.mock("@/app/(app)/imprest/actions", () => ({
   confirmCountAction: (...args: unknown[]) => confirmCountAction(...args),
   sendBackCountAction: (...args: unknown[]) => sendBackCountAction(...args),
   enterCountAction: vi.fn(),
+  enterLateCountAction: vi.fn(),
 }));
 
 const { CountControls } = await import("@/app/(app)/imprest/count-forms");

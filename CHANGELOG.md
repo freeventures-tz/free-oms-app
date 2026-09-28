@@ -2,6 +2,32 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.8.0] — 2026-09-28
+
+A day nobody counted now shows as Not counted, and never as balanced. Both Directors and the
+Manager are alerted until the day has a confirmed count, and the Cashier can count a missed day
+late. The staff workflows stay closed.
+
+### NEW
+
+- When a day ends in Dar es Salaam with no confirmed count, it reads Not counted. Nothing has to run
+  overnight for that to happen.
+- Both Directors and the Manager see every day that is Not counted or Awaiting Manager confirmation
+  on their dashboard, oldest first, with how long each has waited. It stays there until the day has
+  a confirmed count.
+- The imprest screen lists those days, oldest first and a page at a time, with how many there are
+  in all. Resolved alerts move to a history that says when each was raised and what resolved it.
+- The Cashier can count a missed day late from the imprest screen. It needs a reason, goes to the
+  Manager like any count, and stays marked as late on the record.
+- A missed day blocks nothing else. Today can still be counted and spending carries on.
+
+### IMPROVED
+
+- Today reads Count due today until it ends, so an uncounted morning no longer looks like a missed
+  day.
+- The imprest screen lists counts in the order they were entered, so a late count waiting for the
+  Manager is always at the top.
+
 ## [0.7.0] — 2026-09-28
 
 The imprest tin is now counted every day. The Cashier counts the cash and enters the total, the

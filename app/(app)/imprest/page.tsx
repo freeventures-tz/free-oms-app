@@ -3,7 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { ProposeDisbursementForm } from "@/app/(app)/imprest/disbursement-forms";
 import { RequestFundingForm } from "@/app/(app)/imprest/funding-forms";
-import { CountFlags, DailyCountSection } from "@/app/(app)/imprest/daily-count";
+import { CountAlertHistory, CountFlags, DailyCountSection, OpenCountDays } from "@/app/(app)/imprest/daily-count";
 import { FundingStatusChip } from "@/app/(app)/imprest/funding-status";
 import { DisbursementList, SpendingFigures } from "@/app/(app)/imprest/spending";
 import { Pager } from "@/components/ui/pager";
@@ -20,7 +20,7 @@ import {
   loadRecentPurposes,
   loadSpendingPosition,
 } from "@/lib/imprest/disbursements";
-import { loadCountFlags, loadCounts } from "@/lib/imprest/counts";
+import { loadAlertHistory, loadCountFlags, loadCounts, loadOpenDays } from "@/lib/imprest/counts";
 import { loadFundings } from "@/lib/imprest/funding";
 import { formatTzs } from "@/lib/money";
 import { pageNumber } from "@/lib/settlement/settlement";
@@ -43,7 +43,14 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   const viewer = await requireAccess("/imprest");
   const params = await searchParams;
   if (viewer.role === "cashier") {
-    return <CashierImprest viewerId={viewer.userId} mine={pageNumber(params.mine)} counts={pageNumber(params.counts)} />;
+    return (
+      <CashierImprest
+        viewerId={viewer.userId}
+        mine={pageNumber(params.mine)}
+        counts={pageNumber(params.counts)}
+        missed={pageNumber(params.missed)}
+      />
+    );
   }
 
   const t = await getTranslations("imprest");
@@ -51,10 +58,12 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   const page = pageNumber(params.page);
 
   const countPage = pageNumber(params.counts);
-  const [position, counts, todays, flags, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
+  const [position, counts, todays, openDays, alertHistory, flags, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
+    loadOpenDays(pageNumber(params.missed)),
+    loadAlertHistory(pageNumber(params.alerts)),
     viewer.role === "director" ? loadCountFlags() : null,
     loadAwaitingDecision(pageNumber(params.waiting)),
     loadOpenApprovals(pageNumber(params.open)),
@@ -74,6 +83,8 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     verified: verified.page,
     page: fundings.page,
     counts: counts.page,
+    missed: openDays.page,
+    alerts: alertHistory.page,
   };
   const others = (own: keyof typeof pages) =>
     Object.fromEntries(Object.entries(pages).filter(([name]) => name !== own));
@@ -94,7 +105,11 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
           todays={(todays ?? counts).rows}
           history={counts}
           otherParams={others("counts")}
-        />
+        >
+          {/* The days not closed, oldest first: the open alerts, and what resolved them (issue #69). */}
+          <OpenCountDays role={viewer.role} days={openDays} mayCountLate={false} otherParams={others("missed")} />
+          <CountAlertHistory history={alertHistory} otherParams={others("alerts")} />
+        </DailyCountSection>
       ) : null}
 
       <DisbursementList
@@ -222,15 +237,29 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   );
 }
 
-async function CashierImprest({ viewerId, mine, counts: countPage }: { viewerId: string; mine: number; counts: number }) {
+async function CashierImprest({
+  viewerId,
+  mine,
+  counts: countPage,
+  missed,
+}: {
+  viewerId: string;
+  mine: number;
+  counts: number;
+  missed: number;
+}) {
   const t = await getTranslations("imprest");
-  const [position, own, purposes, counts, todays] = await Promise.all([
+  const [position, own, purposes, counts, todays, openDays] = await Promise.all([
     loadSpendingPosition(),
     loadOwnDisbursements(viewerId, mine),
     loadRecentPurposes(viewerId),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
+    loadOpenDays(missed),
   ]);
+  // The fund holds one waiting count, and it is always the latest entered, so the first page of
+  // counts shows whether one waits. While it does, no missed day can be counted.
+  const aCountWaits = (todays ?? counts).rows.some((c) => c.status === "awaiting_confirmation");
 
   return (
     <>
@@ -245,8 +274,16 @@ async function CashierImprest({ viewerId, mine, counts: countPage }: { viewerId:
           today={businessDate()}
           todays={(todays ?? counts).rows}
           history={counts}
-          otherParams={{ mine: own.page }}
-        />
+          otherParams={{ mine: own.page, missed: openDays.page }}
+        >
+          {/* A day nobody counted can be counted late, with a reason (issue #69). */}
+          <OpenCountDays
+            role="cashier"
+            days={openDays}
+            mayCountLate={!aCountWaits}
+            otherParams={{ mine: own.page, counts: counts.page }}
+          />
+        </DailyCountSection>
       ) : null}
 
       {position ? (
@@ -265,7 +302,7 @@ async function CashierImprest({ viewerId, mine, counts: countPage }: { viewerId:
         showOpenFor
         showProposer={false}
         showNextStep
-        otherParams={{ counts: counts.page }}
+        otherParams={{ counts: counts.page, missed: openDays.page }}
       />
     </>
   );

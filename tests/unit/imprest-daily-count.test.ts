@@ -172,14 +172,16 @@ const row = (overrides: Partial<DailyCount>): DailyCount => ({
   returnedBy: null,
   returnedAt: null,
   needsDirectorDecision: null,
+  lateReason: null,
   ...overrides,
 });
 
 describe("today's state", () => {
-  it("is Not counted when today has no count, never a zero variance", () => {
-    expect(dayState([], TODAY)).toEqual({ state: "not_counted", latest: null });
+  // Issue #69: today is due until it closes; only a closed day with no count is Not counted.
+  it("is due when today has no count, never a zero variance", () => {
+    expect(dayState([], TODAY)).toEqual({ state: "due", latest: null });
     expect(dayState([row({ businessDate: "2026-09-27", status: "confirmed", outcome: "balanced" })], TODAY).state).toBe(
-      "not_counted",
+      "due",
     );
   });
 
@@ -213,7 +215,7 @@ describe("the words", () => {
 
   it.each(["en", "sw"] as const)("names each of the day's states in %s, all different", (locale) => {
     const states = dictionaries[locale].imprest.count.state as Record<string, string>;
-    const names = ["not_counted", "awaiting_confirmation", "sent_back", "balanced", "shortage", "excess"].map(
+    const names = ["due", "not_counted", "awaiting_confirmation", "sent_back", "balanced", "shortage", "excess"].map(
       (s) => states[s],
     );
     expect(names.every(Boolean)).toBe(true);

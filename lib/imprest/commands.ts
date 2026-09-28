@@ -295,11 +295,13 @@ export const settleDisbursement = (
 // expected cash or the variance: the database calculates both and keeps them with the count.
 
 /** Today's count. A recount names the sent-back count it replaces; the first count names none. */
+/** Today's count, or a past Not counted day's with a late reason (issue #69). */
 export const enterCount = (input: {
   businessDate: string;
   previousCountId: string | null;
   counted: number;
   note: string | null;
+  lateReason: string | null;
   idempotencyKey: string;
 }) =>
   call("staff_enter_imprest_count", {
@@ -307,6 +309,7 @@ export const enterCount = (input: {
     p_previous_count_id: input.previousCountId,
     p_counted_tzs: input.counted,
     p_note: input.note,
+    p_late_reason: input.lateReason,
     p_idempotency_key: input.idempotencyKey,
   });
 

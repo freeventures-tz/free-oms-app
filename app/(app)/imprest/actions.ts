@@ -43,6 +43,7 @@ import {
   correctHandoverSchema,
   disbursementReasonSchema,
   enterCountSchema,
+  enterLateCountSchema,
   handOutSchema,
   increaseApprovalSchema,
   proposeDisbursementSchema,
@@ -166,6 +167,12 @@ const COUNT_ERRORS = new Set([
   "explanation_not_needed",
   "earlier_count_waiting",
   "figures_moved",
+  // A late count (issue #69).
+  "later_count_waiting",
+  "late_reason_required",
+  "late_reason_invalid",
+  "late_reason_not_needed",
+  "day_not_countable",
 ]);
 
 type Messages = { namespace: "imprestErrors" | "spendingErrors" | "countErrors"; known: Set<string> };
@@ -455,8 +462,27 @@ export async function enterCountAction(_p: ImprestActionState, data: FormData) {
       note: data.get("note") ?? "",
       idempotencyKey: data.get("idempotencyKey"),
     },
-    enterCount,
+    (input) => enterCount({ ...input, lateReason: null }),
     "imprest.count.success.counted",
+    COUNT_MESSAGES,
+  );
+}
+
+/** A past Not counted day, counted late with a reason (issue #69). The same confirm path follows. */
+export async function enterLateCountAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    enterLateCountSchema,
+    {
+      businessDate: data.get("businessDate") ?? "",
+      previousCountId: data.get("previousCountId") ?? "",
+      counted: data.get("counted") ?? "",
+      note: data.get("note") ?? "",
+      lateReason: data.get("lateReason") ?? "",
+      idempotencyKey: data.get("idempotencyKey"),
+    },
+    enterCount,
+    "imprest.count.success.countedLate",
     COUNT_MESSAGES,
   );
 }
