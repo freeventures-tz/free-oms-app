@@ -1101,7 +1101,7 @@
     "description": "Fedha za uendeshaji na malipo yanayotoka humo: nani aliomba, nani aliamua, na nini kilikabidhiwa na kuthibitishwa.",
     "total": {
       "label": "Salio lililothibitishwa",
-      "help": "Ufadhili uliothibitishwa ukiondoa matumizi na hasara zilizohakikiwa, ukiondoa upungufu wa hesabu uliothibitishwa na kuongeza ziada. Si hesabu ya fedha taslimu.",
+      "help": "Ufadhili uliothibitishwa ukiondoa matumizi na hasara zilizohakikiwa. Upungufu wa hesabu uliothibitishwa unalipunguza na ziada inaliongeza. Si hesabu ya fedha taslimu.",
       "noFund": "Bado hakuna ombi la ufadhili wa imprest."
     },
     "request": {

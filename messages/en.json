@@ -1101,7 +1101,7 @@
     "description": "Operating cash and the payments made from it: who asked, who decided, and what was handed over and confirmed.",
     "total": {
       "label": "Posted balance",
-      "help": "Confirmed funding minus verified spending and losses, less any confirmed count shortage and plus any excess. It is not a cash count.",
+      "help": "Confirmed funding minus verified spending and losses. A confirmed count shortage lowers it and an excess raises it. It is not a cash count.",
       "noFund": "No imprest funding has been requested yet."
     },
     "request": {

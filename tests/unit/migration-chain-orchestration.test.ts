@@ -167,7 +167,8 @@ describe("the migration-chain command's verdict", () => {
     // report, a label added to a released enum and a widened grant. Issue #62's v0.3.3 phase adds
     // nine: those eight again and a rejected disbursement's reason rewritten. Issue #64's v0.4.0
     // phase adds ten: those nine again and a settlement line's purpose rewritten. Issue #65's v0.5.0
-    // phase adds eleven: those ten again and a verification reattributed. An exact count, so a phase
+    // phase adds eleven: those ten again and a verification reattributed. Issue #68's v0.6.0 phase
+    // adds twelve: those eleven again and a send-back's reason rewritten. An exact count, so a phase
     // that silently stopped running its counterexamples is a failure rather than a quieter pass.
     expect(out).toContain("a disputed imprest handover's amount rewritten in place");
     expect(out).toContain("a delivered report's content rewritten in place");
@@ -176,16 +177,27 @@ describe("the migration-chain command's verdict", () => {
     expect(out).toContain("a rejected disbursement's reason rewritten in place");
     expect(out).toContain("a settlement line's purpose rewritten in place");
     expect(out).toContain("a verification reattributed to another person");
+    expect(out).toContain("a send-back's reason rewritten in place");
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(51);
+    ).toHaveLength(63);
+
+    // Issue #68: the v0.6.0 phase reset to the last released migration, sent a settlement back, and
+    // asserted the daily count upgrade.
+    expect(out).toContain("a verification AND a settlement sent back");
+    expect(calls.filter((call) => call.args[0]?.includes("40_mark_v060_boundary"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args[0]?.includes("41_build_v060_send_back"))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.args[0]?.includes("42_assert_daily_count_upgrade")),
+    ).toHaveLength(1);
 
     // Issue #65: the v0.5.0 phase reset to the last released migration, verified a disbursement
     // with an unexplained loss, and asserted the send-back upgrade.
     expect(out).toContain("one verified with an unexplained loss");
     expect(calls.filter((call) => call.args[0]?.includes("36_mark_v050_boundary"))).toHaveLength(1);
-    expect(calls.filter((call) => call.args[0]?.includes("37_build_v050_verifications"))).toHaveLength(1);
+    // Twice: the v0.6.0 phase issue #68 adds builds the same verification on its own database.
+    expect(calls.filter((call) => call.args[0]?.includes("37_build_v050_verifications"))).toHaveLength(2);
     expect(
       calls.filter((call) => call.args[0]?.includes("38_assert_send_back_upgrade")),
     ).toHaveLength(1);
@@ -194,8 +206,8 @@ describe("the migration-chain command's verdict", () => {
     // and without a remainder, and asserted the verification upgrade.
     expect(out).toContain("settled with and without a remainder");
     expect(calls.filter((call) => call.args[0]?.includes("32_mark_v040_boundary"))).toHaveLength(1);
-    // Twice: the v0.5.0 phase issue #65 adds builds the same settlements on its own database.
-    expect(calls.filter((call) => call.args[0]?.includes("33_build_v040_settlements"))).toHaveLength(2);
+    // Three times: the v0.5.0 and v0.6.0 phases of issues #65 and #68 build the same settlements.
+    expect(calls.filter((call) => call.args[0]?.includes("33_build_v040_settlements"))).toHaveLength(3);
     expect(
       calls.filter((call) => call.args[0]?.includes("34_assert_verification_upgrade")),
     ).toHaveLength(1);
@@ -204,8 +216,9 @@ describe("the migration-chain command's verdict", () => {
     // every status, and asserted the settlement upgrade.
     expect(out).toContain("AND disbursements in every status");
     expect(calls.filter((call) => call.args[0]?.includes("28_mark_v030_boundary"))).toHaveLength(1);
-    // Three times: the v0.4.0 and v0.5.0 phases of issues #64 and #65 build the same disbursements.
-    expect(calls.filter((call) => call.args[0]?.includes("29_build_v030_disbursements"))).toHaveLength(3);
+    // Four times: the v0.4.0, v0.5.0 and v0.6.0 phases of issues #64, #65 and #68 build the same
+    // disbursements.
+    expect(calls.filter((call) => call.args[0]?.includes("29_build_v030_disbursements"))).toHaveLength(4);
     expect(
       calls.filter((call) => call.args[0]?.includes("30_assert_settlement_upgrade")),
     ).toHaveLength(1);
@@ -214,9 +227,9 @@ describe("the migration-chain command's verdict", () => {
     // it, and asserted the disbursement upgrade.
     expect(out).toContain("imprest funding AND a delivered report");
     expect(calls.filter((call) => call.args[0]?.includes("22_mark_v020_boundary"))).toHaveLength(1);
-    // Four times: the v0.3.3, v0.4.0 and v0.5.0 phases of issues #62, #64 and #65 each build the
-    // same real report on their own database.
-    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(4);
+    // Five times: the v0.3.3, v0.4.0, v0.5.0 and v0.6.0 phases of issues #62, #64, #65 and #68 each
+    // build the same real report on their own database.
+    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(5);
     expect(
       calls.filter((call) => call.args[0]?.includes("24_assert_disbursement_upgrade")),
     ).toHaveLength(1);
