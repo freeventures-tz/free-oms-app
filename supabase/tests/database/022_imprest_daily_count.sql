@@ -19,7 +19,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(107);
+select plan(108);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -359,6 +359,12 @@ select is((tests.count_row(tests.cid('c1'))).variance_tzs, -1000::bigint,
 select tests.manager();
 select is(tests.confirm(tests.cid('c2'), 1, 'counting_error', null, 'k-c2'), 'confirmed',
           'the Manager confirms a shortage of 1,000 with a preset explanation');
+-- The commit-time check runs as the Manager's own session, who may not read the Directors' flag.
+set local role authenticated;
+select lives_ok($$ set constraints all immediate $$,
+                'the confirmation is complete at commit, checked as the Manager who made it');
+set constraints all deferred;
+reset role;
 select is(tests.confirm(tests.cid('c2'), 1, 'counting_error', null, 'k-c2'), 'replayed',
           'a confirmation retried with its key is a replay');
 select is(tests.confirm(tests.cid('c2'), 1, 'recording_error', null, 'k-c2'),

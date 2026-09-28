@@ -411,9 +411,15 @@ create trigger imprest_count_flags_target
 -- At commit: a return leaves its count sent back; a confirmation leaves it confirmed, with a posting
 -- and a flag exactly when there is a variance. The rows can be written in any order but never go
 -- without each other.
+--
+-- SECURITY DEFINER, unlike the checks above. A deferred trigger runs at COMMIT as the session's own
+-- role, after the command's definer rights have ended, and the Manager who confirms may not read the
+-- flag raised to the Directors. Read as the caller, the flag would look missing and every confirmed
+-- variance would be refused.
 create or replace function private.check_imprest_count_complete()
 returns trigger
 language plpgsql
+security definer
 set search_path = ''
 as $$
 declare
