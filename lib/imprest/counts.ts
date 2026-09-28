@@ -101,6 +101,23 @@ export async function loadCounts(page: number): Promise<Page<DailyCount>> {
   };
 }
 
+/**
+ * Every count of one business day, most recently entered first. Today's card reads this rather than
+ * a page of the history, so late counts entered after today's never push today off it (issue #69).
+ */
+export async function loadDayCounts(businessDate: string): Promise<DailyCount[]> {
+  const api = await userApi();
+  const rows = requireRows(
+    (await api.rpc("staff_imprest_counts", {
+      p_limit: 100,
+      p_offset: 0,
+      p_business_date: businessDate,
+    })) as { data: CountRow[] | null; error: { message: string } | null },
+    "imprest.day_counts",
+  );
+  return rows.map(fromRow);
+}
+
 export type CountFlag = {
   id: string;
   businessDate: string;
@@ -162,40 +179,66 @@ function unreadable(what: string, field: string): never {
 }
 
 /**
+ * One page of a list whose rows carry the whole list's `total`.
+ *
+ * AN EMPTY PAGE PAST THE FIRST IS NOT AN EMPTY LIST. A confirmation can empty the page a link was
+ * built for, and reading its missing total as zero would say every day is closed while earlier
+ * pages still hold open ones. So the first page is read for the total, and the last page that
+ * still has rows is returned in place of the one asked for.
+ */
+async function readPage<R extends { total: number }, T>(
+  fn: string,
+  what: string,
+  page: number,
+  map: (row: R) => T,
+): Promise<Page<T>> {
+  const api = await userApi();
+  const fetchPage = async (p: number) =>
+    requireRows(
+      (await api.rpc(fn, {
+        p_limit: OPEN_DAY_PAGE_SIZE,
+        p_offset: (p - 1) * OPEN_DAY_PAGE_SIZE,
+      })) as { data: R[] | null; error: { message: string } | null },
+      what,
+    );
+
+  let current = page;
+  let rows = await fetchPage(page);
+  if (rows.length === 0 && page > 1) {
+    const first = await fetchPage(1);
+    const total = first.length > 0 ? Number(first[0].total) : 0;
+    current = Math.max(1, Math.ceil(total / OPEN_DAY_PAGE_SIZE));
+    rows = current === 1 ? first : await fetchPage(current);
+  }
+  return {
+    rows: rows.map(map),
+    page: current,
+    pageSize: OPEN_DAY_PAGE_SIZE,
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+  };
+}
+
+/**
  * One page of the days that are not closed, oldest first (issue #69, §15.2a): Not counted, or a
  * count waiting for the Manager. Directors and the Manager read them as open alerts; the Cashier
  * reads them to count a missed day late.
  */
-export async function loadOpenDays(page: number): Promise<Page<OpenDay>> {
-  const api = await userApi();
-  const rows = requireRows(
-    (await api.rpc("staff_imprest_open_count_days", {
-      p_limit: OPEN_DAY_PAGE_SIZE,
-      p_offset: (page - 1) * OPEN_DAY_PAGE_SIZE,
-    })) as { data: OpenDayRow[] | null; error: { message: string } | null },
-    "imprest.open_count_days",
-  );
-  return {
-    rows: rows.map((row) => {
-      if (row.state !== "not_counted" && row.state !== "awaiting_confirmation") {
-        unreadable("imprest.open_count_days", "state");
-      }
-      if (typeof row.waiting_since !== "string") unreadable("imprest.open_count_days", "waiting_since");
-      return {
-        businessDate: row.business_date,
-        state: row.state,
-        waitingSince: row.waiting_since,
-        notCountedSince: row.not_counted_since,
-        awaitingSince: row.awaiting_since,
-        latestCountId: row.latest_count_id,
-        latestStatus: row.latest_status,
-        latestReturnReason: row.latest_return_reason,
-      };
-    }),
-    page,
-    pageSize: OPEN_DAY_PAGE_SIZE,
-    total: rows.length > 0 ? Number(rows[0].total) : 0,
-  };
+export function loadOpenDays(page: number): Promise<Page<OpenDay>> {
+  const what = "imprest.open_count_days";
+  return readPage<OpenDayRow, OpenDay>("staff_imprest_open_count_days", what, page, (row) => {
+    if (row.state !== "not_counted" && row.state !== "awaiting_confirmation") unreadable(what, "state");
+    if (typeof row.waiting_since !== "string") unreadable(what, "waiting_since");
+    return {
+      businessDate: row.business_date,
+      state: row.state,
+      waitingSince: row.waiting_since,
+      notCountedSince: row.not_counted_since,
+      awaitingSince: row.awaiting_since,
+      latestCountId: row.latest_count_id,
+      latestStatus: row.latest_status,
+      latestReturnReason: row.latest_return_reason,
+    };
+  });
 }
 
 type AlertRow = {
@@ -212,33 +255,19 @@ type AlertRow = {
 const RESOLUTIONS = new Set(["counted_late", "confirmed", "sent_back"]);
 
 /** One page of resolved count alerts, most recently resolved first. Directors and the Manager. */
-export async function loadAlertHistory(page: number): Promise<Page<ResolvedCountAlert>> {
-  const api = await userApi();
-  const rows = requireRows(
-    (await api.rpc("staff_imprest_count_alert_history", {
-      p_limit: OPEN_DAY_PAGE_SIZE,
-      p_offset: (page - 1) * OPEN_DAY_PAGE_SIZE,
-    })) as { data: AlertRow[] | null; error: { message: string } | null },
-    "imprest.count_alert_history",
-  );
-  return {
-    rows: rows.map((row) => {
-      if (row.kind !== "not_counted" && row.kind !== "awaiting_confirmation") {
-        unreadable("imprest.count_alert_history", "kind");
-      }
-      if (!RESOLUTIONS.has(row.resolution)) unreadable("imprest.count_alert_history", "resolution");
-      return {
-        kind: row.kind,
-        businessDate: row.business_date,
-        countId: row.count_id,
-        attempt: row.attempt,
-        raisedAt: row.raised_at,
-        resolvedAt: row.resolved_at,
-        resolution: row.resolution as ResolvedCountAlert["resolution"],
-      };
-    }),
-    page,
-    pageSize: OPEN_DAY_PAGE_SIZE,
-    total: rows.length > 0 ? Number(rows[0].total) : 0,
-  };
+export function loadAlertHistory(page: number): Promise<Page<ResolvedCountAlert>> {
+  const what = "imprest.count_alert_history";
+  return readPage<AlertRow, ResolvedCountAlert>("staff_imprest_count_alert_history", what, page, (row) => {
+    if (row.kind !== "not_counted" && row.kind !== "awaiting_confirmation") unreadable(what, "kind");
+    if (!RESOLUTIONS.has(row.resolution)) unreadable(what, "resolution");
+    return {
+      kind: row.kind,
+      businessDate: row.business_date,
+      countId: row.count_id,
+      attempt: row.attempt,
+      raisedAt: row.raised_at,
+      resolvedAt: row.resolved_at,
+      resolution: row.resolution as ResolvedCountAlert["resolution"],
+    };
+  });
 }

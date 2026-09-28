@@ -410,10 +410,12 @@ export function LateCountControl({
   const [open, setOpen] = useState(false);
   const [key, controller] = useFreshKey(() => setOpen(false), COUNT_UNCONFIRMED_KEY);
 
-  if (!mayOpen && !open && !controller.result.successKey && !controller.result.error) return null;
+  // An open form closes when another day's count starts waiting: the fund holds one waiting count,
+  // so a second submission could only be refused.
+  if (!mayOpen && !controller.result.successKey && !controller.result.error) return null;
   return (
     <div className="flex flex-col gap-3">
-      {open ? (
+      {open && mayOpen ? (
         <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
           <Help>{t("imprest.count.late.help")}</Help>
           <EnterCountForm

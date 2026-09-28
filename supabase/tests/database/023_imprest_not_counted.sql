@@ -17,7 +17,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(69);
+select plan(71);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -422,6 +422,14 @@ select is(
 select is(
   (select count(*)::int from api.staff_imprest_counts(100, 0) where late_reason is null),
   2, 'and none for the counts entered on their own day');
+select is(
+  (select string_agg(attempt::text, ',' order by attempt)
+     from api.staff_imprest_counts(1, 0, tests.t() - 4)),
+  '2', 'the read narrows to one day, so today''s card never loses today behind late counts');
+select is(
+  (select string_agg(attempt::text || ':' || total, ',' order by attempt)
+     from api.staff_imprest_counts(100, 0, tests.t() - 4)),
+  '1:2,2:2', 'and counts only that day''s rows in its total');
 
 -- ---------------------------------------------------------------------------
 -- 6 · The audit trail

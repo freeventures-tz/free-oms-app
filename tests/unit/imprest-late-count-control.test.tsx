@@ -29,7 +29,9 @@ const view = (mayOpen: boolean) => (
   </NextIntlClientProvider>
 );
 
-beforeEach(() => enterLateCountAction.mockReset());
+beforeEach(() => {
+  enterLateCountAction.mockReset();
+});
 
 describe("a late count", () => {
   it("sends the day, the cash and the reason, and keeps the answer once the day is no longer Not counted", async () => {
@@ -53,6 +55,17 @@ describe("a late count", () => {
     rerender(view(false));
     expect(screen.getByText(en.imprest.count.success.countedLate)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /late$/ })).toBeNull();
+  });
+
+  it("closes an open form once another day's count starts waiting", async () => {
+    const user = userEvent.setup();
+    const { rerender, container } = render(view(true));
+    await user.click(screen.getByRole("button", { name: "Count Friday, 25 September 2026 late" }));
+    expect(screen.getByRole("button", { name: "Enter late count" })).toBeEnabled();
+
+    rerender(view(false));
+    expect(screen.queryByRole("button", { name: "Enter late count" })).toBeNull();
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("offers nothing on a day that cannot be counted late now", () => {

@@ -373,7 +373,10 @@ comment on function api.staff_enter_imprest_count(date, uuid, bigint, text, text
 -- ---------------------------------------------------------------------------
 drop function api.staff_imprest_counts(integer, integer);
 
-create function api.staff_imprest_counts(p_limit integer, p_offset integer)
+-- `p_business_date` narrows the read to one day, so today's card reads today's counts however many
+-- late counts were entered after them. Left out, it reads every day, as issue #68's form did.
+create function api.staff_imprest_counts(p_limit integer, p_offset integer,
+                                         p_business_date date default null)
 returns table (id uuid, business_date date, attempt integer, counted_tzs bigint, note text,
                posted_balance_tzs bigint, awaiting_verification_tzs bigint, expected_tzs bigint,
                variance_tzs bigint, status text, version integer, counted_by text,
@@ -411,6 +414,7 @@ begin
       left join public.imprest_count_returns x on x.count_id = c.id
       left join public.profiles px on px.id = x.returned_by
       left join public.imprest_count_postings p on p.count_id = c.id
+     where p_business_date is null or c.business_date = p_business_date
      -- Most recently entered first, where issue #68 ordered by day. A late count is for an old day,
      -- and the fund's one waiting count must lead the first page: nothing is entered while it
      -- waits, so it is always the latest entered.
@@ -420,7 +424,7 @@ begin
 end;
 $$;
 
-comment on function api.staff_imprest_counts(integer, integer) is
+comment on function api.staff_imprest_counts(integer, integer, date) is
   'The active fund''s daily counts, most recently entered first, each with expected, counted, variance, the '
   'Manager''s confirmation or send-back, and a late count''s reason (issues #68 and #69). A Cashier '
   'is not sent the posted balance or awaiting verification behind expected cash.';

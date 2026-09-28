@@ -20,7 +20,8 @@ import {
   loadRecentPurposes,
   loadSpendingPosition,
 } from "@/lib/imprest/disbursements";
-import { loadAlertHistory, loadCountFlags, loadCounts, loadOpenDays } from "@/lib/imprest/counts";
+import type { DailyCount } from "@/lib/imprest/counting";
+import { loadAlertHistory, loadCountFlags, loadCounts, loadDayCounts, loadOpenDays } from "@/lib/imprest/counts";
 import { loadFundings } from "@/lib/imprest/funding";
 import { formatTzs } from "@/lib/money";
 import { pageNumber } from "@/lib/settlement/settlement";
@@ -39,6 +40,16 @@ import { businessDate, formatBusinessStamp } from "@/lib/time/business-date";
  * Every figure is calculated on each read. Posted funding keeps its released label, because a reader
  * could otherwise take it for the cash in the tin or for what may be spent.
  */
+/**
+ * The counts today's card decides from: every count of today, read on its own so late counts
+ * entered afterwards never push them off a page, and the first history page, which always holds
+ * the fund's one waiting count, since nothing is entered while it waits (issue #69).
+ */
+function withToday(dayCounts: DailyCount[], firstPage: DailyCount[]): DailyCount[] {
+  const seen = new Set(dayCounts.map((c) => c.id));
+  return [...dayCounts, ...firstPage.filter((c) => !seen.has(c.id))];
+}
+
 export default async function ImprestPage({ searchParams }: PageProps<"/imprest">) {
   const viewer = await requireAccess("/imprest");
   const params = await searchParams;
@@ -58,10 +69,12 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   const page = pageNumber(params.page);
 
   const countPage = pageNumber(params.counts);
-  const [position, counts, todays, openDays, alertHistory, flags, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
+  const today = businessDate();
+  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
+    loadDayCounts(today),
     loadOpenDays(pageNumber(params.missed)),
     loadAlertHistory(pageNumber(params.alerts)),
     viewer.role === "director" ? loadCountFlags() : null,
@@ -101,8 +114,8 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
       {position ? (
         <DailyCountSection
           role={viewer.role}
-          today={businessDate()}
-          todays={(todays ?? counts).rows}
+          today={today}
+          todays={withToday(dayCounts, (todays ?? counts).rows)}
           history={counts}
           otherParams={others("counts")}
         >
@@ -249,12 +262,14 @@ async function CashierImprest({
   missed: number;
 }) {
   const t = await getTranslations("imprest");
-  const [position, own, purposes, counts, todays, openDays] = await Promise.all([
+  const today = businessDate();
+  const [position, own, purposes, counts, todays, dayCounts, openDays] = await Promise.all([
     loadSpendingPosition(),
     loadOwnDisbursements(viewerId, mine),
     loadRecentPurposes(viewerId),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
+    loadDayCounts(today),
     loadOpenDays(missed),
   ]);
   // The fund holds one waiting count, and it is always the latest entered, so the first page of
@@ -271,8 +286,8 @@ async function CashierImprest({
       {position ? (
         <DailyCountSection
           role="cashier"
-          today={businessDate()}
-          todays={(todays ?? counts).rows}
+          today={today}
+          todays={withToday(dayCounts, (todays ?? counts).rows)}
           history={counts}
           otherParams={{ mine: own.page, missed: openDays.page }}
         >

@@ -303,12 +303,12 @@ test.describe("imprest daily count", () => {
 
     await as(page, "cashier");
     try {
-      superSql("revoke execute on function api.staff_imprest_counts(integer, integer) from authenticated;");
+      superSql("revoke execute on function api.staff_imprest_counts(integer, integer, date) from authenticated;");
       await page.goto("/imprest");
       await expect(page.getByText(/this page could not be loaded/i)).toBeVisible();
       await expect(page.getByTestId("count-today")).toHaveCount(0);
     } finally {
-      superSql("grant execute on function api.staff_imprest_counts(integer, integer) to authenticated;");
+      superSql("grant execute on function api.staff_imprest_counts(integer, integer, date) to authenticated;");
     }
     await page.goto("/imprest");
     await expect(page.getByTestId("count-today").getByTestId("count-state-due")).toBeVisible();
