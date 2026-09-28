@@ -22,6 +22,7 @@ const TONES = {
   approved: "neutral",
   handed_out: "neutral",
   settled: "attention",
+  sent_back: "danger",
   verified: "success",
   rejected: "danger",
   withdrawn: "neutral",
@@ -196,6 +197,19 @@ export async function DisbursementList({
           })}
         </span>,
       );
+    } else if (d.status === "sent_back" && d.sentBack) {
+      // The Manager's reason, and how long the Cashier has had it (issue #65).
+      progress.set(
+        d.id,
+        <>
+          <span className="line-clamp-2 max-w-xs text-xs md:text-right" data-testid="sent-back-reason">
+            {t("lists.sentBackReason", { reason: d.sentBack.reason })}
+          </span>
+          <span className="text-xs text-muted-foreground" data-testid="waiting-for">
+            {t("lists.waitingFor", { age: await ageText(d.sentBack.returnedAt, now) })}
+          </span>
+        </>,
+      );
     } else if (d.status === "settled" && d.settlement) {
       progress.set(
         d.id,
@@ -214,10 +228,11 @@ export async function DisbursementList({
     }
   }
 
+  const NEXT = { approved: "lists.nextHandOut", handed_out: "lists.nextSettle", sent_back: "lists.nextSettleAgain" } as const;
   const nextStep = (d: Disbursement) =>
-    showNextStep && (d.status === "approved" || d.status === "handed_out") ? (
+    showNextStep && d.status in NEXT ? (
       <span className="text-xs font-medium underline underline-offset-4" data-testid="next-step">
-        {t(d.status === "approved" ? "lists.nextHandOut" : "lists.nextSettle")}
+        {t(NEXT[d.status as keyof typeof NEXT])}
       </span>
     ) : null;
 

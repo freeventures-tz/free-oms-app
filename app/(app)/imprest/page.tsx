@@ -12,6 +12,7 @@ import {
   loadAwaitingDecision,
   loadHandedOut,
   loadOpenApprovals,
+  loadSentBack,
   loadSettledWaiting,
   loadVerified,
   loadOwnDisbursements,
@@ -45,12 +46,13 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   const locale = await getLocale();
   const page = pageNumber(params.page);
 
-  const [position, waiting, open, out, settled, verified, fundings] = await Promise.all([
+  const [position, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadAwaitingDecision(pageNumber(params.waiting)),
     loadOpenApprovals(pageNumber(params.open)),
     loadHandedOut(pageNumber(params.out)),
     loadSettledWaiting(pageNumber(params.settled)),
+    loadSentBack(pageNumber(params.back)),
     loadVerified(pageNumber(params.verified)),
     loadFundings(page),
   ]);
@@ -60,6 +62,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     open: open.page,
     out: out.page,
     settled: settled.page,
+    back: back.page,
     verified: verified.page,
     page: fundings.page,
   };
@@ -111,6 +114,19 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         page={settled}
         param="settled"
         otherParams={others("settled")}
+      />
+
+      {/* Sent back to the Cashier with a reason (issue #65). Directors read the same list. */}
+      <DisbursementList
+        id="disbursements-sent-back"
+        title={t(viewer.role === "manager" ? "spending.lists.sentBack" : "spending.lists.sentBackDirector", {
+          count: back.total,
+        })}
+        empty={t("spending.lists.sentBackEmpty")}
+        note={t(viewer.role === "manager" ? "spending.lists.sentBackNote" : "spending.lists.sentBackNoteDirector")}
+        page={back}
+        param="back"
+        otherParams={others("back")}
       />
 
       {/* Once verified a payment leaves the queue above; this is where it can be found again. */}

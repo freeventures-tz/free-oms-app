@@ -21,6 +21,7 @@ export type DisbursementStatus =
   | "approved"
   | "handed_out"
   | "settled"
+  | "sent_back"
   | "verified"
   | "rejected"
   | "withdrawn"
@@ -51,6 +52,18 @@ export type VerificationSummary = {
   loss: number | null;
 };
 
+/**
+ * The Manager sent a settlement cycle back to the Cashier (issue #65). `returnedBy` is the Manager's
+ * name, or "" when the viewer may not read it (a Cashier reads only their own profile).
+ */
+export type SettlementReturn = {
+  settlementId: string;
+  reason: string;
+  returnedAt: string;
+  returnedById: string;
+  returnedBy: string;
+};
+
 export type Disbursement = {
   id: string;
   disbursementNo: string;
@@ -67,6 +80,8 @@ export type Disbursement = {
   recipient: string | null;
   handedOutAt: string | null;
   settlement: SettlementSummary | null;
+  /** While sent back: the return of the latest cycle, which the Cashier is answering. */
+  sentBack: SettlementReturn | null;
   verification: VerificationSummary | null;
   /**
    * Permanent flags (issue #62 criterion 7). They are true when ANY settlement of this disbursement
@@ -81,6 +96,7 @@ export type DisbursementEvent = {
     | "approved"
     | "handed_out"
     | "settled"
+    | "sent_back"
     | "verified"
     | "rejected"
     | "withdrawn"
@@ -91,6 +107,8 @@ export type DisbursementEvent = {
   /** Who acts at this step. Only the proposing Cashier proposes, withdraws, hands out and settles. */
   role: "cashier" | "manager";
   text: string | null;
+  /** The settlement cycle a settle or send-back event belongs to. */
+  cycle?: number;
 };
 
 export type SettlementLineView = {
@@ -102,9 +120,19 @@ export type SettlementLineView = {
   note: string | null;
 };
 
+/** One settlement cycle, in full: its figures, its lines, and its return when it was sent back. */
+export type SettlementCycle = SettlementSummary & {
+  lines: SettlementLineView[];
+  sentBack: SettlementReturn | null;
+};
+
+/** A receipt already uploaded and cited, which a later cycle may cite again (issue #65). */
+export type EarlierReceipt = { id: string; fileName: string; contentType: string; cycle: number };
+
 export type DisbursementDetail = Disbursement & {
   events: DisbursementEvent[];
-  lines: SettlementLineView[];
+  /** Every settlement cycle, oldest first. Nothing in an earlier one ever changes. */
+  cycles: SettlementCycle[];
 };
 
 /**
@@ -156,7 +184,8 @@ const COLUMNS = `
   imprest_settlements(id, cycle, used_tzs, returned_tzs, unaccounted_tzs, unaccounted_explanation,
                       line_count, no_receipt_lines, settled_at),
   imprest_verifications(settlement_id, verified_by, verified_at),
-  imprest_postings(kind, amount_tzs)
+  imprest_postings(kind, amount_tzs),
+  imprest_settlement_returns(settlement_id, reason, returned_by, returned_at)
 `;
 
 type SettlementRow = {
@@ -197,7 +226,30 @@ type Row = {
   // One-to-one (a disbursement is verified once), so PostgREST embeds an object or null.
   imprest_verifications: { settlement_id: string; verified_by: string; verified_at: string } | null;
   imprest_postings: { kind: "expense" | "unexplained_loss"; amount_tzs: number }[] | null;
+  imprest_settlement_returns: ReturnRow[] | null;
 };
+
+type ReturnRow = { settlement_id: string; reason: string; returned_by: string; returned_at: string };
+
+const summaryOf = (s: SettlementRow): SettlementSummary => ({
+  id: s.id,
+  cycle: s.cycle,
+  used: Number(s.used_tzs),
+  returned: Number(s.returned_tzs),
+  unaccounted: Number(s.unaccounted_tzs),
+  explanation: s.unaccounted_explanation,
+  lineCount: s.line_count,
+  noReceiptLines: s.no_receipt_lines,
+  settledAt: s.settled_at,
+});
+
+const returnOf = (r: ReturnRow, names: Map<string, string>): SettlementReturn => ({
+  settlementId: r.settlement_id,
+  reason: r.reason,
+  returnedAt: r.returned_at,
+  returnedById: r.returned_by,
+  returnedBy: names.get(r.returned_by) ?? "",
+});
 
 type Counted = PromiseLike<{
   data: Row[] | null;
@@ -238,19 +290,12 @@ function fromRow(row: Row, names: Map<string, string>): Disbursement {
     approvedAt: row.approved_at,
     recipient: row.imprest_disbursement_handouts?.recipient ?? null,
     handedOutAt: row.imprest_disbursement_handouts?.handed_out_at ?? null,
-    settlement: latest
-      ? {
-          id: latest.id,
-          cycle: latest.cycle,
-          used: Number(latest.used_tzs),
-          returned: Number(latest.returned_tzs),
-          unaccounted: Number(latest.unaccounted_tzs),
-          explanation: latest.unaccounted_explanation,
-          lineCount: latest.line_count,
-          noReceiptLines: latest.no_receipt_lines,
-          settledAt: latest.settled_at,
-        }
-      : null,
+    settlement: latest ? summaryOf(latest) : null,
+    sentBack: (() => {
+      if (row.status !== "sent_back" || !latest) return null;
+      const found = (row.imprest_settlement_returns ?? []).find((r) => r.settlement_id === latest.id);
+      return found ? returnOf(found, names) : null;
+    })(),
     verification: verified
       ? {
           verifiedAt: verified.verified_at,
@@ -275,7 +320,13 @@ async function page(
 ): Promise<Page<Disbursement>> {
   const result = await pagedQuery<Row>(pageNo, build, label);
   const names = await namesFor(result.rows.map((row) => row.proposed_by));
-  return { ...result, rows: result.rows.map((row) => fromRow(row, names)) };
+  const rows = result.rows.map((row) => fromRow(row, names));
+  // A sent-back row always carries the return it is answering. Without it the list would show a
+  // Sent back status with no reason, which is a failed read, not a fact.
+  if (rows.some((d) => d.status === "sent_back" && !d.sentBack)) {
+    throw new Error(`${DATA_UNAVAILABLE}: ${label}.sent_back`);
+  }
+  return { ...result, rows };
 }
 
 /**
@@ -288,6 +339,7 @@ type QueueOrder =
   | "approved_at"
   | "imprest_disbursement_handouts(handed_out_at)"
   | "imprest_disbursement_settled_at"
+  | "imprest_disbursement_sent_back_at"
   | "imprest_verifications(verified_at)";
 
 async function byStatus(
@@ -324,6 +376,13 @@ export const loadHandedOut = (pageNo = 1) =>
 /** Settled and waiting for the Manager to verify, longest waiting first. */
 export const loadSettledWaiting = (pageNo = 1) =>
   byStatus("imprest.settled_waiting", "settled", "imprest_disbursement_settled_at", pageNo);
+
+/**
+ * Sent back and waiting for the Cashier to settle again (issue #65), longest waiting first, ordered
+ * by when each was last sent back.
+ */
+export const loadSentBack = (pageNo = 1) =>
+  byStatus("imprest.sent_back", "sent_back", "imprest_disbursement_sent_back_at", pageNo);
 
 /**
  * Verified payments, most recently verified first (issue #64), so the Manager and Directors can
@@ -366,6 +425,7 @@ export async function loadRecentPurposes(viewerId: string, limit = 6): Promise<s
 }
 
 type LineRow = {
+  settlement_id: string;
   line_no: number;
   amount_tzs: number;
   purpose: string;
@@ -374,32 +434,73 @@ type LineRow = {
   imprest_receipts: { id: string; file_name: string; content_type: string } | null;
 };
 
-async function loadLines(settlementId: string): Promise<SettlementLineView[]> {
+/**
+ * Cycles per read of their lines. A cycle has at most 20 lines, so a batch returns at most 800
+ * rows, under the API's 1,000-row cap however many times a payment was sent back.
+ */
+const CYCLES_PER_READ = 40;
+
+/** The lines of every cycle named, keyed by settlement, each in line order. */
+async function loadLines(settlementIds: string[]): Promise<Map<string, SettlementLineView[]>> {
+  const byCycle = new Map<string, SettlementLineView[]>(settlementIds.map((id) => [id, []]));
+  if (settlementIds.length === 0) return byCycle;
   const supabase = await createServerSupabase();
-  const rows = requireRows(
-    (await supabase
-      .from("imprest_settlement_lines")
-      .select(
-        "line_no, amount_tzs, purpose, no_receipt_reason, no_receipt_note, imprest_receipts(id, file_name, content_type)",
-      )
-      .eq("settlement_id", settlementId)
-      .order("line_no")) as unknown as { data: LineRow[] | null; error: { message: string } | null },
-    "imprest.settlement_lines",
-  );
-  return rows.map((row) => ({
-    lineNo: row.line_no,
-    amount: Number(row.amount_tzs),
-    purpose: row.purpose,
-    receipt: row.imprest_receipts
-      ? {
-          id: row.imprest_receipts.id,
-          fileName: row.imprest_receipts.file_name,
-          contentType: row.imprest_receipts.content_type,
-        }
-      : null,
-    reason: row.no_receipt_reason,
-    note: row.no_receipt_note,
-  }));
+  const batches: string[][] = [];
+  for (let i = 0; i < settlementIds.length; i += CYCLES_PER_READ) {
+    batches.push(settlementIds.slice(i, i + CYCLES_PER_READ));
+  }
+  const rows = (
+    await Promise.all(
+      batches.map(async (ids) =>
+        requireRows(
+          (await supabase
+            .from("imprest_settlement_lines")
+            .select(
+              "settlement_id, line_no, amount_tzs, purpose, no_receipt_reason, no_receipt_note, imprest_receipts(id, file_name, content_type)",
+            )
+            .in("settlement_id", ids)
+            .order("settlement_id")
+            .order("line_no")) as unknown as { data: LineRow[] | null; error: { message: string } | null },
+          "imprest.settlement_lines",
+        ),
+      ),
+    )
+  ).flat();
+  for (const row of rows) {
+    byCycle.get(row.settlement_id)?.push({
+      lineNo: row.line_no,
+      amount: Number(row.amount_tzs),
+      purpose: row.purpose,
+      receipt: row.imprest_receipts
+        ? {
+            id: row.imprest_receipts.id,
+            fileName: row.imprest_receipts.file_name,
+            contentType: row.imprest_receipts.content_type,
+          }
+        : null,
+      reason: row.no_receipt_reason,
+      note: row.no_receipt_note,
+    });
+  }
+  return byCycle;
+}
+
+/**
+ * The receipts earlier cycles cited, newest cycle first and each once, which the Cashier may cite
+ * again when settling a sent-back disbursement. Only cited receipts are offered: a cited one is
+ * known to be uploaded, where a registered one may never have arrived.
+ */
+export function earlierReceipts(cycles: SettlementCycle[]): EarlierReceipt[] {
+  const seen = new Set<string>();
+  const out: EarlierReceipt[] = [];
+  for (const cycle of [...cycles].sort((a, b) => b.cycle - a.cycle)) {
+    for (const line of cycle.lines) {
+      if (!line.receipt || seen.has(line.receipt.id)) continue;
+      seen.add(line.receipt.id);
+      out.push({ ...line.receipt, cycle: cycle.cycle });
+    }
+  }
+  return out;
 }
 
 /** One disbursement with its history and settlement lines, or `null` when it may not be read. */
@@ -421,6 +522,7 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
     row.rejected_by,
     row.cancelled_by,
     row.imprest_verifications?.verified_by ?? null,
+    ...(row.imprest_settlement_returns ?? []).map((r) => r.returned_by),
   ]);
   const who = (person: string | null) => (person ? (names.get(person) ?? "") : "");
   const disbursement = fromRow(row, names);
@@ -432,6 +534,10 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
   }
   if ((row.status === "handed_out" || row.status === "settled") && !disbursement.handedOutAt) {
     throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement_handout`);
+  }
+  // A sent-back row always carries its hand-out, its settlement and the return of that settlement.
+  if (row.status === "sent_back" && (!disbursement.settlement || !disbursement.handedOutAt || !disbursement.sentBack)) {
+    throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement_sent_back`);
   }
   // A verified row always carries its settlement, hand-out, verification and expense, and a loss
   // exactly when the settlement left a remainder. Anything less is a failed read, and showing the
@@ -464,14 +570,26 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
       text: disbursement.recipient,
     });
   }
-  if (disbursement.settlement) {
-    events.push({
-      kind: "settled",
-      at: disbursement.settlement.settledAt,
-      by: who(row.proposed_by),
-      role: "cashier",
-      text: null,
-    });
+  // Every cycle the Cashier settled, and every one the Manager sent back, in order.
+  const settlements = [...(row.imprest_settlements ?? [])].sort((a, b) => a.cycle - b.cycle);
+  const returns = row.imprest_settlement_returns ?? [];
+  for (const s of settlements) {
+    events.push({ kind: "settled", at: s.settled_at, by: who(row.proposed_by), role: "cashier", text: null, cycle: s.cycle });
+    const back = returns.find((r) => r.settlement_id === s.id);
+    if (back) {
+      events.push({
+        kind: "sent_back",
+        at: back.returned_at,
+        by: who(back.returned_by),
+        role: "manager",
+        text: back.reason,
+        cycle: s.cycle,
+      });
+    }
+  }
+  // Every return belongs to one of the cycles read; one that does not means a cycle is missing.
+  if (returns.some((r) => !settlements.some((s) => s.id === r.settlement_id))) {
+    throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement_returns`);
   }
   if (v) {
     events.push({ kind: "verified", at: v.verifiedAt, by: who(v.verifiedById), role: "manager", text: null });
@@ -507,10 +625,14 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
   if (events.some((event) => !event.at)) throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement`);
   events.sort((a, b) => a.at.localeCompare(b.at));
 
-  const lines = disbursement.settlement ? await loadLines(disbursement.settlement.id) : [];
-  if (disbursement.settlement && lines.length !== disbursement.settlement.lineCount) {
+  const lines = await loadLines(settlements.map((s) => s.id));
+  const cycles: SettlementCycle[] = settlements.map((s) => {
+    const back = returns.find((r) => r.settlement_id === s.id);
+    return { ...summaryOf(s), lines: lines.get(s.id) ?? [], sentBack: back ? returnOf(back, names) : null };
+  });
+  if (cycles.some((c) => c.lines.length !== c.lineCount)) {
     throw new Error(`${DATA_UNAVAILABLE}: imprest.settlement_lines`);
   }
 
-  return { ...disbursement, events, lines };
+  return { ...disbursement, events, cycles };
 }

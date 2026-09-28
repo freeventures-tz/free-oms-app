@@ -143,8 +143,8 @@ select ok(
 select is(
   (select string_agg(enumlabel, ',' order by enumsortorder) from pg_enum
     where enumtypid = 'public.imprest_disbursement_status'::regtype),
-  'proposed,approved,handed_out,settled,verified,rejected,withdrawn,cancelled',
-  'verified comes after settled');
+  'proposed,approved,handed_out,settled,sent_back,verified,rejected,withdrawn,cancelled',
+  'verified comes after settled, and after sent back (issue #65)');
 
 -- ---------------------------------------------------------------------------
 -- The worked example: TZS 200,000 posted, built directly as its owner would

@@ -8,6 +8,7 @@ import {
   cancelDisbursementAction,
   proposeDisbursementAction,
   rejectDisbursementAction,
+  sendBackSettlementAction,
   verifyDisbursementAction,
   withdrawDisbursementAction,
 } from "@/app/(app)/imprest/actions";
@@ -325,7 +326,30 @@ export function DisbursementActions({
         disabled={controller.pending}
       />
     );
-    toggles = toggle("verify", "imprest.spending.verify.open");
+    // Send back (issue #65): the same cycle, with a reason. There is no figure to type.
+    forms.sendBack = (
+      <div className="flex flex-col gap-3 rounded-lg border border-border p-4" data-testid="send-back">
+        <h3 className="font-semibold">{t("imprest.spending.sendBack.title")}</h3>
+        <Help>{t("imprest.spending.sendBack.help")}</Help>
+        <ActionForm
+          {...shared}
+          hidden={{ ...hidden, settlementId: settlement.id }}
+          id="send-back"
+          name="sendBack"
+          action={sendBackSettlementAction}
+          fields={[{ name: "reason", labelKey: "imprest.spending.sendBack.reason", kind: "text" }]}
+          submitKey="imprest.spending.sendBack.confirm"
+          variant="danger"
+          testId="send-back-form"
+        />
+      </div>
+    );
+    toggles = (
+      <>
+        {toggle("verify", "imprest.spending.verify.open")}
+        {toggle("sendBack", "imprest.spending.sendBack.open", "danger")}
+      </>
+    );
   } else if (role === "cashier" && isOwn && disbursement.status === "proposed") {
     toggles = toggle("withdraw", "imprest.spending.actions.withdraw", "danger");
   }

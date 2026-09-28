@@ -7,6 +7,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { derivedAuthIdentifier } from "@/lib/auth/phone-identity";
 
 import { expectLandsOn, fixtures, signIn } from "./fixtures";
+import { receiptPhoto } from "./receipt-photo";
 
 /**
  * Imprest hand-out and settlement through the screens (issue #62), on every device tier.
@@ -533,7 +534,8 @@ test.describe("imprest hand-out and settlement", () => {
 // Hand-out and Settle: a real touch starts the clock inside the page, acknowledgement is the first
 // animation frame after the touched control reports `aria-busy`, and completion is the server's
 // confirmation. The receipt upload is timed on its own, from choosing a 3 MB photo to the file
-// being stored, because it is bound by the uplink rather than by the command.
+// being stored, because it is bound by the uplink rather than by the command. Since issue #65 that
+// time includes making the photo smaller on the phone, and the size actually uploaded is reported.
 // ---------------------------------------------------------------------------------------------
 
 const BENCHMARK = process.env.FV_BENCHMARK === "1";
@@ -652,11 +654,14 @@ function report(label: string, ack: number[], done: number[]) {
     test.skip(testInfo.project.name !== "mobile", "the mobile profile only");
     await ensureFree(UPLOAD_SAMPLES * PROFILES.length * 1000 + 1000);
     await as(page, "cashier");
-    // Random bytes the size of a phone photo. Encryption makes every file look like this anyway.
-    const photo = { name: "photo.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(PHOTO_BYTES, 7) };
+    // A real, decodable phone photo of a receipt, about 3 MB (issue #65). Filler bytes of the same
+    // size would be uploaded as they are, because no browser can decode them, so they would time
+    // the upload without the shrinking every real photo now goes through.
+    const photo = await receiptPhoto(page, "IMG_4211.jpg", PHOTO_BYTES);
 
     for (const profile of PROFILES) {
       const times: number[] = [];
+      let uploaded = 0;
       for (let i = 0; i < UPLOAD_SAMPLES; i += 1) {
         const row = await seedHandedOut(1000, `Bench upload ${SUFFIX} ${profile.name} ${i}`);
         await page.goto(`/imprest/disbursements/${row.id}`);
@@ -670,9 +675,14 @@ function report(label: string, ack: number[], done: number[]) {
           return Date.now() - start;
         });
         times.push(elapsed);
+        // A build from before issue #65 carries no size on the status, and uploaded the photo as is.
+        uploaded = Number((await line.getByTestId("upload-status").getAttribute("data-bytes")) ?? photo.buffer.length);
       }
       const s = summary(times);
-      console.log(`${profile.name} upload ${PHOTO_BYTES} bytes n=${s.n} p50=${s.p50}ms p95=${s.p95}ms worst=${s.worst}ms`);
+      console.log(
+        `${profile.name} upload of a ${photo.buffer.length}-byte photo as ${uploaded} bytes ` +
+          `n=${s.n} p50=${s.p50}ms p95=${s.p95}ms worst=${s.worst}ms`,
+      );
     }
   });
 });
