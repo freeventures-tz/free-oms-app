@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { ProposeDisbursementForm } from "@/app/(app)/imprest/disbursement-forms";
 import { RequestFundingForm } from "@/app/(app)/imprest/funding-forms";
+import { CountFlags, DailyCountSection } from "@/app/(app)/imprest/daily-count";
 import { FundingStatusChip } from "@/app/(app)/imprest/funding-status";
 import { DisbursementList, SpendingFigures } from "@/app/(app)/imprest/spending";
 import { Pager } from "@/components/ui/pager";
@@ -19,10 +20,11 @@ import {
   loadRecentPurposes,
   loadSpendingPosition,
 } from "@/lib/imprest/disbursements";
+import { loadCountFlags, loadCounts } from "@/lib/imprest/counts";
 import { loadFundings } from "@/lib/imprest/funding";
 import { formatTzs } from "@/lib/money";
 import { pageNumber } from "@/lib/settlement/settlement";
-import { formatBusinessStamp } from "@/lib/time/business-date";
+import { businessDate, formatBusinessStamp } from "@/lib/time/business-date";
 
 /**
  * Imprest (product.md §13.2 and §13.3, issues #48 and #55).
@@ -40,14 +42,20 @@ import { formatBusinessStamp } from "@/lib/time/business-date";
 export default async function ImprestPage({ searchParams }: PageProps<"/imprest">) {
   const viewer = await requireAccess("/imprest");
   const params = await searchParams;
-  if (viewer.role === "cashier") return <CashierImprest viewerId={viewer.userId} mine={pageNumber(params.mine)} />;
+  if (viewer.role === "cashier") {
+    return <CashierImprest viewerId={viewer.userId} mine={pageNumber(params.mine)} counts={pageNumber(params.counts)} />;
+  }
 
   const t = await getTranslations("imprest");
   const locale = await getLocale();
   const page = pageNumber(params.page);
 
-  const [position, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
+  const countPage = pageNumber(params.counts);
+  const [position, counts, todays, flags, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
+    loadCounts(countPage),
+    countPage === 1 ? null : loadCounts(1),
+    viewer.role === "director" ? loadCountFlags() : null,
     loadAwaitingDecision(pageNumber(params.waiting)),
     loadOpenApprovals(pageNumber(params.open)),
     loadHandedOut(pageNumber(params.out)),
@@ -65,6 +73,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     back: back.page,
     verified: verified.page,
     page: fundings.page,
+    counts: counts.page,
   };
   const others = (own: keyof typeof pages) =>
     Object.fromEntries(Object.entries(pages).filter(([name]) => name !== own));
@@ -74,6 +83,19 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
       <PageHeader title={t("title")} description={t("description")} />
 
       <SpendingFigures position={position} />
+
+      {/* The flags a confirmed shortage or excess raised to the Directors (issue #68). */}
+      {flags ? <CountFlags flags={flags} /> : null}
+
+      {position ? (
+        <DailyCountSection
+          role={viewer.role}
+          today={businessDate()}
+          todays={(todays ?? counts).rows}
+          history={counts}
+          otherParams={others("counts")}
+        />
+      ) : null}
 
       <DisbursementList
         id="disbursements-waiting"
@@ -200,12 +222,14 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
   );
 }
 
-async function CashierImprest({ viewerId, mine }: { viewerId: string; mine: number }) {
+async function CashierImprest({ viewerId, mine, counts: countPage }: { viewerId: string; mine: number; counts: number }) {
   const t = await getTranslations("imprest");
-  const [position, own, purposes] = await Promise.all([
+  const [position, own, purposes, counts, todays] = await Promise.all([
     loadSpendingPosition(),
     loadOwnDisbursements(viewerId, mine),
     loadRecentPurposes(viewerId),
+    loadCounts(countPage),
+    countPage === 1 ? null : loadCounts(1),
   ]);
 
   return (
@@ -213,6 +237,17 @@ async function CashierImprest({ viewerId, mine }: { viewerId: string; mine: numb
       <PageHeader title={t("title")} description={t("spending.cashierDescription")} />
 
       <SpendingFigures position={position} />
+
+      {/* The Cashier counts the tin each day (issue #68). */}
+      {position ? (
+        <DailyCountSection
+          role="cashier"
+          today={businessDate()}
+          todays={(todays ?? counts).rows}
+          history={counts}
+          otherParams={{ mine: own.page }}
+        />
+      ) : null}
 
       {position ? (
         <Card className="flex flex-col gap-3">
@@ -230,6 +265,7 @@ async function CashierImprest({ viewerId, mine }: { viewerId: string; mine: numb
         showOpenFor
         showProposer={false}
         showNextStep
+        otherParams={{ counts: counts.page }}
       />
     </>
   );

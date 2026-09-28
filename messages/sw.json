@@ -1101,7 +1101,7 @@
     "description": "Fedha za uendeshaji na malipo yanayotoka humo: nani aliomba, nani aliamua, na nini kilikabidhiwa na kuthibitishwa.",
     "total": {
       "label": "Salio lililothibitishwa",
-      "help": "Ufadhili uliothibitishwa ukiondoa matumizi na hasara zilizohakikiwa. Si hesabu ya fedha taslimu.",
+      "help": "Ufadhili uliothibitishwa ukiondoa matumizi na hasara zilizohakikiwa, ukiondoa upungufu wa hesabu uliothibitishwa na kuongeza ziada. Si hesabu ya fedha taslimu.",
       "noFund": "Bado hakuna ombi la ufadhili wa imprest."
     },
     "request": {
@@ -1414,6 +1414,110 @@
         "reasonHeading": "Kwa nini Meneja aliirudisha",
         "help": "Rekebisha hesabu na uiwasilishe tena. Hesabu yako ya awali inabaki kwenye kumbukumbu kama ilivyokuwa. Mistari hapa chini inaanzia hapo."
       }
+    },
+    "count": {
+      "title": "Hesabu ya fedha ya kila siku",
+      "state": {
+        "not_counted": "Haijahesabiwa",
+        "awaiting_confirmation": "Inasubiri uthibitisho wa Meneja",
+        "sent_back": "Imerudishwa ihesabiwe upya",
+        "balanced": "Imelingana",
+        "shortage": "Upungufu",
+        "excess": "Ziada"
+      },
+      "help": {
+        "not_counted": {
+          "cashier": "Hesabu fedha zilizo kwenye kasha kisha andika jumla. Programu inakokotoa kinachopaswa kuwepo.",
+          "other": "Keshia bado hajahesabu kasha leo. Hii si tofauti ya sifuri."
+        },
+        "awaiting_confirmation": {
+          "manager": "Kagua hesabu. Ithibitishe kama ilivyo, au irudishe ihesabiwe upya.",
+          "other": "Keshia amehesabu. Meneja bado hajaithibitisha, kwa hivyo siku haijafungwa."
+        },
+        "sent_back": {
+          "cashier": "Meneja amerudisha hesabu yako. Hesabu kasha tena kisha andika jumla mpya.",
+          "other": "Meneja amerudisha hesabu. Keshia anahesabu tena."
+        },
+        "balanced": "Hesabu imelingana kabisa na fedha zinazotarajiwa. Siku imefungwa.",
+        "shortage": "Kasha lilikuwa na kidogo kuliko kinachotarajiwa. Upungufu umeandikwa na unasubiri uamuzi wa Mkurugenzi.",
+        "excess": "Kasha lilikuwa na zaidi ya kinachotarajiwa. Ziada imeandikwa."
+      },
+      "figures": {
+        "expected": "Fedha zinazotarajiwa",
+        "counted": "Zilizohesabiwa",
+        "variance": "Tofauti",
+        "short": "Pungufu kwa {amount}",
+        "over": "Zaidi kwa {amount}",
+        "none": "Hakuna"
+      },
+      "record": {
+        "counted": "Imehesabiwa na {name} tarehe {when}",
+        "note": "Maelezo ya Keshia: {note}",
+        "basis": "Fedha zinazotarajiwa zilikuwa salio lililothibitishwa la {posted} ukiondoa {awaiting} kinachosubiri uhakiki.",
+        "sentBack": "Imerudishwa na {name} tarehe {when}: {reason}",
+        "confirmed": "Imethibitishwa na {name} tarehe {when}.",
+        "because": "Sababu: {explanation}.",
+        "explanationNote": "Maelezo: {note}",
+        "postedShortage": "Imeandikwa kama upungufu wa hesabu wa {amount}, unaosubiri uamuzi wa Mkurugenzi.",
+        "postedExcess": "Imeandikwa kama ziada ya hesabu ya {amount}."
+      },
+      "enter": {
+        "counted": "Fedha zilizo kwenye kasha",
+        "countedHelp": "Hesabu kila noti na sarafu, kisha andika jumla kwa shilingi. Andika 0 kama kasha ni tupu.",
+        "note": "Maelezo (si lazima)",
+        "submit": "Andika hesabu",
+        "submitAgain": "Andika hesabu mpya",
+        "recountReason": "Meneja ameomba ihesabiwe upya: {reason}"
+      },
+      "confirm": {
+        "heading": "Thibitisha au rudisha",
+        "title": "Thibitisha hesabu",
+        "help": "Chagua kwa nini hesabu inatofautiana na fedha zinazotarajiwa. Huwezi kubadilisha hesabu ya Keshia.",
+        "helpBalanced": "Hesabu inalingana na fedha zinazotarajiwa. Kuthibitisha kunafunga siku.",
+        "explanation": "Sababu ya tofauti",
+        "note": "Maelezo (si lazima)",
+        "noteRequired": "Maelezo (ni lazima kwa sababu hii)",
+        "postsShortage": "Kuthibitisha kunaandika upungufu wa hesabu wa {amount}, kunapunguza salio lililothibitishwa na kunawajulisha Wakurugenzi wote wawili.",
+        "postsExcess": "Kuthibitisha kunaandika ziada ya hesabu ya {amount}, kunaongeza salio lililothibitishwa na kunawajulisha Wakurugenzi wote wawili.",
+        "balanced": "Thibitisha imelingana",
+        "shortage": "Thibitisha upungufu wa {amount}",
+        "excess": "Thibitisha ziada ya {amount}"
+      },
+      "sendBack": {
+        "open": "Rudisha",
+        "title": "Rudisha hesabu",
+        "help": "Keshia ataona sababu yako na kuhesabu tena. Hesabu hii inabaki kwenye kumbukumbu na hakuna kinachoandikwa.",
+        "reason": "Keshia akague nini",
+        "confirm": "Rudisha ihesabiwe upya"
+      },
+      "explanation": {
+        "counting_error": "Kosa la kuhesabu",
+        "recording_error": "Kosa la kuandika",
+        "change_not_returned": "Chenji haikurudishwa",
+        "amount_correction": "Marekebisho ya kiasi",
+        "suspected_loss_or_theft": "Inashukiwa kupotea au kuibiwa",
+        "under_investigation": "Inachunguzwa",
+        "other": "Nyingine"
+      },
+      "history": {
+        "title": "Hesabu",
+        "empty": "Bado hakuna hesabu.",
+        "day": "{date}, hesabu ya {attempt}"
+      },
+      "flags": {
+        "title": "Tahadhari za hesabu ya imprest",
+        "empty": "Hakuna hesabu iliyotolewa tahadhari.",
+        "shortage": "Upungufu wa {amount} tarehe {date}",
+        "excess": "Ziada ya {amount} tarehe {date}",
+        "waitingDecision": "Inasubiri uamuzi wa Mkurugenzi",
+        "recorded": "Imeandikwa",
+        "raised": "Tahadhari ilitolewa {when}"
+      },
+      "success": {
+        "counted": "Hesabu imeandikwa. Sasa inamsubiri Meneja.",
+        "confirmed": "Hesabu imethibitishwa. Siku imefungwa.",
+        "sentBack": "Hesabu imerudishwa. Keshia atahesabu tena."
+      }
     }
   },
   "imprestErrors": {
@@ -1486,6 +1590,27 @@
     "receipt_not_uploaded_yet": "Risiti moja haikupakiwa. Bonyeza Jaribu tena juu yake, au ondoa mstari huo.",
     "not_settled": "Malipo yaliyofungwa hesabu na yanayomsubiri Meneja pekee ndiyo yanaweza kuhakikiwa au kurudishwa, na haya hayasubiri hilo.",
     "settlement_not_latest": "Hesabu imebadilika tangu uifungue. Pakia upya uone ya karibuni."
+  },
+  "countErrors": {
+    "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",
+    "generic": "Hitilafu imetokea na hakuna kilichobadilishwa. Jaribu tena.",
+    "unconfirmed": "Jibu halikurudi, kwa hivyo huenda hili limehifadhiwa au halijahifadhiwa. Bonyeza Jaribu tena ili ujue: ombi lilelile linatumwa tena, na haliwezi kurekodiwa mara mbili.",
+    "idempotency_key_conflict": "Ombi hili tayari limetumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
+    "no_fund": "Bado hakuna mfuko wa imprest uliofunguliwa, kwa hivyo hakuna cha kuhesabu.",
+    "day_changed": "Siku imebadilika ukurasa huu ukiwa wazi. Upakie upya ili uhesabu ya leo.",
+    "already_confirmed": "Hesabu ya leo imeshathibitishwa. Siku imefungwa.",
+    "count_awaiting_confirmation": "Hesabu ya leo imeshaandikwa na inamsubiri Meneja.",
+    "stale": "Hesabu ya leo imebadilika tangu ulipofungua ukurasa huu. Upakie upya uone ilipofikia.",
+    "amount_invalid": "Andika idadi kamili ya shilingi zilizo kwenye kasha, 0 au zaidi.",
+    "amount_too_large": "Kiasi hicho ni kikubwa kuliko mfumo unavyokubali.",
+    "note_invalid": "Andika maelezo yenye herufi 3 hadi 500, au yaache wazi.",
+    "no_count": "Hesabu hii haipatikani.",
+    "not_awaiting_confirmation": "Hesabu hii haikusubiri tena. Pakia ukurasa upya uone ilipofikia.",
+    "reason_required": "Toa sababu yenye herufi 3 hadi 500.",
+    "explanation_required": "Chagua sababu ya tofauti.",
+    "explanation_invalid": "Chagua mojawapo ya sababu zilizoorodheshwa.",
+    "explanation_note_required": "Sababu hii inahitaji maelezo yenye herufi 3 hadi 500.",
+    "explanation_not_needed": "Hesabu iliyolingana haihitaji sababu wala maelezo."
   },
   "reports": {
     "title": "Ripoti za kila siku",

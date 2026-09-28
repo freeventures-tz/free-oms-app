@@ -8,10 +8,12 @@ import { requireRole } from "@/lib/auth/guard";
 import type { AppRole } from "@/lib/auth/roles";
 import {
   cancelDisbursement,
+  confirmCount,
   confirmReceived,
   correctHandover,
   decideDisbursement,
   decideFunding,
+  enterCount,
   handOutDisbursement,
   increaseApproval,
   openReceipt,
@@ -20,6 +22,7 @@ import {
   registerReceipt,
   reportMismatch,
   requestFunding,
+  sendBackCount,
   sendBackSettlement,
   settleDisbursement,
   verifyDisbursement,
@@ -34,9 +37,11 @@ import { fieldErrors } from "@/lib/validation/auth";
 import {
   approveDisbursementSchema,
   approveFundingSchema,
+  confirmCountSchema,
   confirmReceivedSchema,
   correctHandoverSchema,
   disbursementReasonSchema,
+  enterCountSchema,
   handOutSchema,
   increaseApprovalSchema,
   proposeDisbursementSchema,
@@ -45,6 +50,7 @@ import {
   rejectFundingSchema,
   reportMismatchSchema,
   requestFundingSchema,
+  sendBackCountSchema,
   sendBackSchema,
   settleSchema,
   verifyDisbursementSchema,
@@ -136,9 +142,33 @@ const SPENDING_ERRORS = new Set([
   "settlement_not_latest",
 ]);
 
-type Messages = { namespace: "imprestErrors" | "spendingErrors"; known: Set<string> };
+/** The daily count's refusals (issue #68) speak of the tin and the day, not of payments. */
+const COUNT_ERRORS = new Set([
+  "not_permitted",
+  "generic",
+  "unconfirmed",
+  "idempotency_key_conflict",
+  "no_fund",
+  "day_changed",
+  "already_confirmed",
+  "count_awaiting_confirmation",
+  "stale",
+  "amount_invalid",
+  "amount_too_large",
+  "note_invalid",
+  "no_count",
+  "not_awaiting_confirmation",
+  "reason_required",
+  "explanation_required",
+  "explanation_invalid",
+  "explanation_note_required",
+  "explanation_not_needed",
+]);
+
+type Messages = { namespace: "imprestErrors" | "spendingErrors" | "countErrors"; known: Set<string> };
 const FUNDING_MESSAGES: Messages = { namespace: "imprestErrors", known: KNOWN_ERRORS };
 const SPENDING_MESSAGES: Messages = { namespace: "spendingErrors", known: SPENDING_ERRORS };
+const COUNT_MESSAGES: Messages = { namespace: "countErrors", known: COUNT_ERRORS };
 
 export type ImprestActionState = {
   error?: string;
@@ -402,6 +432,58 @@ export async function settleDisbursementAction(_p: ImprestActionState, data: For
     settleDisbursement,
     "imprest.spending.success.settled",
     SPENDING_MESSAGES,
+  );
+}
+
+// The daily count (issue #68): the Cashier counts, the Manager confirms or sends back.
+
+export async function enterCountAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    enterCountSchema,
+    {
+      businessDate: data.get("businessDate") ?? "",
+      previousCountId: data.get("previousCountId") ?? "",
+      counted: data.get("counted") ?? "",
+      note: data.get("note") ?? "",
+      idempotencyKey: data.get("idempotencyKey"),
+    },
+    enterCount,
+    "imprest.count.success.counted",
+    COUNT_MESSAGES,
+  );
+}
+
+const countTarget = (data: FormData) => ({
+  countId: data.get("countId"),
+  expectedVersion: data.get("expectedVersion"),
+  idempotencyKey: data.get("idempotencyKey"),
+});
+
+export async function confirmCountAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    confirmCountSchema,
+    {
+      ...countTarget(data),
+      variance: data.get("variance"),
+      explanation: data.get("explanation") ?? "",
+      note: data.get("note") ?? "",
+    },
+    confirmCount,
+    "imprest.count.success.confirmed",
+    COUNT_MESSAGES,
+  );
+}
+
+export async function sendBackCountAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    sendBackCountSchema,
+    { ...countTarget(data), reason: data.get("reason") ?? "" },
+    sendBackCount,
+    "imprest.count.success.sentBack",
+    COUNT_MESSAGES,
   );
 }
 
