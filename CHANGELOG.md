@@ -2,7 +2,7 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
-## [0.8.0] — 2026-09-28
+## [0.8.0] — 2026-09-29
 
 A day nobody counted now shows as Not counted, and never as balanced. Both Directors and the
 Manager are alerted until the day has a confirmed count, and the Cashier can count a missed day
