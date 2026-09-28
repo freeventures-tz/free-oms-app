@@ -19,7 +19,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(108);
+select plan(111);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -132,7 +132,7 @@ select ok(
   (select bool_and(not has_table_privilege('authenticated', t, 'insert')
                    and not has_table_privilege('authenticated', t, 'update')
                    and not has_table_privilege('authenticated', t, 'delete')
-                   and has_table_privilege('authenticated', t, 'select')
+                   and has_any_column_privilege('authenticated', t, 'select')
                    and not has_table_privilege('anon', t, 'select')
                    and not has_table_privilege('service_role', t, 'select')
                    and not has_table_privilege('service_role', t, 'insert')
@@ -398,6 +398,12 @@ select tests.director_b();
 select is((select count(*)::int from public.imprest_count_flags), 1, 'so does the other Director');
 select is((select count(*)::int from public.imprest_counts), 2, 'Directors read every count');
 select tests.cashier();
+select throws_ok($$ select posted_balance_tzs from public.imprest_counts $$, '42501', null,
+                 'the Cashier cannot read the posted balance kept with a count, even directly');
+select throws_ok($$ select awaiting_verification_tzs from public.imprest_counts $$, '42501', null,
+                 'nor awaiting verification');
+select is((select count(*)::int from public.imprest_counts where expected_tzs > 0), 2,
+          'the Cashier reads the counts themselves, with expected cash');
 select is((select count(*)::int from public.imprest_count_flags), 0, 'the Cashier reads no flag');
 select is((select count(*)::int from public.imprest_count_postings), 0,
           'nor the posting, which changes the posted balance the Cashier is not shown');

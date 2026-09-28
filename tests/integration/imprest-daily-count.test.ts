@@ -365,6 +365,12 @@ describe("one business day of counting, over HTTP", () => {
 
     const { error: repError } = await salesRep.api.rpc("staff_imprest_counts", { p_limit: 30, p_offset: 0 });
     expect(repError?.message).toMatch(/may not perform this command/);
+
+    // Nor can the Cashier read those figures by selecting the table directly.
+    const direct = await cashier.read.from("imprest_counts").select("posted_balance_tzs, awaiting_verification_tzs");
+    expect(direct.error?.message).toMatch(/permission denied/);
+    const own = await cashier.read.from("imprest_counts").select("expected_tzs").eq("id", standing.id);
+    expect(own.data).toEqual([{ expected_tzs: expected }]);
   });
 
   it("records every success with its actor, live role and correlation id", async () => {

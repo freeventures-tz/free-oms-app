@@ -478,18 +478,22 @@ revoke all on public.imprest_counts, public.imprest_count_returns,
               public.imprest_count_confirmations, public.imprest_count_postings,
               public.imprest_count_flags
   from public, anon, authenticated, service_role;
-grant select on public.imprest_counts, public.imprest_count_returns,
-                public.imprest_count_confirmations, public.imprest_count_postings,
-                public.imprest_count_flags
+grant select on public.imprest_count_returns, public.imprest_count_confirmations,
+                public.imprest_count_postings, public.imprest_count_flags
   to authenticated;
+-- Every column of a count but the posted balance and awaiting verification behind expected cash,
+-- which the Cashier is never sent. Directors and the Manager read those two through
+-- `api.staff_imprest_counts`, the one read the screens use.
+grant select (id, fund_id, business_date, attempt, counted_tzs, note, expected_tzs, variance_tzs,
+              status, version, counted_by, counted_at)
+  on public.imprest_counts to authenticated;
 grant select, insert, update on public.imprest_counts to fv_definer_owner;
 grant select, insert on public.imprest_count_returns, public.imprest_count_confirmations,
                         public.imprest_count_postings, public.imprest_count_flags
   to fv_definer_owner;
 
--- The count and its decisions: the three imprest roles. The Cashier reads the posted balance kept
--- with a count only through `api.staff_imprest_counts`, which withholds it; the table is read
--- through that function, never directly by the Cashier's screen.
+-- The count and its decisions: the three imprest roles. The column grant above keeps the posted
+-- balance and awaiting verification out of a direct read.
 create policy imprest_counts_select on public.imprest_counts
   for select to authenticated
   using ((select private.authorize(array['director', 'manager', 'cashier']::public.app_role[])));

@@ -52,6 +52,14 @@ begin
     raise exception 'a role holds more than it should on the count tables: %', v_bad;
   end if;
 
+  -- The posted balance and awaiting verification kept with a count are never a column a Cashier's
+  -- session can select.
+  if has_column_privilege('authenticated', 'public.imprest_counts', 'posted_balance_tzs', 'select')
+     or has_column_privilege('authenticated', 'public.imprest_counts', 'awaiting_verification_tzs', 'select')
+     or not has_column_privilege('authenticated', 'public.imprest_counts', 'expected_tzs', 'select') then
+    raise exception 'the count columns a session may select are not the intended ones';
+  end if;
+
   select string_agg(p.oid::regprocedure::text, ', ') into v_bad
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where ((n.nspname = 'api'
