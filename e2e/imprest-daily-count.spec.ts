@@ -118,11 +118,15 @@ function superSql(sql: string) {
   }
 }
 
-/** Ends the day: every count and flag so far moves one day into the past, so today is uncounted. */
+/**
+ * Ends the day: every count and flag so far moves one day into the past, so today is uncounted. In
+ * two steps, because one `- 1` moves a row onto a day another row has not left yet.
+ */
 function endDay() {
   superSql(`
     set session_replication_role = replica;
-    update public.imprest_counts set business_date = business_date - 1;
+    update public.imprest_counts set business_date = business_date - 100000;
+    update public.imprest_counts set business_date = business_date + 99999;
     update public.imprest_count_flags set business_date = business_date - 1;
   `);
 }
