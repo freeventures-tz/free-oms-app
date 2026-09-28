@@ -1101,7 +1101,7 @@
     "description": "Operating cash and the payments made from it: who asked, who decided, and what was handed over and confirmed.",
     "total": {
       "label": "Posted balance",
-      "help": "Confirmed funding minus verified spending and losses. It is not a cash count.",
+      "help": "Confirmed funding minus verified spending and losses. A confirmed count shortage lowers it and an excess raises it. It is not a cash count.",
       "noFund": "No imprest funding has been requested yet."
     },
     "request": {
@@ -1414,6 +1414,116 @@
         "reasonHeading": "Why the Manager sent it back",
         "help": "Correct the settlement and submit it again. Your earlier settlement stays on the record as it was. The lines below start from it."
       }
+    },
+    "count": {
+      "title": "Daily cash count",
+      "state": {
+        "not_counted": "Not counted",
+        "awaiting_confirmation": "Awaiting Manager confirmation",
+        "sent_back": "Sent back for a recount",
+        "balanced": "Balanced",
+        "shortage": "Shortage",
+        "excess": "Excess"
+      },
+      "help": {
+        "not_counted": {
+          "cashier": "Count the cash in the tin and enter the total. The app works out what should be there.",
+          "other": "The Cashier hasn't counted the tin today. This is not a zero variance."
+        },
+        "awaiting_confirmation": {
+          "manager": "Check the count. Confirm it as it stands, or send it back for a recount.",
+          "other": "The Cashier has counted. The Manager hasn't confirmed it yet, so the day isn't closed."
+        },
+        "sent_back": {
+          "cashier": "The Manager sent your count back. Count the tin again and enter the new total.",
+          "other": "The Manager sent the count back. The Cashier is counting again."
+        },
+        "balanced": "The count matched the expected cash exactly. The day is closed.",
+        "shortage": "The tin held less than expected. The shortage is posted and waits for a Director's decision.",
+        "excess": "The tin held more than expected. The excess is posted."
+      },
+      "figures": {
+        "expected": "Expected cash",
+        "counted": "Counted",
+        "variance": "Difference",
+        "short": "Short by {amount}",
+        "over": "Over by {amount}",
+        "none": "None"
+      },
+      "record": {
+        "counted": "Counted by {name} on {when}",
+        "note": "Cashier's note: {note}",
+        "basis": "Expected cash was the posted balance of {posted} minus {awaiting} awaiting verification.",
+        "sentBack": "Sent back by {name} on {when}: {reason}",
+        "confirmed": "Confirmed by {name} on {when}.",
+        "because": "Reason: {explanation}.",
+        "explanationNote": "Note: {note}",
+        "postedShortage": "Posted as a count shortage of {amount}, waiting for a Director's decision.",
+        "postedExcess": "Posted as a count excess of {amount}."
+      },
+      "enter": {
+        "counted": "Cash in the tin",
+        "countedHelp": "Count every note and coin, then enter the total in shillings. Enter 0 if the tin is empty.",
+        "note": "Note (optional)",
+        "submit": "Enter count",
+        "submitAgain": "Enter the new count",
+        "recountReason": "The Manager asked for a recount: {reason}"
+      },
+      "confirm": {
+        "heading": "Confirm or send back",
+        "title": "Confirm the count",
+        "help": "Choose why the count differs from the expected cash. You can't change the Cashier's count.",
+        "helpBalanced": "The count matches the expected cash. Confirming closes the day.",
+        "explanation": "Reason for the difference",
+        "note": "Note (optional)",
+        "noteRequired": "Note (required for this reason)",
+        "postsShortage": "Confirming posts a count shortage of {amount}, lowers the posted balance and flags it to both Directors.",
+        "postsExcess": "Confirming posts a count excess of {amount}, raises the posted balance and flags it to both Directors.",
+        "balanced": "Confirm balanced",
+        "shortage": "Confirm shortage of {amount}",
+        "excess": "Confirm excess of {amount}"
+      },
+      "sendBack": {
+        "open": "Send back",
+        "title": "Send the count back",
+        "help": "The Cashier sees your reason and counts again. This count stays on the record and nothing is posted.",
+        "reason": "What the Cashier should check",
+        "confirm": "Send back for a recount"
+      },
+      "explanation": {
+        "counting_error": "Counting error",
+        "recording_error": "Recording error",
+        "change_not_returned": "Change not returned",
+        "amount_correction": "Amount correction",
+        "suspected_loss_or_theft": "Suspected loss or theft",
+        "under_investigation": "Under investigation",
+        "other": "Other"
+      },
+      "history": {
+        "title": "Counts",
+        "empty": "No counts yet.",
+        "day": "{date}, count {attempt}"
+      },
+      "earlier": {
+        "title": "Count from {date}",
+        "cashier": "The count from {date} still waits for the Manager. Today's count opens once the Manager confirms it or sends it back.",
+        "manager": "The count from {date} still waits for you. Confirm it or send it back before today's count can be entered.",
+        "other": "The count from {date} still waits for the Manager, so today can't be counted yet."
+      },
+      "flags": {
+        "title": "Imprest count flags",
+        "empty": "No count has been flagged.",
+        "shortage": "Shortage of {amount} on {date}",
+        "excess": "Excess of {amount} on {date}",
+        "waitingDecision": "Waiting for a Director's decision",
+        "recorded": "Posted",
+        "raised": "Flagged {when}"
+      },
+      "success": {
+        "counted": "Count entered. It now waits for the Manager.",
+        "confirmed": "Count confirmed. The day is closed.",
+        "sentBack": "Count sent back. The Cashier will count again."
+      }
     }
   },
   "imprestErrors": {
@@ -1486,6 +1596,29 @@
     "receipt_not_uploaded_yet": "A receipt didn't upload. Press Try again on it, or remove that line.",
     "not_settled": "Only a settled payment waiting for the Manager can be verified or sent back, and this one isn't waiting for that.",
     "settlement_not_latest": "The settlement changed since you opened it. Reload to see the latest one."
+  },
+  "countErrors": {
+    "not_permitted": "Your account may not do this.",
+    "generic": "Something went wrong and nothing was changed. Try again.",
+    "unconfirmed": "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which can't be recorded twice.",
+    "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
+    "no_fund": "No imprest fund is open yet, so there is nothing to count.",
+    "day_changed": "The day changed while this page was open. Reload it to count today.",
+    "already_confirmed": "Today's count is already confirmed. The day is closed.",
+    "count_awaiting_confirmation": "Today's count is already entered and waits for the Manager.",
+    "stale": "Today's count changed since you opened this page. Reload it to see where it stands.",
+    "amount_invalid": "Enter the whole number of shillings in the tin, 0 or more.",
+    "amount_too_large": "That amount is larger than the system accepts.",
+    "note_invalid": "Write a note of 3 to 500 characters, or leave it empty.",
+    "no_count": "This count can't be found.",
+    "not_awaiting_confirmation": "This count is no longer waiting for you. Reload the page to see where it stands.",
+    "reason_required": "Give a reason of 3 to 500 characters.",
+    "explanation_required": "Choose a reason for the difference.",
+    "explanation_invalid": "Choose one of the listed reasons.",
+    "explanation_note_required": "This reason needs a note of 3 to 500 characters.",
+    "explanation_not_needed": "A balanced count takes no reason or note.",
+    "earlier_count_waiting": "The count from {business_date} still waits for the Manager. Today's count opens once it is confirmed or sent back.",
+    "figures_moved": "The fund's figures changed while you were counting. Nothing was saved. Press Enter count again."
   },
   "reports": {
     "title": "Daily reports",

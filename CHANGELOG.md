@@ -2,6 +2,35 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.7.0] — 2026-09-28
+
+The imprest tin is now counted every day. The Cashier counts the cash and enters the total, the
+Manager confirms it or asks for a recount, and any shortage or excess is posted and flagged to both
+Directors. Days with no count come in a later release. The staff workflows stay closed.
+
+### NEW
+
+- The Cashier counts the cash in the tin each day and enters the total on the imprest screen. There
+  is one field: the app works out what should be there and shows it once the count is in.
+- The Manager checks the count and confirms it, or sends it back with a reason. The Cashier sees the
+  reason and counts again. Every count stays on the record.
+- A confirmed day reads Balanced, Shortage or Excess. Until the Manager confirms, it reads Awaiting
+  Manager confirmation, and a day with no count reads Not counted. None of them looks like another.
+- For a shortage or excess the Manager picks one of seven reasons, such as Counting error or Change
+  not returned. Suspected loss or theft, Under investigation and Other also need a written note.
+- Confirming a shortage posts it and lowers the posted balance, and it waits for a Director's
+  decision. Confirming an excess posts it and raises the posted balance. So tomorrow's expected cash
+  matches the tin, and the same gap isn't reported again every day.
+- Both Directors see each shortage or excess as soon as it is confirmed, on the imprest screen and
+  on their dashboard.
+- The imprest screen lists every count, newest first, with the expected cash, what was counted, the
+  difference, and who counted, sent back or confirmed it.
+
+### IMPROVED
+
+- The posted balance now includes confirmed count shortages and excesses, and so do Free to approve
+  and the expected cash.
+
 ## [0.6.0] — 2026-09-28
 
 When a settlement is wrong, the Manager can now send it back to the Cashier with a reason instead

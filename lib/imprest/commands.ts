@@ -24,6 +24,9 @@ const CONTEXT_KEYS = [
   "used_tzs",
   "returned_tzs",
   "unaccounted_tzs",
+  // A count refused as `day_changed` names today; one refused for a missing explanation, its variance.
+  "business_date",
+  "variance_tzs",
 ] as const;
 
 /**
@@ -285,5 +288,44 @@ export const settleDisbursement = (
     })),
     p_returned_tzs: input.returned,
     p_explanation: input.explanation || null,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+// The daily count (issue #68). The Cashier counts; the Manager confirms or sends back. Neither types
+// expected cash or the variance: the database calculates both and keeps them with the count.
+
+/** Today's count. A recount names the sent-back count it replaces; the first count names none. */
+export const enterCount = (input: {
+  businessDate: string;
+  previousCountId: string | null;
+  counted: number;
+  note: string | null;
+  idempotencyKey: string;
+}) =>
+  call("staff_enter_imprest_count", {
+    p_business_date: input.businessDate,
+    p_previous_count_id: input.previousCountId,
+    p_counted_tzs: input.counted,
+    p_note: input.note,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+type CountTarget = { countId: string; expectedVersion: number; idempotencyKey: string };
+
+/** There is no figure: the count is confirmed as it stands, with a preset explanation for a variance. */
+export const confirmCount = (input: CountTarget & { explanation: string | null; note: string | null }) =>
+  call("staff_confirm_imprest_count", {
+    p_id: input.countId,
+    p_expected_version: input.expectedVersion,
+    p_explanation: input.explanation,
+    p_note: input.note,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+export const sendBackCount = (input: CountTarget & { reason: string }) =>
+  call("staff_send_back_imprest_count", {
+    p_id: input.countId,
+    p_expected_version: input.expectedVersion,
+    p_reason: input.reason,
     p_idempotency_key: input.idempotencyKey,
   });

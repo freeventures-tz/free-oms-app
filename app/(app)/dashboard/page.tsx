@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
+import { CountFlags } from "@/app/(app)/imprest/daily-count";
 import { Card, PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
+import { loadCountFlags } from "@/lib/imprest/counts";
 
 /**
  * Manager and Director landing (design.md §4.1): the same information architecture, with
@@ -11,6 +13,8 @@ import { requireAccess } from "@/lib/auth/guard";
 export default async function DashboardPage() {
   const viewer = await requireAccess("/dashboard");
   const t = await getTranslations();
+  // A confirmed imprest shortage or excess is flagged to the Directors at once (issue #68, AC-58).
+  const flags = viewer.role === "director" ? await loadCountFlags(5) : null;
 
   return (
     <>
@@ -23,6 +27,8 @@ export default async function DashboardPage() {
         <p className="text-sm text-muted-foreground">{t("landing.dashboard.empty")}</p>
         <p className="mt-2 text-sm">{t("landing.comingSoon")}</p>
       </Card>
+
+      {flags ? <CountFlags flags={flags} /> : null}
 
       {viewer.role === "director" ? (
         <Card>

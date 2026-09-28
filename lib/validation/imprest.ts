@@ -12,6 +12,7 @@ import {
   RECIPIENT_MAX,
   settlementFigures,
 } from "@/lib/imprest/spending";
+import { COUNT_EXPLANATIONS, EXPLANATIONS_NEEDING_NOTE } from "@/lib/imprest/counting";
 import { MAX_PRICE_TZS, parseTzs } from "@/lib/money";
 
 /**
@@ -274,3 +275,74 @@ export const settleSchema = z
       if (line.receiptId) seen.add(line.receiptId);
     });
   });
+
+// The daily count (issue #68). Its messages live in `countErrors`.
+
+const countKey = z.string().uuid({ message: "countErrors.idempotency_key_conflict" });
+const countVersion = z.coerce.number().int().min(1, { message: "countErrors.stale" });
+const countId = z.string().uuid({ message: "countErrors.no_count" });
+
+/** Empty is `null`, so the database is sent no note rather than an empty one. */
+const optionalNote = (message: string) =>
+  textField(false, message).transform((value) => (value === "" ? null : value));
+
+/**
+ * The Cashier's count: the cash in the tin, whole shillings of 0 or more, and an optional note.
+ * There is no expected figure: the database calculates it and keeps it with the count. A recount
+ * names the sent-back count it replaces, and the day the screen was showing.
+ */
+export const enterCountSchema = z.object({
+  businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: "countErrors.day_changed" }),
+  previousCountId: z
+    .union([z.literal(""), z.string().uuid({ message: "countErrors.stale" })])
+    .transform((value) => (value === "" ? null : value)),
+  counted: tzsField(true, "countErrors"),
+  note: optionalNote("countErrors.note_invalid"),
+  idempotencyKey: countKey,
+});
+
+/**
+ * The Manager's confirmation. There is no figure. `variance` is the one the Manager was shown, so a
+ * missing explanation is answered beside the choices; the database decides again from the count
+ * itself, and `variance` is not sent to it.
+ */
+export const confirmCountSchema = z
+  .object({
+    countId,
+    expectedVersion: countVersion,
+    variance: z.coerce.number().int(),
+    explanation: z.string().transform((value) => (value === "" ? null : value)),
+    note: optionalNote("countErrors.explanation_note_required"),
+    idempotencyKey: countKey,
+  })
+  .superRefine((input, ctx) => {
+    if (input.variance === 0) {
+      if (input.explanation !== null || input.note !== null) {
+        ctx.addIssue({ code: "custom", path: ["explanation"], message: "countErrors.explanation_not_needed" });
+      }
+    } else if (input.explanation === null) {
+      ctx.addIssue({ code: "custom", path: ["explanation"], message: "countErrors.explanation_required" });
+    } else if (!(COUNT_EXPLANATIONS as readonly string[]).includes(input.explanation)) {
+      ctx.addIssue({ code: "custom", path: ["explanation"], message: "countErrors.explanation_invalid" });
+    } else if (
+      (EXPLANATIONS_NEEDING_NOTE as readonly string[]).includes(input.explanation) &&
+      input.note === null
+    ) {
+      ctx.addIssue({ code: "custom", path: ["note"], message: "countErrors.explanation_note_required" });
+    }
+  })
+  .transform((input) => ({
+    countId: input.countId,
+    expectedVersion: input.expectedVersion,
+    explanation: input.explanation,
+    note: input.note,
+    idempotencyKey: input.idempotencyKey,
+  }));
+
+/** Send a count back for a recount: a reason of 3 to 500 characters, and no figure. */
+export const sendBackCountSchema = z.object({
+  countId,
+  expectedVersion: countVersion,
+  reason: textField(true, "countErrors.reason_required"),
+  idempotencyKey: countKey,
+});
