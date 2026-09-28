@@ -1504,6 +1504,12 @@
         "empty": "Bado hakuna hesabu.",
         "day": "{date}, hesabu ya {attempt}"
       },
+      "earlier": {
+        "title": "Hesabu ya {date}",
+        "cashier": "Hesabu ya {date} bado inamsubiri Meneja. Hesabu ya leo itafunguka Meneja akishaithibitisha au kuirudisha.",
+        "manager": "Hesabu ya {date} bado inakusubiri. Ithibitishe au uirudishe kabla hesabu ya leo haijaandikwa.",
+        "other": "Hesabu ya {date} bado inamsubiri Meneja, kwa hivyo leo haiwezi kuhesabiwa bado."
+      },
       "flags": {
         "title": "Tahadhari za hesabu ya imprest",
         "empty": "Hakuna hesabu iliyotolewa tahadhari.",
@@ -1610,7 +1616,9 @@
     "explanation_required": "Chagua sababu ya tofauti.",
     "explanation_invalid": "Chagua mojawapo ya sababu zilizoorodheshwa.",
     "explanation_note_required": "Sababu hii inahitaji maelezo yenye herufi 3 hadi 500.",
-    "explanation_not_needed": "Hesabu iliyolingana haihitaji sababu wala maelezo."
+    "explanation_not_needed": "Hesabu iliyolingana haihitaji sababu wala maelezo.",
+    "earlier_count_waiting": "Hesabu ya {business_date} bado inamsubiri Meneja. Hesabu ya leo itafunguka ikishathibitishwa au kurudishwa.",
+    "figures_moved": "Takwimu za mfuko zimebadilika ulipokuwa ukihesabu. Hakuna kilichohifadhiwa. Bonyeza Andika hesabu tena."
   },
   "reports": {
     "title": "Ripoti za kila siku",

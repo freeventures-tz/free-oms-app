@@ -19,7 +19,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(111);
+select plan(119);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -501,6 +501,47 @@ select throws_ok(format($$ delete from public.imprest_count_confirmations where 
 set constraints all immediate;
 select throws_ok($$ truncate public.imprest_count_postings $$, '23001', null,
                  'the postings are never truncated');
+set constraints all deferred;
+
+-- ---------------------------------------------------------------------------
+-- One count waiting in the whole fund: yesterday's blocks today's until the Manager decides it
+-- ---------------------------------------------------------------------------
+select tests.end_day();
+select tests.cashier();
+select is(tests.keep('d5-blocked', tests.enter(null, 149500, null, 'd5-blocked')), 'earlier_count_waiting',
+          'yesterday''s count still waiting blocks today''s, so one gap can never post twice');
+select is((select res ->> 'business_date' from r where name = 'd5-blocked'), (tests.today() - 1)::text,
+          'and the refusal names the day that waits');
+select tests.manager();
+select is(tests.confirm(tests.cid('d4'), 1, 'under_investigation', 'The tin was found open', 'k-d4'),
+          'confirmed', 'the Manager confirms yesterday''s count the next day');
+
+-- A figure that moves between the command's read and the entry trigger's re-check is a refusal the
+-- Cashier can answer by pressing Enter count again, never a failure. Awaiting verification is made
+-- to answer differently on each call, as a hand-out committing in between would.
+savepoint moved;
+create sequence tests.calls;
+grant usage on sequence tests.calls to public;
+set local role fv_definer_owner;
+create or replace function private.imprest_awaiting_verification_tzs(p_fund_id uuid)
+returns bigint language sql volatile security definer set search_path = '' as $$
+  select 50000::bigint + nextval('tests.calls') % 2 $$;
+reset role;
+select tests.cashier();
+select is(tests.keep('d5-moved', tests.enter(null, 1000, null, 'd5-key')), 'figures_moved',
+          'a count whose figures moved underneath it is refused, not failed');
+select is((select count(*)::int from public.imprest_counts where business_date = tests.today()), 0,
+          'and nothing was stored');
+select ok(not exists (select 1 from public.idempotency_keys where key = 'd5-key'),
+          'nor was its key claimed, so pressing Enter count again works');
+select ok(exists (select 1 from public.audit_events
+                   where entity_type = 'imprest_count' and action = 'command_refused'
+                     and after_state ->> 'reason' = 'figures_moved'),
+          'the refusal is on the audit trail');
+rollback to savepoint moved;
+select tests.cashier();
+select is(tests.keep('d5', tests.enter(null, 1000, null, 'd5-key')), 'counted',
+          'the same request with the same key then counts');
 
 -- ---------------------------------------------------------------------------
 -- 7 · The audit trail

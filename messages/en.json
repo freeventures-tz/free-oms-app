@@ -1504,6 +1504,12 @@
         "empty": "No counts yet.",
         "day": "{date}, count {attempt}"
       },
+      "earlier": {
+        "title": "Count from {date}",
+        "cashier": "The count from {date} still waits for the Manager. Today's count opens once the Manager confirms it or sends it back.",
+        "manager": "The count from {date} still waits for you. Confirm it or send it back before today's count can be entered.",
+        "other": "The count from {date} still waits for the Manager, so today can't be counted yet."
+      },
       "flags": {
         "title": "Imprest count flags",
         "empty": "No count has been flagged.",
@@ -1610,7 +1616,9 @@
     "explanation_required": "Choose a reason for the difference.",
     "explanation_invalid": "Choose one of the listed reasons.",
     "explanation_note_required": "This reason needs a note of 3 to 500 characters.",
-    "explanation_not_needed": "A balanced count takes no reason or note."
+    "explanation_not_needed": "A balanced count takes no reason or note.",
+    "earlier_count_waiting": "The count from {business_date} still waits for the Manager. Today's count opens once it is confirmed or sent back.",
+    "figures_moved": "The fund's figures changed while you were counting. Nothing was saved. Press Enter count again."
   },
   "reports": {
     "title": "Daily reports",

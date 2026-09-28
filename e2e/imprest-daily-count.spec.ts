@@ -241,6 +241,31 @@ test.describe("imprest daily count", () => {
     await page.screenshot({ path: testInfo.outputPath(`count-6-director-${testInfo.project.name}.png`), fullPage: true });
   });
 
+  test("yesterday's count still waiting holds today's until the Manager decides it", async ({ page }) => {
+    await enteredByCommand((await expectedCash()) - 400);
+    endDay();
+
+    await as(page, "cashier");
+    await page.goto("/imprest");
+    const today = page.getByTestId("count-today");
+    await expect(today.getByTestId("count-earlier")).toBeVisible();
+    await expect(today).toContainText("still waits for the Manager");
+    await expect(page.getByTestId("enter-count-form")).toHaveCount(0);
+
+    await as(page, "manager");
+    await page.goto("/imprest");
+    await expect(today.getByTestId("count-earlier").getByTestId("count-variance")).toContainText(`Short by ${tzs(400)}`);
+    const form = today.getByTestId("confirm-count-form");
+    await form.getByText("Counting error", { exact: true }).click();
+    await form.getByRole("button", { name: `Confirm shortage of ${tzs(400)}` }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Count confirmed." })).toBeVisible();
+    await expect(today.getByTestId("count-earlier")).toHaveCount(0);
+
+    await as(page, "cashier");
+    await page.goto("/imprest");
+    await expect(page.getByTestId("enter-count-form")).toBeVisible();
+  });
+
   test("a screen left open while the count was sent back is told so", async ({ page }) => {
     const count = await enteredByCommand((await expectedCash()) - 300);
     await as(page, "manager");

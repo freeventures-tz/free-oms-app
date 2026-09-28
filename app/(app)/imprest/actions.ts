@@ -32,6 +32,7 @@ import {
 } from "@/lib/imprest/commands";
 import { RECEIPT_BUCKET, RECEIPT_LINK_SECONDS } from "@/lib/imprest/spending";
 import { formatTzs } from "@/lib/money";
+import { formatBusinessDate } from "@/lib/time/business-date";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { fieldErrors } from "@/lib/validation/auth";
 import {
@@ -163,6 +164,8 @@ const COUNT_ERRORS = new Set([
   "explanation_invalid",
   "explanation_note_required",
   "explanation_not_needed",
+  "earlier_count_waiting",
+  "figures_moved",
 ]);
 
 type Messages = { namespace: "imprestErrors" | "spendingErrors" | "countErrors"; known: Set<string> };
@@ -195,7 +198,11 @@ async function fromRefusal(
     ? Object.fromEntries(
         Object.entries(result.context).map(([key, value]) => [
           key,
-          key.endsWith("_tzs") && typeof value === "number" ? formatTzs(value, locale) : value,
+          key.endsWith("_tzs") && typeof value === "number"
+            ? formatTzs(value, locale)
+            : key === "business_date" && typeof value === "string"
+              ? formatBusinessDate(value, locale)
+              : value,
         ]),
       )
     : undefined;

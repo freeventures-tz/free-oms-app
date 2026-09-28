@@ -138,6 +138,10 @@ export async function DailyCountSection({
   const t = await getTranslations("imprest.count");
   const locale = await getLocale();
   const { state, latest } = dayState(todays, today);
+  // An earlier day's count still waiting for the Manager. The fund holds one waiting count at most,
+  // and it blocks today's until the Manager decides it, so it is shown here with its controls.
+  const earlier = todays.find((c) => c.status === "awaiting_confirmation" && c.businessDate < today) ?? null;
+  const toDecide = earlier ?? (state === "awaiting_confirmation" ? latest : null);
 
   const help: Record<DayState, string> = {
     not_counted: t(`help.not_counted.${role === "cashier" ? "cashier" : "other"}`),
@@ -159,25 +163,43 @@ export async function DailyCountSection({
           <span className="text-sm text-muted-foreground">{formatBusinessDate(today, locale)}</span>
           <CountStateChip state={state} />
         </div>
-        <p className="text-sm">{help[state]}</p>
+        <p className="text-sm">
+          {earlier
+            ? t(`earlier.${role === "cashier" ? "cashier" : role === "manager" ? "manager" : "other"}`, {
+                date: formatBusinessDate(earlier.businessDate, locale),
+              })
+            : help[state]}
+        </p>
         {latest ? <CountFigures count={latest} testId="count-today-figures" /> : null}
         {latest ? <CountRecord count={latest} /> : null}
+        {earlier ? (
+          <div className="flex flex-col gap-3 rounded-lg border border-border p-4" data-testid="count-earlier">
+            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <h3 className="font-semibold">
+                {t("earlier.title", { date: formatBusinessDate(earlier.businessDate, locale) })}
+              </h3>
+              <CountStateChip state="awaiting_confirmation" />
+            </div>
+            <CountFigures count={earlier} testId="count-earlier-figures" />
+            <CountRecord count={earlier} />
+          </div>
+        ) : null}
         {role === "cashier" || role === "manager" ? (
           <CountControls
             role={role}
             businessDate={today}
-            mayCount={state === "not_counted" || state === "sent_back"}
+            mayCount={!earlier && (state === "not_counted" || state === "sent_back")}
             replaces={
               state === "sent_back" && latest ? { id: latest.id, reason: latest.returnReason ?? "" } : null
             }
             waiting={
-              state === "awaiting_confirmation" && latest
+              toDecide
                 ? {
-                    id: latest.id,
-                    version: latest.version,
-                    expected: latest.expected,
-                    counted: latest.counted,
-                    variance: latest.variance,
+                    id: toDecide.id,
+                    version: toDecide.version,
+                    expected: toDecide.expected,
+                    counted: toDecide.counted,
+                    variance: toDecide.variance,
                   }
                 : null
             }

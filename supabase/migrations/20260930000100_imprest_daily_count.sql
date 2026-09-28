@@ -103,6 +103,10 @@ comment on table public.imprest_counts is
 -- At most one count a day that has not been sent back: the one waiting, or the one confirmed.
 create unique index imprest_counts_one_standing_per_day
   on public.imprest_counts (fund_id, business_date) where status <> 'sent_back';
+-- At most one count waiting in the whole fund. Two waiting counts would each have kept the balance
+-- before the other's variance posted, and confirming both would post the same gap twice.
+create unique index imprest_counts_one_waiting
+  on public.imprest_counts (fund_id) where status = 'awaiting_confirmation';
 create index imprest_counts_recent_idx on public.imprest_counts (fund_id, counted_at desc);
 create index imprest_counts_by_idx on public.imprest_counts (counted_by);
 
@@ -621,6 +625,7 @@ declare
   v_last    public.imprest_counts%rowtype;
   v_posted  bigint;
   v_waiting bigint;
+  v_waiting_day date;
   v_id      uuid := gen_random_uuid();
   v_request jsonb := jsonb_build_object('business_date', p_business_date,
                                         'previous_count_id', p_previous_count_id,
@@ -649,6 +654,15 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'day_changed', 'business_date', v_today::text);
   end if;
 
+  -- An earlier day's count still waiting blocks today's: it kept the balance before today's gap, so
+  -- confirming both would post the same missing cash twice. The Manager decides it first.
+  select business_date into v_waiting_day from public.imprest_counts
+   where fund_id = v_fund and status = 'awaiting_confirmation' and business_date < v_today;
+  if v_waiting_day is not null then
+    return jsonb_build_object('ok', false, 'reason', 'earlier_count_waiting',
+                              'business_date', v_waiting_day::text);
+  end if;
+
   select * into v_last from public.imprest_counts
    where fund_id = v_fund and business_date = v_today
    order by attempt desc limit 1;
@@ -668,19 +682,27 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'note_invalid');
   end if;
 
-  if private.imprest_claim_key(p_idempotency_key, 'imprest.enter_count', v_actor, v_request,
-                               v_id) <> 'claimed' then
-    return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
-  end if;
+  -- The key, the figures and the count go in together. Funding received, a hand-out and a settlement
+  -- move the figures without the per-fund lock, so one committing between this read and the entry
+  -- trigger's re-check makes the trigger refuse the row. That rolls back to here, key and all, and
+  -- the Cashier is told to press Enter count again rather than shown a failure.
+  begin
+    if private.imprest_claim_key(p_idempotency_key, 'imprest.enter_count', v_actor, v_request,
+                                 v_id) <> 'claimed' then
+      return jsonb_build_object('ok', false, 'reason', 'idempotency_key_conflict');
+    end if;
 
-  select s.posted_balance_tzs into v_posted from private.imprest_spending_figures(v_fund) s;
-  v_waiting := private.imprest_awaiting_verification_tzs(v_fund);
+    select s.posted_balance_tzs into v_posted from private.imprest_spending_figures(v_fund) s;
+    v_waiting := private.imprest_awaiting_verification_tzs(v_fund);
 
-  insert into public.imprest_counts (id, fund_id, business_date, attempt, counted_tzs, note,
-                                     posted_balance_tzs, awaiting_verification_tzs, expected_tzs,
-                                     counted_by)
-  values (v_id, v_fund, v_today, coalesce(v_last.attempt, 0) + 1, p_counted_tzs, v_note,
-          v_posted, v_waiting, v_posted - v_waiting, v_actor);
+    insert into public.imprest_counts (id, fund_id, business_date, attempt, counted_tzs, note,
+                                       posted_balance_tzs, awaiting_verification_tzs, expected_tzs,
+                                       counted_by)
+    values (v_id, v_fund, v_today, coalesce(v_last.attempt, 0) + 1, p_counted_tzs, v_note,
+            v_posted, v_waiting, v_posted - v_waiting, v_actor);
+  exception when check_violation then
+    return jsonb_build_object('ok', false, 'reason', 'figures_moved');
+  end;
 
   perform private.imprest_count_audit(v_actor, 'imprest_count_entered', v_id,
     case when v_last.id is not null then jsonb_build_object('replaces_count_id', v_last.id) end,

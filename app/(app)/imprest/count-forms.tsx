@@ -144,6 +144,10 @@ function CountDecision({
   const hidden = { countId: count.id, expectedVersion: String(count.version) };
   const amount = formatTzs(Math.abs(count.variance), locale);
   const needsNote = explanation !== "" && EXPLANATIONS_NEEDING_NOTE.includes(explanation);
+  // After a request that got no answer, only Try again may use its key: the other action would be a
+  // different command under the same key, and would hide whether the first one committed.
+  const unconfirmed =
+    controller.retry && controller.result.error === COUNT_UNCONFIRMED_KEY ? controller.retryName : null;
 
   const confirmLabel =
     count.variance === 0
@@ -243,7 +247,7 @@ function CountDecision({
             data-testid="confirm-count"
             pending={controller.running === "confirm"}
             pendingLabel={t("common.loading")}
-            disabled={controller.pending}
+            disabled={controller.pending || unconfirmed === "sendBack"}
           >
             {confirmLabel}
           </Button>
@@ -252,12 +256,12 @@ function CountDecision({
             variant={open === "sendBack" ? "secondary" : "danger"}
             size="small"
             className={TOUCH_FLOOR}
-            disabled={controller.pending}
+            disabled={controller.pending || unconfirmed === "confirm"}
             aria-expanded={open === "sendBack"}
             data-testid="open-send-back-count"
             onClick={() => {
-              // An unconfirmed request may already have committed: keep its key for Try again.
-              if (!(controller.retry && controller.result.error === COUNT_UNCONFIRMED_KEY)) {
+              // An unconfirmed send-back may already have committed: keep its key for Try again.
+              if (!unconfirmed) {
                 controller.clear();
                 renewKey();
               }

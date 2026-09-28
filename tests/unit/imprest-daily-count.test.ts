@@ -237,6 +237,8 @@ describe("the words", () => {
       "explanation_invalid",
       "explanation_note_required",
       "explanation_not_needed",
+      "earlier_count_waiting",
+      "figures_moved",
       "idempotency_key_conflict",
       "unconfirmed",
       "not_permitted",
