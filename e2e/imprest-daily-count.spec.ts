@@ -380,6 +380,25 @@ async function measureTap(page: Page, profile: Profile, control: string, done: s
   }
 }
 
+/**
+ * Confirms the latest count if it still waits for the Manager. A waiting earlier count blocks today's
+ * count (one waiting count per fund), so every sample starts from here, outside the timed tap.
+ */
+async function confirmWaitingCount() {
+  const { data, error } = await (await sessionFor("manager")).client
+    .schema("api")
+    .rpc("staff_imprest_counts", { p_limit: 1, p_offset: 0 });
+  if (error) throw new Error(`staff_imprest_counts: ${error.message}`);
+  const latest = (data as { id: string; version: number; variance_tzs: number; status: string }[] | null)?.[0];
+  if (latest?.status !== "awaiting_confirmation") return;
+  await command("manager", "staff_confirm_imprest_count", {
+    p_id: latest.id,
+    p_expected_version: latest.version,
+    p_explanation: latest.variance_tzs === 0 ? null : "counting_error",
+    p_note: null,
+  });
+}
+
 function report(label: string, ack: number[], done: number[]) {
   const a = summary(ack);
   const d = summary(done);
@@ -403,6 +422,7 @@ function report(label: string, ack: number[], done: number[]) {
       const ack: number[] = [];
       const done: number[] = [];
       for (let i = 0; i < SAMPLES; i += 1) {
+        await confirmWaitingCount();
         endDay();
         await page.goto("/imprest");
         await page.getByTestId("count-today").getByLabel("Cash in the tin").fill(String(100_000 + i));
@@ -418,6 +438,7 @@ function report(label: string, ack: number[], done: number[]) {
       const ack: number[] = [];
       const done: number[] = [];
       for (let i = 0; i < SAMPLES; i += 1) {
+        await confirmWaitingCount();
         endDay();
         await enteredByCommand((await expectedCash()) - 100);
         await page.goto("/imprest");

@@ -2,6 +2,16 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.8.1] — 2026-09-29
+
+A fix to how the daily count's speed on phones is measured. Nothing changes in the app itself.
+
+### FIXED
+
+- The phone speed check for entering and confirming a daily count runs to the end again. It used to
+  stall on its second try, because the count from the first try was still waiting for the Manager.
+  On slow 4G, 19 of 20 tries entered a count within 878 ms and confirmed one within 938 ms.
+
 ## [0.8.0] — 2026-09-29
 
 A day nobody counted now shows as Not counted, and never as balanced. Both Directors and the
