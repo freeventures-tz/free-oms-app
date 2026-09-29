@@ -28,7 +28,13 @@ vi.mock("@/app/(app)/imprest/actions", () => ({
   rejectRetirementAction: (...args: unknown[]) => rejectRetirement(...args),
 }));
 
-const { DecideRetirement, SubmitRetirement } = await import("@/app/(app)/imprest/retirement-forms");
+const { RetirementActions } = await import("@/app/(app)/imprest/retirement-forms");
+
+// Elements, not wrapper components: a rerender must meet the same component to keep its state.
+const submitting = (countId: string) => <RetirementActions submit={{ countId }} decide={null} />;
+const deciding = (retirement: { id: string; version: number }) => (
+  <RetirementActions submit={null} decide={retirement} />
+);
 
 const COUNT = "7d4f5b1e-3c1a-4a55-9a53-2f4c9e1d2b10";
 const RETIREMENT = "0b8e6c2a-5d44-4f0e-8a61-9b1c3d2e4f50";
@@ -97,7 +103,7 @@ describe("submitting", () => {
   it("sends the closing count and the reason under one key, then shows the answer", async () => {
     const user = userEvent.setup();
     submitRetirement.mockResolvedValue({ successKey: "imprest.retirement.success.submitted" });
-    render(intl(<SubmitRetirement countId={COUNT} />));
+    const { rerender } = render(intl(submitting(COUNT)));
 
     await user.type(screen.getByLabelText(en.imprest.retirement.reason), "Month end");
     await user.click(screen.getByRole("button", { name: en.imprest.retirement.submit }));
@@ -108,6 +114,10 @@ describe("submitting", () => {
     expect(data.get("reason")).toBe("Month end");
     expect(data.get("idempotencyKey")).toMatch(/^[0-9a-f-]{36}$/);
     expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.retirement.success.submitted);
+
+    // The page refreshes into the submitted state, which has no form: the answer stays.
+    rerender(intl(<RetirementActions submit={null} decide={null} />));
+    expect(screen.getByRole("status")).toHaveTextContent(en.imprest.retirement.success.submitted);
     expect(screen.queryByRole("button", { name: en.imprest.retirement.submit })).toBeNull();
   });
 
@@ -117,7 +127,7 @@ describe("submitting", () => {
       error: "retirementErrors.blocked",
       errorValues: { blockers: "FV-DSB-20260929-0004, FV-IMP-20260929-0002" },
     });
-    render(intl(<SubmitRetirement countId={COUNT} />));
+    render(intl(submitting(COUNT)));
     await user.type(screen.getByLabelText(en.imprest.retirement.reason), "Month end");
     await user.click(screen.getByRole("button", { name: en.imprest.retirement.submit }));
     expect(await screen.findByText(/FV-DSB-20260929-0004, FV-IMP-20260929-0002/)).toBeInTheDocument();
@@ -131,7 +141,7 @@ describe("a Director's decision", () => {
   it("asks once more before the irreversible approval, then sends the version", async () => {
     const user = userEvent.setup();
     approveRetirement.mockResolvedValue({ successKey: "imprest.retirement.success.approved" });
-    render(intl(<DecideRetirement retirement={retirement} />));
+    const { rerender } = render(intl(deciding(retirement)));
 
     await user.click(screen.getByTestId("approve-retirement"));
     expect(approveRetirement).not.toHaveBeenCalled();
@@ -143,6 +153,10 @@ describe("a Director's decision", () => {
     expect(data.get("retirementId")).toBe(RETIREMENT);
     expect(data.get("expectedVersion")).toBe("1");
     expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.retirement.success.approved);
+
+    // The page refreshes into the next fund, with nothing to decide: the answer stays.
+    rerender(intl(<RetirementActions submit={null} decide={null} />));
+    expect(screen.getByRole("status")).toHaveTextContent(en.imprest.retirement.success.approved);
     expect(screen.queryByTestId("approve-retirement")).toBeNull();
   });
 
@@ -151,7 +165,7 @@ describe("a Director's decision", () => {
     approveRetirement.mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce({
       successKey: "imprest.retirement.success.approved",
     });
-    render(intl(<DecideRetirement retirement={retirement} />));
+    render(intl(deciding(retirement)));
 
     await user.click(screen.getByTestId("approve-retirement"));
     await user.click(screen.getByTestId("confirm-retirement"));
@@ -170,7 +184,7 @@ describe("a Director's decision", () => {
   it("rejects with a reason", async () => {
     const user = userEvent.setup();
     rejectRetirement.mockResolvedValue({ successKey: "imprest.retirement.success.rejected" });
-    render(intl(<DecideRetirement retirement={retirement} />));
+    render(intl(deciding(retirement)));
     await user.click(screen.getByTestId("reject-retirement-toggle"));
     await user.type(screen.getByLabelText(en.imprest.retirement.rejectReason), "Count again with me");
     await user.click(screen.getByRole("button", { name: en.imprest.retirement.rejectConfirm }));

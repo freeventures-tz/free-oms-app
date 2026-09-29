@@ -2,7 +2,7 @@ import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { DecideRetirement, SubmitRetirement } from "@/app/(app)/imprest/retirement-forms";
+import { RetirementActions } from "@/app/(app)/imprest/retirement-forms";
 import { Pager } from "@/components/ui/pager";
 import { Card, StatusChip } from "@/components/ui/surface";
 import type { AppRole } from "@/lib/auth/roles";
@@ -133,6 +133,14 @@ export async function RetirementSection({ role, state }: { role: AppRole; state:
   const readiness = state.readiness;
   const open = state.retirement;
   if (!readiness) return null;
+  const submit =
+    role === "manager" &&
+    !open &&
+    readiness.blockers.length === 0 &&
+    readiness.count?.status === "confirmed" &&
+    readiness.count.closesFund
+      ? { countId: readiness.count.id }
+      : null;
 
   return (
     <section className="flex flex-col gap-3" aria-labelledby="retirement-heading" data-testid="retirement">
@@ -169,9 +177,7 @@ export async function RetirementSection({ role, state }: { role: AppRole; state:
               </div>
             </dl>
             <p className="text-sm text-muted-foreground">{t("carryHelp", { amount: tzs(open.closingBalance) })}</p>
-            {role === "director" ? (
-              <DecideRetirement retirement={{ id: open.id, version: open.version }} />
-            ) : (
+            {role === "director" ? null : (
               <p className="text-sm text-muted-foreground" data-testid="retirement-waiting-manager">
                 {t("waitingManager")}
               </p>
@@ -212,14 +218,11 @@ export async function RetirementSection({ role, state }: { role: AppRole; state:
                   ? t("count.ready", { amount: tzs(readiness.count.counted) })
                   : t("count.beforeLastPosting")}
             </p>
-            {role === "manager" &&
-            readiness.blockers.length === 0 &&
-            readiness.count?.status === "confirmed" &&
-            readiness.count.closesFund ? (
-              <SubmitRetirement countId={readiness.count.id} />
-            ) : null}
           </div>
         )}
+        {role === "manager" || role === "director" ? (
+          <RetirementActions submit={submit} decide={role === "director" && open ? { id: open.id, version: open.version } : null} />
+        ) : null}
       </Card>
     </section>
   );

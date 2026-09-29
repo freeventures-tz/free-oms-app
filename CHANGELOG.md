@@ -2,7 +2,7 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
-## [0.11.0] — 2026-09-29
+## [0.11.0] — 2026-09-30
 
 The imprest fund can now be retired. Its balance carries into the next fund, and nothing that
 was still unresolved is hidden. The staff workflows stay closed.
@@ -29,7 +29,8 @@ was still unresolved is hidden. The staff workflows stay closed.
 - The day counted just before a retirement isn't asked for again: counting starts on the next day.
 - A payment proposed or a count entered while a retirement is being approved waits for it, then
   goes into the new fund.
-- @@BENCHMARK@@
+- On slow 4G, all 20 tries at submitting a retirement, and all 20 at approving one, were confirmed
+  within 838 ms.
 
 ## [0.10.0] — 2026-09-29
 

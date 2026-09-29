@@ -208,6 +208,9 @@ test.describe("imprest retirement", () => {
     await form.getByLabel("Why the fund is being retired").fill("Month end");
     await form.getByRole("button", { name: "Submit retirement" }).click();
     await expect(section.getByRole("status")).toContainText("Retirement submitted.");
+    // The screen refreshes into the waiting state, and the confirmation stays beside it.
+    await expect(page.getByTestId("retirement-status")).toHaveText("Waiting for a Director");
+    await expect(section.getByRole("status")).toContainText("Retirement submitted.");
     await page.reload();
     await expect(page.getByTestId("retirement-status")).toHaveText("Waiting for a Director");
     await expect(page.getByTestId("retirement-closing")).toContainText(tzs(50500));
@@ -220,6 +223,9 @@ test.describe("imprest retirement", () => {
     await page.getByTestId("approve-retirement").click();
     await expect(page.getByTestId("confirm-retirement-form")).toContainText("It can't be undone.");
     await page.getByTestId("confirm-retirement").click();
+    await expect(page.getByTestId("retirement").getByRole("status")).toContainText("The fund is retired.");
+    // The screen refreshes into the next fund, and the confirmation stays.
+    await expect(page.getByTestId("carried-balance")).toBeVisible();
     await expect(page.getByTestId("retirement").getByRole("status")).toContainText("The fund is retired.");
 
     // The next fund carries the balance, and today is not due again.
