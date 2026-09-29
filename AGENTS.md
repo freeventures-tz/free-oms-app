@@ -13,7 +13,7 @@
 3. **Build**: `implement` → `tdd`, to the invariants below.
 4. **Prove**: `evidence-driven-testing`. Capture *before* while reproducing, *after* once it works.
 5. **Ship**: `code-review` → cross-review (the human starts the other agent on `code-review` for the PR) → `before-and-after` (production vs PR preview) → PR → `greploop` (`greploop-apps` over the file limit) until **5/5, zero unresolved**. End by presenting the PR URL. **Stop**: merge is the human's.
-6. **Release**: once the human approves the merge, merge, tag and changelog it. See *Releasing*.
+6. **Release**: when the human says "merge", merge, tag, release and housekeep. See *Releasing*.
 
 End an unfinished session with `handoff`.
 
@@ -45,12 +45,20 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 8. Present the PR URL. Keep the worktree until the PR merges or closes.
 ## Releasing
 Every merge to `main` is a release: it carries a SemVer tag and a `CHANGELOG.md` entry. A merge without both is unfinished work. Add the changelog entry to the PR before merging, so the tag contains the entry that describes it.
-This section is the whole release process. No tool calculates versions, opens preparation PRs or writes tags. When the human says "merge and tag", do steps 3 to 5 for that PR.
+This section is the whole release process. No tool calculates versions, opens preparation PRs or writes tags. When the human says "merge" (or "merge and tag"), do steps 3 to 6 for that PR, without asking again.
 1. Pick the version. `v1.0.0` is reserved for the complete app, so stay in `0.x` until then. Before 1.0, a new capability bumps the minor (`v0.2.0`) and a correction to shipped behaviour bumps the patch (`v0.1.1`). After 1.0, ordinary SemVer: breaking change major, capability minor, fix patch.
 2. Write the entry, newest at the top, as a date heading carrying the version, then only the sections that have content: `NEW` for what a person can now do, `IMPROVED` for what already existed and got better, `FIXED` for what was broken. Write each line for someone using the app, in the plain voice the existing entries use, not as a commit subject. `unslop` applies. Set the same version in `package.json` and both version fields of `package-lock.json` with `npm version <X.Y.Z> --no-git-tag-version`.
 3. Merge the PR with a message that says what the change does.
 4. Tag the merge commit on `main`, annotated, message `<version>: <one line>`, then `git push origin <version>`.
 5. Give the human the tag and the release entry alongside the merged PR URL.
+6. Housekeep, so the work just merged leaves nothing behind:
+   - Before deleting anything, check that every commit of the task branch is on `origin` (`git branch -r --contains <head>`, `git log origin/<branch>..<branch>` empty) and that its worktree has no uncommitted or untracked work. If anything is not on the remote, stop and report it; delete nothing.
+   - Bring the primary checkout to `main`, fast-forward it to `origin/main`, fetch tags, and confirm `git status` is clean.
+   - Remove the merged task's worktree and any scratch worktree it used, delete its branch locally and on `origin`, then `git worktree prune` and `git fetch --prune`.
+   - Stop what the task started locally (dev servers, a Supabase stack started for it, temporary env files) and undo any `skip-worktree` flag or edited config.
+   - Commit the workspace docs the task changed (one level above the repo) so the workspace repo is clean too.
+   - Leave other agents' worktrees and branches alone, and name them in the report.
+   - Finish by reporting `git status` and `git log -1` for the app and workspace repos.
 ## Writing for humans
 Run `unslop` over text a person will read (commits, PR title and body, docs, comments, the closing reply), only on text you wrote or changed.
 ## Agent skills
