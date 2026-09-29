@@ -258,6 +258,38 @@ export const handOutRaise = (input: DisbursementTarget & { raiseId: string; reci
     p_idempotency_key: input.idempotencyKey,
   });
 
+// Reversals (issue #71). A Cashier or the Manager asks; a Director approves or rejects.
+
+/** The correct amount is whole shillings, 0 or more; 0 undoes the posting. */
+export const requestReversal = (input: {
+  postingId: string;
+  correct: number;
+  reason: string;
+  idempotencyKey: string;
+}) =>
+  call("staff_request_imprest_reversal", {
+    p_posting_id: input.postingId,
+    p_correct_tzs: input.correct,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+/** There is no amount: the Director approves the correct amount as asked, or rejects with a reason. */
+export const decideReversal = (input: {
+  reversalId: string;
+  expectedVersion: number;
+  approve: boolean;
+  reason: string | null;
+  idempotencyKey: string;
+}) =>
+  call("admin_decide_imprest_reversal", {
+    p_reversal_id: input.reversalId,
+    p_expected_version: input.expectedVersion,
+    p_approve: input.approve,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
 /** A receipt as the database filed it. `key` is its AES-256 key, base64. */
 export type ReceiptTicket = {
   id: string;

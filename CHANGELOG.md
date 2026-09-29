@@ -2,6 +2,32 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.10.0] — 2026-09-29
+
+A verified expense or loss that turns out to be wrong can now be corrected, with a Director's
+approval, and the original stays on the record. The staff workflows stay closed.
+
+### NEW
+
+- On a verified payment, the Cashier who made it, or the Manager, can ask for a reversal of its
+  expense or its unexplained loss, giving the amount it should have been and why. An amount of 0
+  undoes it.
+- A Director approves or rejects the request, with a reason when rejecting. Approving cancels the
+  posting in full and posts it again at the right amount. Nothing already posted is changed or
+  deleted.
+- A correction the fund can't carry, because it would leave less than is set aside, is refused, and
+  the message says how much is free.
+- The payment's page lists every request with who asked, who decided, when and why, and every
+  posting in order: the original, its reversal and its replacement.
+- Directors' imprest screen lists the reversals waiting for approval, oldest first. The Manager can
+  read the list.
+
+### IMPROVED
+
+- The posted balance, and what can be approved, now include every approved correction.
+- On slow 4G, all 20 tries at asking for a reversal, and all 20 at approving one, were confirmed
+  within 751 ms.
+
 ## [0.9.0] — 2026-09-29
 
 A Cashier who needs more than was approved now asks first, and the Manager raises the approval

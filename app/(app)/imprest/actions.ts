@@ -15,6 +15,7 @@ import {
   decideFunding,
   enterCount,
   decideRaise,
+  decideReversal,
   handOutDisbursement,
   handOutRaise,
   increaseApproval,
@@ -25,6 +26,7 @@ import {
   reportMismatch,
   requestFunding,
   requestRaise,
+  requestReversal,
   sendBackCount,
   sendBackSettlement,
   settleDisbursement,
@@ -41,6 +43,7 @@ import { fieldErrors } from "@/lib/validation/auth";
 import {
   approveDisbursementSchema,
   approveFundingSchema,
+  approveReversalSchema,
   confirmCountSchema,
   confirmReceivedSchema,
   correctHandoverSchema,
@@ -56,9 +59,11 @@ import {
   refuseRaiseSchema,
   registerReceiptSchema,
   rejectFundingSchema,
+  rejectReversalSchema,
   reportMismatchSchema,
   requestFundingSchema,
   requestRaiseSchema,
+  requestReversalSchema,
   sendBackCountSchema,
   sendBackSchema,
   settleSchema,
@@ -186,10 +191,35 @@ const COUNT_ERRORS = new Set([
   "day_not_countable",
 ]);
 
-type Messages = { namespace: "imprestErrors" | "spendingErrors" | "countErrors"; known: Set<string> };
+/** A reversal's refusals (issue #71) speak of postings and corrections, not of payment steps. */
+const REVERSAL_ERRORS = new Set([
+  "not_permitted",
+  "generic",
+  "unconfirmed",
+  "idempotency_key_conflict",
+  "amount_invalid",
+  "amount_too_large",
+  "reason_required",
+  "stale",
+  "not_awaiting_decision",
+  "decision_required",
+  "no_posting",
+  "not_reversible",
+  "already_reversed",
+  "reversal_open",
+  "amount_unchanged",
+  "below_set_aside",
+  "no_reversal",
+]);
+
+type Messages = {
+  namespace: "imprestErrors" | "spendingErrors" | "countErrors" | "reversalErrors";
+  known: Set<string>;
+};
 const FUNDING_MESSAGES: Messages = { namespace: "imprestErrors", known: KNOWN_ERRORS };
 const SPENDING_MESSAGES: Messages = { namespace: "spendingErrors", known: SPENDING_ERRORS };
 const COUNT_MESSAGES: Messages = { namespace: "countErrors", known: COUNT_ERRORS };
+const REVERSAL_MESSAGES: Messages = { namespace: "reversalErrors", known: REVERSAL_ERRORS };
 
 export type ImprestActionState = {
   error?: string;
@@ -503,6 +533,52 @@ export async function settleDisbursementAction(_p: ImprestActionState, data: For
     settleDisbursement,
     "imprest.spending.success.settled",
     SPENDING_MESSAGES,
+  );
+}
+
+// Reversals (issue #71): a Cashier on their own payment, or the Manager, asks; a Director decides.
+
+export async function requestReversalAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier", "manager"],
+    requestReversalSchema,
+    {
+      postingId: data.get("postingId"),
+      correct: data.get("correct") ?? "",
+      reason: data.get("reason") ?? "",
+      idempotencyKey: data.get("idempotencyKey"),
+    },
+    requestReversal,
+    "imprest.reversal.success.requested",
+    REVERSAL_MESSAGES,
+  );
+}
+
+const reversalTarget = (data: FormData) => ({
+  reversalId: data.get("reversalId"),
+  expectedVersion: data.get("expectedVersion"),
+  idempotencyKey: data.get("idempotencyKey"),
+});
+
+export async function approveReversalAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["director"],
+    approveReversalSchema,
+    reversalTarget(data),
+    (input) => decideReversal({ ...input, approve: true, reason: null }),
+    "imprest.reversal.success.approved",
+    REVERSAL_MESSAGES,
+  );
+}
+
+export async function rejectReversalAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["director"],
+    rejectReversalSchema,
+    { ...reversalTarget(data), reason: data.get("reason") ?? "" },
+    (input) => decideReversal({ ...input, approve: false }),
+    "imprest.reversal.success.rejected",
+    REVERSAL_MESSAGES,
   );
 }
 

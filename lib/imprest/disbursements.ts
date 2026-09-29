@@ -90,6 +90,55 @@ export type Raise = {
   recipient: string | null;
 };
 
+export type PostingKind = "expense" | "unexplained_loss";
+export type PostingEntry = "original" | "reversal" | "replacement";
+
+/**
+ * One row of what a payment posted (issues #64 and #71): the original from verification, a reversal
+ * that cancels one posting in full, or the replacement at the correct amount. Never changed.
+ */
+export type Posting = {
+  id: string;
+  kind: PostingKind;
+  entry: PostingEntry;
+  amount: number;
+  /** The request that posted it, for a reversal or a replacement. */
+  reversalId: string | null;
+  /** The posting a reversal cancels, or the one a replacement stands in for. */
+  correctsPostingId: string | null;
+  needsDirectorDecision: boolean;
+  postedAt: string;
+  /** True once a later reversal cancels this posting. A reversal itself is never reversed. */
+  reversed: boolean;
+};
+
+export type ReversalStatus = "requested" | "approved" | "rejected";
+
+/**
+ * A request to reverse one verified posting and post it again at the correct amount (issue #71),
+ * and the Director's decision. Names are "" when the viewer may not read the profile.
+ */
+export type Reversal = {
+  id: string;
+  postingId: string;
+  kind: PostingKind;
+  status: ReversalStatus;
+  version: number;
+  /** What the posting held. */
+  original: number;
+  /** What it should have been. 0 undoes it. */
+  correct: number;
+  reason: string;
+  requestedById: string;
+  requestedBy: string;
+  requestedRole: "cashier" | "manager";
+  requestedAt: string;
+  decidedById: string | null;
+  decidedBy: string;
+  decidedAt: string | null;
+  rejectionReason: string | null;
+};
+
 export type Disbursement = {
   id: string;
   disbursementNo: string;
@@ -126,6 +175,8 @@ export type Disbursement = {
    * ever had such a line or remainder, so a later cycle cannot clear them.
    */
   flags: { noReceipt: boolean; notAccounted: boolean };
+  /** Reversal requests still waiting for a Director (issue #71). */
+  openReversals: number;
 };
 
 export type DisbursementEvent = {
@@ -142,15 +193,24 @@ export type DisbursementEvent = {
     | "raise_requested"
     | "raise_raised"
     | "raise_refused"
-    | "raise_handed_out";
+    | "raise_handed_out"
+    | "reversal_requested"
+    | "reversal_approved"
+    | "reversal_rejected"
+    | "reversal_posted"
+    | "replacement_posted";
   at: string;
   /** The person's name, or "" when the viewer may not read it (a Cashier reads only their own). */
   by: string;
   /** Who acts at this step. Only the proposing Cashier proposes, withdraws, hands out and settles. */
-  role: "cashier" | "manager";
+  role: "cashier" | "manager" | "director";
   text: string | null;
   /** The settlement cycle a settle or send-back event belongs to. */
   cycle?: number;
+  /** A correction event's amount: the correct amount asked for, or what a posting cancelled or posted. */
+  amount?: number;
+  /** The kind of posting a correction event is about. */
+  posting?: PostingKind;
 };
 
 export type SettlementLineView = {
@@ -172,6 +232,10 @@ export type SettlementCycle = SettlementSummary & {
 export type EarlierReceipt = { id: string; fileName: string; contentType: string; cycle: number };
 
 export type DisbursementDetail = Disbursement & {
+  /** Every posting in the order it was posted: the originals, then each correction. */
+  postings: Posting[];
+  /** Every reversal request, oldest first, and what became of it. */
+  reversals: Reversal[];
   events: DisbursementEvent[];
   /** Every settlement cycle, oldest first. Nothing in an earlier one ever changes. */
   cycles: SettlementCycle[];
@@ -181,7 +245,8 @@ export type DisbursementDetail = Disbursement & {
  * The figures of the active fund, or `null` when no fund has been opened yet. For a Cashier,
  * everything but Free to approve is `null`: the database does not send it.
  *
- * `postedBalance` is confirmed funding minus verified expenses and unexplained losses (issue #64).
+ * `postedBalance` is confirmed funding minus verified expenses and unexplained losses, as corrected
+ * by reversals and replacements (issues #64 and #71).
  */
 export type SpendingPosition = {
   postedBalance: number | null;
@@ -229,7 +294,11 @@ const COLUMNS = `
   imprest_approval_raises(id, raise_no, status, amount_tzs, reason, requested_by, requested_at,
                           decided_by, decided_at, refusal_reason, handed_out_at, recipient),
   imprest_verifications(settlement_id, verified_by, verified_at),
-  imprest_postings(kind, amount_tzs),
+  imprest_postings(id, kind, entry, amount_tzs, reversal_id, corrects_posting_id,
+                   needs_director_decision, posted_at),
+  imprest_posting_reversals(id, posting_id, status, version, original_tzs, correct_tzs, reason,
+                            requested_by, requested_role, requested_at, decided_by, decided_at,
+                            rejection_reason),
   imprest_settlement_returns(settlement_id, reason, returned_by, returned_at)
 `;
 
@@ -272,7 +341,8 @@ type Row = {
   imprest_settlements: SettlementRow[] | null;
   // One-to-one (a disbursement is verified once), so PostgREST embeds an object or null.
   imprest_verifications: { settlement_id: string; verified_by: string; verified_at: string } | null;
-  imprest_postings: { kind: "expense" | "unexplained_loss"; amount_tzs: number }[] | null;
+  imprest_postings: PostingRow[] | null;
+  imprest_posting_reversals: ReversalRow[] | null;
   imprest_settlement_returns: ReturnRow[] | null;
   imprest_approval_raises: RaiseRow[] | null;
 };
@@ -290,6 +360,33 @@ type RaiseRow = {
   refusal_reason: string | null;
   handed_out_at: string | null;
   recipient: string | null;
+};
+
+type PostingRow = {
+  id: string;
+  kind: PostingKind;
+  entry: PostingEntry;
+  amount_tzs: number;
+  reversal_id: string | null;
+  corrects_posting_id: string | null;
+  needs_director_decision: boolean;
+  posted_at: string;
+};
+
+type ReversalRow = {
+  id: string;
+  posting_id: string;
+  status: ReversalStatus;
+  version: number;
+  original_tzs: number;
+  correct_tzs: number;
+  reason: string;
+  requested_by: string;
+  requested_role: "cashier" | "manager";
+  requested_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  rejection_reason: string | null;
 };
 
 type ReturnRow = { settlement_id: string; reason: string; returned_by: string; returned_at: string };
@@ -355,8 +452,10 @@ function fromRow(row: Row, names: Map<string, string>): Disbursement {
   const raises = [...(row.imprest_approval_raises ?? [])]
     .sort((a, b) => a.raise_no - b.raise_no)
     .map((r) => raiseOf(r, names));
-  const posted = (kind: "expense" | "unexplained_loss") => {
-    const found = (row.imprest_postings ?? []).find((p) => p.kind === kind);
+  // What verification posted. Reversals and replacements sit beside the originals and never change
+  // them (issue #71).
+  const posted = (kind: PostingKind) => {
+    const found = (row.imprest_postings ?? []).find((p) => p.kind === kind && p.entry === "original");
     return found ? Number(found.amount_tzs) : null;
   };
   return {
@@ -397,8 +496,53 @@ function fromRow(row: Row, names: Map<string, string>): Disbursement {
       noReceipt: settlements.some((s) => s.no_receipt_lines > 0),
       notAccounted: settlements.some((s) => Number(s.unaccounted_tzs) > 0),
     },
+    openReversals: (row.imprest_posting_reversals ?? []).filter((r) => r.status === "requested").length,
   };
 }
+
+const ENTRY_ORDER: Record<PostingEntry, number> = { original: 0, reversal: 1, replacement: 2 };
+
+/** Every posting in the order it was posted, a reversal before the replacement posted with it. */
+function postingsOf(rows: PostingRow[]): Posting[] {
+  const reversed = new Set(rows.filter((p) => p.entry === "reversal").map((p) => p.corrects_posting_id));
+  return [...rows]
+    .sort(
+      (a, b) =>
+        a.posted_at.localeCompare(b.posted_at) ||
+        ENTRY_ORDER[a.entry] - ENTRY_ORDER[b.entry] ||
+        a.kind.localeCompare(b.kind),
+    )
+    .map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      entry: p.entry,
+      amount: Number(p.amount_tzs),
+      reversalId: p.reversal_id,
+      correctsPostingId: p.corrects_posting_id,
+      needsDirectorDecision: p.needs_director_decision,
+      postedAt: p.posted_at,
+      reversed: reversed.has(p.id),
+    }));
+}
+
+const reversalOf = (r: ReversalRow, kind: PostingKind, names: Map<string, string>): Reversal => ({
+  id: r.id,
+  postingId: r.posting_id,
+  kind,
+  status: r.status,
+  version: r.version,
+  original: Number(r.original_tzs),
+  correct: Number(r.correct_tzs),
+  reason: r.reason,
+  requestedById: r.requested_by,
+  requestedBy: names.get(r.requested_by) ?? "",
+  requestedRole: r.requested_role,
+  requestedAt: r.requested_at,
+  decidedById: r.decided_by,
+  decidedBy: r.decided_by ? (names.get(r.decided_by) ?? "") : "",
+  decidedAt: r.decided_at,
+  rejectionReason: r.rejection_reason,
+});
 
 async function page(
   label: string,
@@ -428,6 +572,7 @@ type QueueOrder =
   | "imprest_disbursement_settled_at"
   | "imprest_disbursement_sent_back_at"
   | "imprest_disbursement_raise_requested_at"
+  | "imprest_disbursement_reversal_requested_at"
   | "imprest_verifications(verified_at)";
 
 async function byStatus(
@@ -491,6 +636,28 @@ export async function loadWaitingForRaise(pageNo = 1): Promise<Page<Disbursement
   // request it cannot show, which is a failed read, not a fact.
   if (result.rows.some((d) => !d.openRequest)) {
     throw new Error(`${DATA_UNAVAILABLE}: imprest.waiting_for_raise.request`);
+  }
+  return result;
+}
+
+/**
+ * Verified payments with a reversal request waiting for a Director (issue #71), longest waiting
+ * first. Directors decide; the Manager reads the same list.
+ */
+export async function loadWaitingForReversal(pageNo = 1): Promise<Page<Disbursement>> {
+  const supabase = await createServerSupabase();
+  const result = await page("imprest.waiting_for_reversal", pageNo, (from, to) =>
+    supabase
+      .from("imprest_disbursements")
+      .select(COLUMNS, { count: "exact" })
+      .not("imprest_disbursement_reversal_requested_at", "is", null)
+      .order("imprest_disbursement_reversal_requested_at", { ascending: true })
+      .order("id")
+      .range(from, to) as unknown as Counted,
+  );
+  // Every row here carries the request it waits on. Without it the list names one it can't show.
+  if (result.rows.some((d) => d.openReversals === 0)) {
+    throw new Error(`${DATA_UNAVAILABLE}: imprest.waiting_for_reversal.request`);
   }
   return result;
 }
@@ -635,6 +802,7 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
     row.imprest_verifications?.verified_by ?? null,
     ...(row.imprest_settlement_returns ?? []).map((r) => r.returned_by),
     ...(row.imprest_approval_raises ?? []).map((r) => r.decided_by),
+    ...(row.imprest_posting_reversals ?? []).flatMap((r) => [r.requested_by, r.decided_by]),
   ]);
   const who = (person: string | null) => (person ? (names.get(person) ?? "") : "");
   const disbursement = fromRow(row, names);
@@ -765,7 +933,61 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
       });
     }
   }
+  // Corrections (issue #71): each request, its decision, then the reversal and the replacement it
+  // posted. Every request names a posting of this payment; every approved one carries its reversal,
+  // and a replacement exactly when the correct amount is above zero. Anything less is a failed read.
+  const postings = postingsOf(row.imprest_postings ?? []);
+  const reversals: Reversal[] = [];
+  const byRequest = [...(row.imprest_posting_reversals ?? [])].sort((a, b) =>
+    a.requested_at.localeCompare(b.requested_at),
+  );
+  for (const r of byRequest) {
+    const target = postings.find((p) => p.id === r.posting_id);
+    if (!target) throw new Error(`${DATA_UNAVAILABLE}: imprest.reversal_posting`);
+    const reversal = reversalOf(r, target.kind, names);
+    reversals.push(reversal);
+    events.push({
+      kind: "reversal_requested",
+      at: reversal.requestedAt,
+      by: reversal.requestedBy,
+      role: reversal.requestedRole,
+      text: reversal.reason,
+      amount: reversal.correct,
+      posting: reversal.kind,
+    });
+    if (reversal.status === "requested") continue;
+    if (!reversal.decidedAt || !reversal.decidedById) {
+      throw new Error(`${DATA_UNAVAILABLE}: imprest.reversal_decision`);
+    }
+    events.push({
+      kind: reversal.status === "approved" ? "reversal_approved" : "reversal_rejected",
+      at: reversal.decidedAt,
+      by: reversal.decidedBy,
+      role: "director",
+      text: reversal.status === "rejected" ? reversal.rejectionReason : null,
+    });
+    if (reversal.status !== "approved") continue;
+    const made = postings.filter((p) => p.reversalId === reversal.id);
+    const cancel = made.find((p) => p.entry === "reversal");
+    const replacement = made.find((p) => p.entry === "replacement");
+    if (!cancel || reversal.correct > 0 !== Boolean(replacement)) {
+      throw new Error(`${DATA_UNAVAILABLE}: imprest.reversal_postings`);
+    }
+    for (const p of replacement ? [cancel, replacement] : [cancel]) {
+      events.push({
+        kind: p.entry === "reversal" ? "reversal_posted" : "replacement_posted",
+        at: p.postedAt,
+        by: reversal.decidedBy,
+        role: "director",
+        text: null,
+        amount: p.amount,
+        posting: p.kind,
+      });
+    }
+  }
+
   if (events.some((event) => !event.at)) throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement`);
+  // A stable sort, so steps that share a moment (a decision and what it posted) keep their order.
   events.sort((a, b) => a.at.localeCompare(b.at));
 
   const lines = await loadLines(settlements.map((s) => s.id));
@@ -777,5 +999,5 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
     throw new Error(`${DATA_UNAVAILABLE}: imprest.settlement_lines`);
   }
 
-  return { ...disbursement, events, cycles };
+  return { ...disbursement, postings, reversals, events, cycles };
 }

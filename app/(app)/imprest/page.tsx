@@ -17,6 +17,7 @@ import {
   loadSettledWaiting,
   loadVerified,
   loadWaitingForRaise,
+  loadWaitingForReversal,
   loadOwnDisbursements,
   loadRecentPurposes,
   loadSpendingPosition,
@@ -71,7 +72,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
 
   const countPage = pageNumber(params.counts);
   const today = businessDate();
-  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, raising, settled, back, verified, fundings] = await Promise.all([
+  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, raising, settled, back, reversing, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
@@ -85,6 +86,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     loadWaitingForRaise(pageNumber(params.raise)),
     loadSettledWaiting(pageNumber(params.settled)),
     loadSentBack(pageNumber(params.back)),
+    loadWaitingForReversal(pageNumber(params.reversal)),
     loadVerified(pageNumber(params.verified)),
     loadFundings(page),
   ]);
@@ -96,6 +98,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     raise: raising.page,
     settled: settled.page,
     back: back.page,
+    reversal: reversing.page,
     verified: verified.page,
     page: fundings.page,
     counts: counts.page,
@@ -191,6 +194,17 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         page={back}
         param="back"
         otherParams={others("back")}
+      />
+
+      {/* A verified posting to correct (issue #71). Directors decide; the Manager reads. */}
+      <DisbursementList
+        id="disbursements-reversal"
+        title={t("spending.lists.reversals", { count: reversing.total })}
+        empty={t("spending.lists.reversalsEmpty")}
+        note={t(viewer.role === "director" ? "spending.lists.reversalsNote" : "spending.lists.reversalsNoteManager")}
+        page={reversing}
+        param="reversal"
+        otherParams={others("reversal")}
       />
 
       {/* Once verified a payment leaves the queue above; this is where it can be found again. */}

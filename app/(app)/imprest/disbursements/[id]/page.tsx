@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { DisbursementActions } from "@/app/(app)/imprest/disbursement-forms";
+import { DecideReversal, RequestReversal } from "@/app/(app)/imprest/reversal-forms";
 import { CashierStep, ReceiptView } from "@/app/(app)/imprest/settlement-forms";
 import { DisbursementFlags, DisbursementStatusChip } from "@/app/(app)/imprest/spending";
-import { Card, PageHeader } from "@/components/ui/surface";
+import { Card, PageHeader, StatusChip } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
 import {
   earlierReceipts,
@@ -51,9 +52,13 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
   }
 
   const target = { id: disbursement.id, version: disbursement.version };
-  // What a raise would take out of Free to approve, shown to the Manager who decides it.
+  // What a raise would take out of Free to approve, shown to the Manager who decides it; and where a
+  // reversal would take the posted balance, shown to the Director who decides that (issue #71).
   const position =
-    viewer.role === "manager" && disbursement.openRequest ? await loadSpendingPosition() : null;
+    (viewer.role === "manager" && disbursement.openRequest) ||
+    (viewer.role === "director" && disbursement.openReversals > 0)
+      ? await loadSpendingPosition()
+      : null;
   const sentBack = disbursement.sentBack
     ? {
         reason: disbursement.sentBack.reason,
@@ -128,6 +133,16 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         <Breakdown key={cycle.id} disbursement={disbursement} cycle={cycle} />
       ))}
 
+      {disbursement.status === "verified" ? (
+        <Corrections
+          disbursement={disbursement}
+          mayRequest={viewer.role === "manager" || cashierDue}
+          decides={viewer.role === "director"}
+          postedBalance={position?.postedBalance ?? null}
+          freeToApprove={position?.freeToApprove ?? null}
+        />
+      ) : null}
+
       {/* Hidden when this viewer has nothing to do here and no answer to show (a Cashier's decided row). */}
       <Card className="flex flex-col gap-3 empty:hidden" data-testid="disbursement-actions">
         <DisbursementActions
@@ -189,7 +204,8 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
             {t("detail.verifiedNote")}
           </p>
         ) : null}
-        {viewer.role === "director" ? (
+        {/* Directors read a payment's steps; a reversal waiting for them is theirs to decide (issue #71). */}
+        {viewer.role === "director" && disbursement.openReversals === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="read-only">
             {t("detail.readOnly")}
           </p>
@@ -232,6 +248,14 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
                   {/* A Cashier may not read the Manager's profile, so they see the role instead. */}
                   {event.by || roles(event.role)} · {formatBusinessStamp(event.at, locale)}
                 </span>
+                {event.amount !== undefined && event.posting ? (
+                  <span className="fv-numeric text-sm" data-testid="history-amount">
+                    {t(event.posting === "expense" ? "posted.expense" : "posted.loss")} ·{" "}
+                    {event.kind === "reversal_requested"
+                      ? t("history.correctAmount", { amount: formatTzs(event.amount, locale) })
+                      : formatTzs(event.kind === "reversal_posted" ? -event.amount : event.amount, locale)}
+                  </span>
+                ) : null}
                 {event.text ? <span className="text-sm">{event.text}</span> : null}
               </Card>
             </li>
@@ -343,6 +367,171 @@ async function ApprovalHistory({ disbursement }: { disbursement: DisbursementDet
           <span className="fv-numeric font-semibold">{formatTzs(disbursement.amount, locale)}</span>
         </li>
       </ol>
+    </Card>
+  );
+}
+
+/**
+ * Corrections of a verified payment (issue #71). What stands now, each with the way to ask for a
+ * reversal; every request with who asked, why, and what the Director decided; and every posting in
+ * the order it was posted, so the original, its reversal and its replacement read top to bottom.
+ */
+async function Corrections({
+  disbursement,
+  mayRequest,
+  decides,
+  postedBalance,
+  freeToApprove,
+}: {
+  disbursement: DisbursementDetail;
+  mayRequest: boolean;
+  decides: boolean;
+  postedBalance: number | null;
+  freeToApprove: number | null;
+}) {
+  const t = await getTranslations("imprest");
+  const roles = await getTranslations("admin.roles");
+  const locale = await getLocale();
+  const tzs = (value: number) => formatTzs(value, locale);
+  const stamp = (at: string) => formatBusinessStamp(at, locale);
+  const kindLabel = (kind: string) => t(kind === "expense" ? "spending.posted.expense" : "spending.posted.loss");
+  const standing = disbursement.postings.filter((p) => p.entry !== "reversal" && !p.reversed);
+  const waitingFor = new Set(disbursement.reversals.filter((r) => r.status === "requested").map((r) => r.postingId));
+  const corrected = disbursement.postings.some((p) => p.entry !== "original");
+  const tones = { requested: "attention", approved: "success", rejected: "danger" } as const;
+
+  return (
+    <Card className="flex flex-col gap-4" data-testid="corrections">
+      <h2 className="text-lg font-semibold">{t("reversal.title")}</h2>
+      <p className="text-sm text-muted-foreground">{t("reversal.help")}</p>
+
+      <ul className="flex flex-col gap-3" data-testid="standing-postings">
+        {standing.map((p) => (
+          <li
+            key={p.id}
+            className="flex flex-col gap-2 border-t border-border pt-3"
+            data-testid={`standing-${p.kind}`}
+            data-entry={p.entry}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="flex flex-col">
+                <span className="font-medium">{kindLabel(p.kind)}</span>
+                <span className="text-xs text-muted-foreground">{t(`reversal.entry.${p.entry}`)}</span>
+                {p.needsDirectorDecision ? (
+                  <span className="text-xs text-muted-foreground">{t("spending.posted.lossNote")}</span>
+                ) : null}
+              </span>
+              <span className={`fv-numeric font-semibold ${p.kind === "unexplained_loss" ? "text-danger" : ""}`}>
+                {tzs(p.amount)}
+              </span>
+            </div>
+            {mayRequest ? (
+              <RequestReversal postingId={p.id} waiting={waitingFor.has(p.id)} />
+            ) : waitingFor.has(p.id) ? (
+              <p className="text-sm text-muted-foreground" data-testid="reversal-waiting">
+                {t("reversal.waiting")}
+              </p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+
+      {disbursement.reversals.length > 0 ? (
+        <section className="flex flex-col gap-3 border-t border-border pt-3" aria-labelledby="reversals-heading">
+          <h3 id="reversals-heading" className="font-semibold">
+            {t("reversal.requestsTitle")}
+          </h3>
+          <ol className="flex flex-col gap-3" data-testid="reversal-requests">
+            {disbursement.reversals.map((r, index) => (
+              <li
+                key={r.id}
+                className="flex flex-col gap-1 rounded-lg border border-border p-3"
+                data-testid={`reversal-${index + 1}`}
+                data-status={r.status}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <span className="fv-numeric font-medium">
+                    {t("reversal.requestLine", {
+                      kind: kindLabel(r.kind),
+                      original: tzs(r.original),
+                      correct: tzs(r.correct),
+                    })}
+                  </span>
+                  <StatusChip tone={tones[r.status]}>
+                    <span data-testid="reversal-status">{t(`reversal.status.${r.status}`)}</span>
+                  </StatusChip>
+                </div>
+                <span className="text-sm" data-testid="reversal-reason">
+                  {r.reason}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t("reversal.requestedBy", { name: r.requestedBy || roles(r.requestedRole), at: stamp(r.requestedAt) })}
+                </span>
+                {r.decidedAt ? (
+                  <span className="text-xs text-muted-foreground" data-testid="reversal-decided-by">
+                    {t("reversal.decidedBy", { name: r.decidedBy || roles("director"), at: stamp(r.decidedAt) })}
+                  </span>
+                ) : null}
+                {r.status === "rejected" && r.rejectionReason ? (
+                  <span className="text-sm" data-testid="reversal-rejection">
+                    {t("reversal.rejectedBecause", { reason: r.rejectionReason })}
+                  </span>
+                ) : null}
+                {r.status === "approved" ? (
+                  <span className="fv-numeric text-sm" data-testid="reversal-posted">
+                    {t("reversal.posted", {
+                      original: tzs(r.original),
+                      replacement:
+                        r.correct > 0
+                          ? t("reversal.replacementOf", { amount: tzs(r.correct) })
+                          : t("reversal.noReplacement"),
+                    })}
+                  </span>
+                ) : null}
+                {decides ? (
+                  <DecideReversal
+                    key={r.id}
+                    reversal={{ id: r.id, version: r.version, original: r.original, correct: r.correct }}
+                    open={r.status === "requested"}
+                    postedBalance={postedBalance}
+                    freeToApprove={freeToApprove}
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
+      {corrected ? (
+        <section className="flex flex-col gap-2 border-t border-border pt-3" aria-labelledby="ledger-heading">
+          <h3 id="ledger-heading" className="font-semibold">
+            {t("reversal.ledgerTitle")}
+          </h3>
+          <ol className="flex flex-col gap-2" data-testid="posting-ledger">
+            {disbursement.postings.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-start justify-between gap-3 text-sm"
+                data-testid="ledger-row"
+                data-entry={p.entry}
+                data-kind={p.kind}
+              >
+                <span className="flex flex-col">
+                  <span>
+                    {t(`reversal.entry.${p.entry}`)} · {kindLabel(p.kind)}
+                    {p.reversed ? ` · ${t("reversal.reversed")}` : ""}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{stamp(p.postedAt)}</span>
+                </span>
+                <span className={`fv-numeric font-semibold ${p.reversed ? "text-muted-foreground line-through" : ""}`}>
+                  {tzs(p.entry === "reversal" ? -p.amount : p.amount)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
     </Card>
   );
 }

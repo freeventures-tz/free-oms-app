@@ -1267,7 +1267,11 @@
         "raiseNoteDirector": "The Cashier asked for more than was approved, and the Manager decides. Directors read them here.",
         "raiseAsked": "Asked for {amount} more: {reason}",
         "nextRaiseWait": "Waiting for the Manager to decide your request for more",
-        "nextHandOutExtra": "Next: hand out the extra"
+        "nextHandOutExtra": "Next: hand out the extra",
+        "reversals": "Reversals waiting for approval ({count})",
+        "reversalsEmpty": "No reversals are waiting.",
+        "reversalsNote": "Open one to approve or reject it. Approving cancels the posting and posts it again at the correct amount.",
+        "reversalsNoteManager": "A Director approves or rejects each one. You read them here."
       },
       "fields": {
         "rejectionReason": "Reason for rejecting",
@@ -1332,7 +1336,13 @@
         "raise_requested": "Asked for more",
         "raise_raised": "Approval raised and set aside",
         "raise_refused": "Request for more refused",
-        "raise_handed_out": "Extra cash handed out"
+        "raise_handed_out": "Extra cash handed out",
+        "reversal_requested": "Reversal asked for",
+        "reversal_approved": "Reversal approved",
+        "reversal_rejected": "Reversal rejected",
+        "reversal_posted": "Reversal posted",
+        "replacement_posted": "Replacement posted",
+        "correctAmount": "Correct amount {amount}"
       },
       "flags": {
         "noReceipt": "No receipt",
@@ -1624,6 +1634,46 @@
           "sent_back": "Raised {raised}. Resolved {resolved}, when the Manager sent it back."
         }
       }
+    },
+    "reversal": {
+      "title": "Corrections",
+      "help": "A verified posting is never changed. To correct one, ask for a reversal. A Director approves it, which cancels the posting in full and posts it again at the correct amount.",
+      "ledgerTitle": "Postings, in order",
+      "entry": {
+        "original": "Posted at verification",
+        "reversal": "Reversal",
+        "replacement": "Replacement"
+      },
+      "reversed": "Reversed",
+      "open": "Ask for a reversal",
+      "correct": "Correct amount (TZS)",
+      "correctHelp": "What it should have been. Enter 0 to undo it.",
+      "reason": "Why it needs correcting",
+      "submit": "Send to a Director",
+      "waiting": "A reversal of this posting is waiting for a Director.",
+      "requestsTitle": "Reversal requests",
+      "requestLine": "{kind}: {original} to {correct}",
+      "requestedBy": "Asked by {name} on {at}",
+      "decidedBy": "Decided by {name} on {at}",
+      "rejectedBecause": "Rejected: {reason}",
+      "posted": "Posted a reversal of {original} and {replacement}.",
+      "replacementOf": "a replacement of {amount}",
+      "noReplacement": "no replacement, because the correct amount is 0",
+      "status": {
+        "requested": "Waiting for a Director",
+        "approved": "Approved and posted",
+        "rejected": "Rejected"
+      },
+      "approve": "Approve reversal",
+      "approveHelp": "This posts a reversal of {original} and {replacement}. The posted balance goes from {before} to {after}. Free to approve now: {free}. It can't be undone.",
+      "reject": "Reject",
+      "rejectReason": "Why you are rejecting it",
+      "rejectConfirm": "Reject request",
+      "success": {
+        "requested": "Request sent. A Director approves or rejects it, and the posting stays as it is until then.",
+        "approved": "Approved. The reversal and the replacement are posted.",
+        "rejected": "Request rejected. The posting stays as it was."
+      }
     }
   },
   "imprestErrors": {
@@ -1699,6 +1749,25 @@
     "raise_open": "There is already a request for more on this payment, or a raise still to be handed out.",
     "no_raise_request": "That request can't be found, or it has already been decided.",
     "raise_not_handed_out": "Ask for more, wait for the Manager to raise it, and hand out the extra before you settle."
+  },
+  "reversalErrors": {
+    "not_permitted": "Your account may not do this.",
+    "generic": "Something went wrong and nothing was changed. Try again.",
+    "unconfirmed": "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which can't be recorded twice.",
+    "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
+    "amount_invalid": "Enter a whole number of shillings, 0 or more.",
+    "amount_too_large": "That amount is larger than the system accepts.",
+    "reason_required": "Give a reason of 3 to 500 characters.",
+    "stale": "This request changed since you opened it. Reload to see where it stands.",
+    "not_awaiting_decision": "This request has already been decided.",
+    "decision_required": "Choose to approve or reject.",
+    "no_posting": "This posting can't be found.",
+    "not_reversible": "A reversal can't itself be reversed. Correct the replacement instead.",
+    "already_reversed": "This posting has already been reversed. Correct its replacement instead.",
+    "reversal_open": "A reversal of this posting is already waiting for a Director.",
+    "amount_unchanged": "The correct amount is the same as what was posted ({amount_tzs}), so there is nothing to correct.",
+    "below_set_aside": "This would take the posted balance below what is set aside: it needs {amount_tzs} more, and only {free_to_approve_tzs} is free to approve. Nothing was changed.",
+    "no_reversal": "This request can't be found."
   },
   "countErrors": {
     "not_permitted": "Your account may not do this.",
