@@ -21,6 +21,10 @@ update public.imprest_posting_reversals
    set reason = 'Rewritten after the fact'
  where reason = 'The stamp was 500 less than the receipt said';
 
+-- The update queued the table's deferred completeness check, and a table with a pending trigger
+-- event cannot be altered. Run it now: the request is still approved with its postings, so it holds.
+set constraints public.imprest_posting_reversal_complete immediate;
+
 alter table public.imprest_posting_reversals enable trigger imprest_posting_reversals_guard;
 
 do $$
