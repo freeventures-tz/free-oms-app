@@ -52,7 +52,7 @@ This section is the whole release process. No tool calculates versions, opens pr
 4. Tag the merge commit on `main`, annotated, message `<version>: <one line>`, then `git push origin <version>`.
 5. Give the human the tag and the release entry alongside the merged PR URL.
 6. Housekeep, so the work just merged leaves nothing behind:
-   - Before deleting anything, check that every commit of the task branch is on `origin` (`git branch -r --contains <head>`, `git log origin/<branch>..<branch>` empty) and that its worktree has no uncommitted or untracked work. If anything is not on the remote, stop and report it; delete nothing.
+   - Before deleting anything, `git fetch origin` and check that nothing on either side of the task branch is left unmerged. The PR's merged head (`gh pr view <n> --json headRefOid`) must equal both the remote branch tip (`git rev-parse origin/<branch>`) and the local branch tip, and the worktree must have no uncommitted or untracked work. A remote tip past the merged head holds commits that never reached `main`; a local tip past it holds commits that never reached the remote. If any of these differ, stop and report it; delete nothing.
    - Bring the primary checkout to `main`, fast-forward it to `origin/main`, fetch tags, and confirm `git status` is clean.
    - Remove the merged task's worktree and any scratch worktree it used, delete its branch locally and on `origin`, then `git worktree prune` and `git fetch --prune`.
    - Stop what the task started locally (dev servers, a Supabase stack started for it, temporary env files) and undo any `skip-worktree` flag or edited config.
