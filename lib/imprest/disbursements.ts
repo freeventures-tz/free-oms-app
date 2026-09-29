@@ -239,6 +239,8 @@ export type DisbursementDetail = Disbursement & {
   events: DisbursementEvent[];
   /** Every settlement cycle, oldest first. Nothing in an earlier one ever changes. */
   cycles: SettlementCycle[];
+  /** The fund it was paid from has been retired (issue #72), so nothing can be added to it. */
+  fundRetired: boolean;
 };
 
 /**
@@ -999,5 +1001,16 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
     throw new Error(`${DATA_UNAVAILABLE}: imprest.settlement_lines`);
   }
 
-  return { ...disbursement, postings, reversals, events, cycles };
+  // Whether its fund is retired (issue #72): a retired fund takes no correction.
+  const funds = requireRows(
+    (await supabase.from("imprest_disbursements").select("imprest_funds(is_active)").eq("id", id)) as unknown as {
+      data: { imprest_funds: { is_active: boolean } | null }[] | null;
+      error: { message: string } | null;
+    },
+    "imprest.disbursement_fund",
+  );
+  const fund = funds[0]?.imprest_funds;
+  if (!fund) throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement_fund`);
+
+  return { ...disbursement, postings, reversals, events, cycles, fundRetired: !fund.is_active };
 }

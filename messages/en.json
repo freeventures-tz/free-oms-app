@@ -1674,7 +1674,8 @@
         "requested": "Request sent. A Director approves or rejects it, and the posting stays as it is until then.",
         "approved": "Approved. The reversal and the replacement are posted.",
         "rejected": "Request rejected. The posting stays as it was."
-      }
+      },
+      "fundRetired": "This payment's fund has been retired, so its postings can no longer be corrected. They stay on the retired fund's record."
     },
     "retirement": {
       "title": "Retire the fund",

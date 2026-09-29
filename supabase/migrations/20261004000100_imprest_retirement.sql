@@ -1056,8 +1056,23 @@ set search_path = ''
 as $$
 begin
   perform private.acting_staff(array['director', 'manager']::public.app_role[]);
+  -- The page is chosen first and only its funds are summarised, so the work follows the page, not
+  -- the whole history of retired funds.
   return query
-    select f.id, f.opened_at, f.retired_at, r.id, r.closing_balance_tzs, ps.full_name, pd.full_name,
+    with page as (
+      select f.id, f.opened_at, f.retired_at, r.id as retirement_id, r.closing_balance_tzs,
+             ps.full_name as submitted_by, pd.full_name as approved_by, count(*) over () as total
+        from public.imprest_funds f
+        join public.imprest_retirements r on r.fund_id = f.id and r.status = 'approved'
+        join public.profiles ps on ps.id = r.submitted_by
+        join public.profiles pd on pd.id = r.decided_by
+       where not f.is_active
+       order by f.retired_at desc, f.id
+       limit greatest(least(coalesce(p_limit, 30), 100), 1)
+      offset greatest(coalesce(p_offset, 0), 0)
+    )
+    select pg.id, pg.opened_at, pg.retired_at, pg.retirement_id, pg.closing_balance_tzs,
+           pg.submitted_by, pg.approved_by,
            jsonb_array_length(u.v -> 'losses'),
            (select coalesce(sum((x ->> 'amount_tzs')::bigint), 0)::bigint
               from jsonb_array_elements(u.v -> 'losses') x),
@@ -1065,16 +1080,10 @@ begin
            (select coalesce(sum((x ->> 'amount_tzs')::bigint), 0)::bigint
               from jsonb_array_elements(u.v -> 'shortages') x),
            jsonb_array_length(u.v -> 'not_counted_days'),
-           count(*) over ()
-      from public.imprest_funds f
-      join public.imprest_retirements r on r.fund_id = f.id and r.status = 'approved'
-      join public.profiles ps on ps.id = r.submitted_by
-      join public.profiles pd on pd.id = r.decided_by
-      cross join lateral (select private.imprest_fund_unresolved(f.id) as v) u
-     where not f.is_active
-     order by f.retired_at desc, f.id
-     limit greatest(least(coalesce(p_limit, 30), 100), 1)
-    offset greatest(coalesce(p_offset, 0), 0);
+           pg.total
+      from page pg
+      cross join lateral (select private.imprest_fund_unresolved(pg.id) as v) u
+     order by pg.retired_at desc, pg.id;
 end;
 $$;
 

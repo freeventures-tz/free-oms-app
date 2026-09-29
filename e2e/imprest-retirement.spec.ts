@@ -254,6 +254,12 @@ test.describe("imprest retirement", () => {
     await expect(page.getByTestId("fund-postings")).toContainText(trip.disbursement_no);
     await expect(page.locator("main form")).toHaveCount(0);
     await expect(page.locator("main button")).toHaveCount(0);
+
+    // A payment of the retired fund can no longer be corrected, and its page says why.
+    await as(page, "manager");
+    await page.goto(`/imprest/disbursements/${trip.id}`);
+    await expect(page.getByTestId("reversal-fund-retired")).toContainText("retired");
+    await expect(page.getByTestId("request-reversal-toggle")).toHaveCount(0);
   });
 
   test("blockers are named with a link and leave no submit; a rejection keeps its reason", async ({ page }, testInfo) => {

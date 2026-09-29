@@ -136,7 +136,8 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
       {disbursement.status === "verified" ? (
         <Corrections
           disbursement={disbursement}
-          mayRequest={viewer.role === "manager" || cashierDue}
+          // A retired fund takes no correction (issue #72); the page says so instead.
+          mayRequest={!disbursement.fundRetired && (viewer.role === "manager" || cashierDue)}
           decides={viewer.role === "director"}
           postedBalance={position?.postedBalance ?? null}
           freeToApprove={position?.freeToApprove ?? null}
@@ -404,6 +405,11 @@ async function Corrections({
     <Card className="flex flex-col gap-4" data-testid="corrections">
       <h2 className="text-lg font-semibold">{t("reversal.title")}</h2>
       <p className="text-sm text-muted-foreground">{t("reversal.help")}</p>
+      {disbursement.fundRetired ? (
+        <p className="text-sm font-medium" data-testid="reversal-fund-retired">
+          {t("reversal.fundRetired")}
+        </p>
+      ) : null}
 
       <ul className="flex flex-col gap-3" data-testid="standing-postings">
         {standing.map((p) => (
