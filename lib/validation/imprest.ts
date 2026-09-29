@@ -221,6 +221,31 @@ export const handOutRaiseSchema = z.object({
   idempotencyKey: spendingKey,
 });
 
+// Reversals (issue #71). Their refusals speak of postings and corrections, not of payment steps.
+
+const reversalKey = z.string().uuid({ message: "reversalErrors.idempotency_key_conflict" });
+
+export const requestReversalSchema = z.object({
+  postingId: z.string().uuid({ message: "reversalErrors.no_posting" }),
+  correct: tzsField(true, "reversalErrors"),
+  reason: textField(true, "reversalErrors.reason_required"),
+  idempotencyKey: reversalKey,
+});
+
+const reversalTarget = {
+  reversalId: z.string().uuid({ message: "reversalErrors.no_reversal" }),
+  expectedVersion: z.coerce.number().int().min(1, { message: "reversalErrors.stale" }),
+  idempotencyKey: reversalKey,
+};
+
+/** Approve: there is no amount. The correct amount is the one that was asked for. */
+export const approveReversalSchema = z.object(reversalTarget);
+
+export const rejectReversalSchema = z.object({
+  ...reversalTarget,
+  reason: textField(true, "reversalErrors.reason_required"),
+});
+
 export const registerReceiptSchema = z.object({
   disbursementId,
   fileName: z
