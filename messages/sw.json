@@ -1418,6 +1418,7 @@
     "count": {
       "title": "Hesabu ya fedha ya kila siku",
       "state": {
+        "due": "Hesabu ya leo inasubiriwa",
         "not_counted": "Haijahesabiwa",
         "awaiting_confirmation": "Inasubiri uthibitisho wa Meneja",
         "sent_back": "Imerudishwa ihesabiwe upya",
@@ -1426,10 +1427,11 @@
         "excess": "Ziada"
       },
       "help": {
-        "not_counted": {
+        "due": {
           "cashier": "Hesabu fedha zilizo kwenye kasha kisha andika jumla. Programu inakokotoa kinachopaswa kuwepo.",
-          "other": "Keshia bado hajahesabu kasha leo. Hii si tofauti ya sifuri."
+          "other": "Keshia bado hajahesabu kasha leo. Siku ikiisha bila hesabu iliyothibitishwa, itaonyeshwa Haijahesabiwa."
         },
+        "not_counted": "Siku iliisha bila hesabu iliyothibitishwa. Hii si tofauti ya sifuri.",
         "awaiting_confirmation": {
           "manager": "Kagua hesabu. Ithibitishe kama ilivyo, au irudishe ihesabiwe upya.",
           "other": "Keshia amehesabu. Meneja bado hajaithibitisha, kwa hivyo siku haijafungwa."
@@ -1459,7 +1461,8 @@
         "because": "Sababu: {explanation}.",
         "explanationNote": "Maelezo: {note}",
         "postedShortage": "Imeandikwa kama upungufu wa hesabu wa {amount}, unaosubiri uamuzi wa Mkurugenzi.",
-        "postedExcess": "Imeandikwa kama ziada ya hesabu ya {amount}."
+        "postedExcess": "Imeandikwa kama ziada ya hesabu ya {amount}.",
+        "late": "Imehesabiwa kwa kuchelewa: {reason}"
       },
       "enter": {
         "counted": "Fedha zilizo kwenye kasha",
@@ -1522,7 +1525,50 @@
       "success": {
         "counted": "Hesabu imeandikwa. Sasa inamsubiri Meneja.",
         "confirmed": "Hesabu imethibitishwa. Siku imefungwa.",
-        "sentBack": "Hesabu imerudishwa. Keshia atahesabu tena."
+        "sentBack": "Hesabu imerudishwa. Keshia atahesabu tena.",
+        "countedLate": "Hesabu iliyochelewa imeandikwa. Sasa inamsubiri Meneja."
+      },
+      "late": {
+        "open": "Hesabu siku hii",
+        "openFor": "Hesabu {date} kwa kuchelewa",
+        "help": "Hesabu fedha zilizo kwenye kasha sasa. Zinalinganishwa na kinachopaswa kuwepo sasa, na Meneja anaithibitisha kama hesabu nyingine yoyote.",
+        "reason": "Kwa nini siku hii haikuhesabiwa",
+        "reasonHelp": "Herufi 3 hadi 500. Kumbukumbu inaihifadhi, na inaonyesha kuwa hesabu ilichelewa.",
+        "countedHelp": "Hesabu kila noti na sarafu iliyo kwenye kasha sasa, kisha andika jumla kwa shilingi. Andika 0 kama kasha ni tupu.",
+        "submit": "Andika hesabu iliyochelewa"
+      },
+      "open": {
+        "title": "{count, plural, =0 {Siku ambazo hazijafungwa} one {Siku # haijafungwa} other {Siku # hazijafungwa}}",
+        "help": "Siku zisizo na hesabu iliyothibitishwa, ya zamani kwanza. Kila moja inabaki hapa hadi siku ipate hesabu iliyothibitishwa.",
+        "helpCashier": "Siku zisizo na hesabu iliyothibitishwa, ya zamani kwanza. Unaweza kuhesabu siku iliyorukwa kwa kuchelewa, ukitoa sababu.",
+        "empty": "Siku zote zimefungwa.",
+        "notCountedSince": "Haijahesabiwa tangu {when}",
+        "awaitingSince": "Inamsubiri Meneja tangu {when}",
+        "lateBlocked": "Kuna hesabu inayomsubiri Meneja. Unaweza kuhesabu siku hii ikishathibitishwa au kurudishwa.",
+        "waited": {
+          "lessThanHour": "Imesubiri chini ya saa moja",
+          "hours": "{count, plural, one {Imesubiri saa #} other {Imesubiri saa #}}",
+          "days": "{count, plural, one {Imesubiri siku #} other {Imesubiri siku #}}"
+        }
+      },
+      "alerts": {
+        "heading": "{count, plural, one {Siku # ya imprest haina hesabu iliyothibitishwa} other {Siku # za imprest hazina hesabu iliyothibitishwa}}",
+        "notZero": "Siku ambayo hakuna aliyeihesabu haijulikani, haijalingana. Kila tahadhari inabaki hadi siku ipate hesabu iliyothibitishwa.",
+        "not_counted": "{date}: Haijahesabiwa",
+        "awaiting_confirmation": "{date}: Inasubiri uthibitisho wa Meneja",
+        "open": "Fungua hesabu ya kila siku",
+        "seeAll": "Tazama zote {count} kwenye ukurasa wa imprest"
+      },
+      "alertHistory": {
+        "title": "Tahadhari za hesabu zilizoshughulikiwa",
+        "empty": "Bado hakuna tahadhari ya hesabu iliyoshughulikiwa.",
+        "not_counted": "{date} haikuhesabiwa",
+        "awaiting_confirmation": "{date}, hesabu ya {attempt}, ilimsubiri Meneja",
+        "resolved": {
+          "counted_late": "Ilitolewa {raised}. Ilishughulikiwa {resolved}, hesabu iliyochelewa ilipothibitishwa.",
+          "confirmed": "Ilitolewa {raised}. Ilishughulikiwa {resolved}, Meneja alipoithibitisha.",
+          "sent_back": "Ilitolewa {raised}. Ilishughulikiwa {resolved}, Meneja alipoirudisha."
+        }
       }
     }
   },
@@ -1604,9 +1650,9 @@
     "idempotency_key_conflict": "Ombi hili tayari limetumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
     "no_fund": "Bado hakuna mfuko wa imprest uliofunguliwa, kwa hivyo hakuna cha kuhesabu.",
     "day_changed": "Siku imebadilika ukurasa huu ukiwa wazi. Upakie upya ili uhesabu ya leo.",
-    "already_confirmed": "Hesabu ya leo imeshathibitishwa. Siku imefungwa.",
-    "count_awaiting_confirmation": "Hesabu ya leo imeshaandikwa na inamsubiri Meneja.",
-    "stale": "Hesabu ya leo imebadilika tangu ulipofungua ukurasa huu. Upakie upya uone ilipofikia.",
+    "already_confirmed": "Hesabu ya siku hii imeshathibitishwa. Siku imefungwa.",
+    "count_awaiting_confirmation": "Hesabu ya siku hii imeshaandikwa na inamsubiri Meneja.",
+    "stale": "Hesabu ya siku hii imebadilika tangu ulipofungua ukurasa huu. Upakie upya uone ilipofikia.",
     "amount_invalid": "Andika idadi kamili ya shilingi zilizo kwenye kasha, 0 au zaidi.",
     "amount_too_large": "Kiasi hicho ni kikubwa kuliko mfumo unavyokubali.",
     "note_invalid": "Andika maelezo yenye herufi 3 hadi 500, au yaache wazi.",
@@ -1617,8 +1663,13 @@
     "explanation_invalid": "Chagua mojawapo ya sababu zilizoorodheshwa.",
     "explanation_note_required": "Sababu hii inahitaji maelezo yenye herufi 3 hadi 500.",
     "explanation_not_needed": "Hesabu iliyolingana haihitaji sababu wala maelezo.",
-    "earlier_count_waiting": "Hesabu ya {business_date} bado inamsubiri Meneja. Hesabu ya leo itafunguka ikishathibitishwa au kurudishwa.",
-    "figures_moved": "Takwimu za mfuko zimebadilika ulipokuwa ukihesabu. Hakuna kilichohifadhiwa. Bonyeza Andika hesabu tena."
+    "earlier_count_waiting": "Hesabu ya {business_date} bado inamsubiri Meneja. Hakuna siku nyingine inayoweza kuhesabiwa hadi ithibitishwe au irudishwe.",
+    "figures_moved": "Takwimu za mfuko zimebadilika ulipokuwa ukihesabu. Hakuna kilichohifadhiwa. Bonyeza Andika hesabu tena.",
+    "later_count_waiting": "Hesabu ya {business_date} bado inamsubiri Meneja. Hakuna siku nyingine inayoweza kuhesabiwa hadi ithibitishwe au irudishwe.",
+    "late_reason_required": "Eleza kwa nini siku hii haikuhesabiwa, kwa herufi 3 hadi 500.",
+    "late_reason_invalid": "Eleza kwa nini siku hii haikuhesabiwa, kwa herufi 3 hadi 500.",
+    "late_reason_not_needed": "Hesabu ya leo haihitaji sababu ya kuchelewa. Pakia ukurasa upya uhesabu ya leo.",
+    "day_not_countable": "{business_date} ni kabla hesabu hazijaanza, kwa hivyo haiwezi kuhesabiwa."
   },
   "reports": {
     "title": "Ripoti za kila siku",

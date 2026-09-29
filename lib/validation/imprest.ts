@@ -302,6 +302,14 @@ export const enterCountSchema = z.object({
 });
 
 /**
+ * A late count for a past Not counted day (issue #69): the same fields, and a reason of 3 to 500
+ * characters for counting late, which is required.
+ */
+export const enterLateCountSchema = enterCountSchema.extend({
+  lateReason: textField(true, "countErrors.late_reason_required"),
+});
+
+/**
  * The Manager's confirmation. There is no figure. `variance` is the one the Manager was shown, so a
  * missing explanation is answered beside the choices; the database decides again from the count
  * itself, and `variance` is not sent to it.

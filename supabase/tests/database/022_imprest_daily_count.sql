@@ -167,7 +167,8 @@ select is(
       and has_function_privilege('authenticated', p.oid, 'execute')
       and not has_function_privilege('anon', p.oid, 'execute')
       and not has_function_privilege('service_role', p.oid, 'execute')),
-  4,
+  -- Five: issue #69 added Enter count's form with a late reason beside this one.
+  5,
   'the count commands and read are security definer, owned by fv_definer_owner, for staff sessions only');
 
 select ok(

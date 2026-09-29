@@ -164,7 +164,7 @@ test.describe("imprest daily count", () => {
     await as(page, "cashier");
     await page.goto("/imprest");
     const today = page.getByTestId("count-today");
-    await expect(today.getByTestId("count-state-not_counted")).toBeVisible();
+    await expect(today.getByTestId("count-state-due")).toBeVisible();
     await expect(today).not.toContainText("Expected cash");
     await shot("count-1-cashier-not-counted");
     await today.getByLabel("Cash in the tin").fill(String(expected - 2000));
@@ -303,15 +303,15 @@ test.describe("imprest daily count", () => {
 
     await as(page, "cashier");
     try {
-      superSql("revoke execute on function api.staff_imprest_counts(integer, integer) from authenticated;");
+      superSql("revoke execute on function api.staff_imprest_counts(integer, integer, date) from authenticated;");
       await page.goto("/imprest");
       await expect(page.getByText(/this page could not be loaded/i)).toBeVisible();
-      await expect(page.getByTestId("count-state-not_counted")).toHaveCount(0);
+      await expect(page.getByTestId("count-today")).toHaveCount(0);
     } finally {
-      superSql("grant execute on function api.staff_imprest_counts(integer, integer) to authenticated;");
+      superSql("grant execute on function api.staff_imprest_counts(integer, integer, date) to authenticated;");
     }
     await page.goto("/imprest");
-    await expect(page.getByTestId("count-state-not_counted")).toBeVisible();
+    await expect(page.getByTestId("count-today").getByTestId("count-state-due")).toBeVisible();
   });
 });
 

@@ -3,7 +3,12 @@
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useState } from "react";
 
-import { confirmCountAction, enterCountAction, sendBackCountAction } from "@/app/(app)/imprest/actions";
+import {
+  confirmCountAction,
+  enterCountAction,
+  enterLateCountAction,
+  sendBackCountAction,
+} from "@/app/(app)/imprest/actions";
 import { ActionForm, Outcome, TOUCH_FLOOR, useFreshKey, type Controller } from "@/app/(app)/imprest/funding-forms";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, Help, Input, Label } from "@/components/ui/field";
@@ -28,22 +33,28 @@ function EnterCountForm({
   replaces,
   controller,
   idempotencyKey: key,
+  late = false,
 }: {
   businessDate: string;
   /** A recount names the sent-back count it replaces, with the Manager's reason. */
   replaces: { id: string; reason: string } | null;
   controller: Controller;
   idempotencyKey: string;
+  /** A past Not counted day, counted late (issue #69): one more field, the reason, required. */
+  late?: boolean;
 }) {
   const t = useTranslations();
   const [counted, setCounted] = useState("");
   const [note, setNote] = useState("");
+  const [lateReason, setLateReason] = useState("");
   const problems = controller.running === null ? controller.result.fieldErrors : undefined;
   const locked = useDeferredValue(controller.pending);
+  // Ids are per day, since several missed days can each have a form on one screen.
+  const id = (name: string) => (late ? `late-${businessDate}-${name}` : `count-${name}`);
 
   const error = (name: string) =>
     problems?.[name] ? (
-      <span id={`count-${name}-error`}>
+      <span id={`${id(name)}-error`}>
         <FieldError>{t(problems[name])}</FieldError>
       </span>
     ) : null;
@@ -58,7 +69,7 @@ function EnterCountForm({
       <form
         className="flex flex-col gap-4"
         noValidate
-        data-testid="enter-count-form"
+        data-testid={late ? "late-count-form" : "enter-count-form"}
         onSubmit={(event) => {
           event.preventDefault();
           const data = new FormData();
@@ -66,37 +77,58 @@ function EnterCountForm({
           data.set("previousCountId", replaces?.id ?? "");
           data.set("counted", counted);
           data.set("note", note);
+          if (late) data.set("lateReason", lateReason);
           data.set("idempotencyKey", key);
-          controller.run("count", enterCountAction, data);
+          controller.run("count", late ? enterLateCountAction : enterCountAction, data);
         }}
       >
+        {late ? (
+          <Field>
+            <Label htmlFor={id("lateReason")}>{t("imprest.count.late.reason")}</Label>
+            <Input
+              id={id("lateReason")}
+              name="lateReason"
+              autoComplete="off"
+              maxLength={500}
+              value={lateReason}
+              readOnly={locked}
+              aria-invalid={problems?.lateReason ? true : undefined}
+              aria-describedby={problems?.lateReason ? `${id("lateReason")}-error` : `${id("lateReason")}-help`}
+              onChange={(event) => setLateReason(event.target.value)}
+            />
+            <Help id={`${id("lateReason")}-help`}>{t("imprest.count.late.reasonHelp")}</Help>
+            {error("lateReason")}
+          </Field>
+        ) : null}
         <Field>
-          <Label htmlFor="count-counted">{t("imprest.count.enter.counted")}</Label>
+          <Label htmlFor={id("counted")}>{t("imprest.count.enter.counted")}</Label>
           <Input
-            id="count-counted"
+            id={id("counted")}
             name="counted"
             inputMode="numeric"
             autoComplete="off"
             value={counted}
             readOnly={locked}
             aria-invalid={problems?.counted ? true : undefined}
-            aria-describedby={problems?.counted ? "count-counted-error" : "count-counted-help"}
+            aria-describedby={problems?.counted ? `${id("counted")}-error` : `${id("counted")}-help`}
             onChange={(event) => setCounted(event.target.value)}
           />
-          <Help id="count-counted-help">{t("imprest.count.enter.countedHelp")}</Help>
+          <Help id={`${id("counted")}-help`}>
+            {t(late ? "imprest.count.late.countedHelp" : "imprest.count.enter.countedHelp")}
+          </Help>
           {error("counted")}
         </Field>
         <Field>
-          <Label htmlFor="count-note">{t("imprest.count.enter.note")}</Label>
+          <Label htmlFor={id("note")}>{t("imprest.count.enter.note")}</Label>
           <Input
-            id="count-note"
+            id={id("note")}
             name="note"
             autoComplete="off"
             maxLength={500}
             value={note}
             readOnly={locked}
             aria-invalid={problems?.note ? true : undefined}
-            aria-describedby={problems?.note ? "count-note-error" : undefined}
+            aria-describedby={problems?.note ? `${id("note")}-error` : undefined}
             onChange={(event) => setNote(event.target.value)}
           />
           {error("note")}
@@ -104,12 +136,18 @@ function EnterCountForm({
         <Button
           type="submit"
           className={`${TOUCH_FLOOR} self-start`}
-          data-testid="submit-count"
+          data-testid={late ? "submit-late-count" : "submit-count"}
           pending={controller.running === "count"}
           pendingLabel={t("common.loading")}
           disabled={controller.pending}
         >
-          {t(replaces ? "imprest.count.enter.submitAgain" : "imprest.count.enter.submit")}
+          {t(
+            late
+              ? "imprest.count.late.submit"
+              : replaces
+                ? "imprest.count.enter.submitAgain"
+                : "imprest.count.enter.submit",
+          )}
         </Button>
       </form>
     </div>
@@ -345,6 +383,62 @@ export function CountControls({
   return (
     <div className="flex flex-col gap-3">
       {form}
+      <Outcome controller={controller} />
+    </div>
+  );
+}
+
+/**
+ * The Cashier's late count for one past Not counted day (issue #69): closed until asked for, so a
+ * list of missed days reads as a list. It stays mounted after a success, so the answer stays on
+ * screen when the day leaves the list for Awaiting Manager confirmation.
+ */
+export function LateCountControl({
+  businessDate,
+  dateLabel,
+  mayOpen,
+  replaces,
+}: {
+  businessDate: string;
+  /** The day as the list writes it, for the button's accessible name. */
+  dateLabel: string;
+  /** The day is Not counted and no count waits in the fund. */
+  mayOpen: boolean;
+  replaces: { id: string; reason: string } | null;
+}) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  const [key, controller] = useFreshKey(() => setOpen(false), COUNT_UNCONFIRMED_KEY);
+
+  // An open form closes when another day's count starts waiting: the fund holds one waiting count,
+  // so a second submission could only be refused.
+  if (!mayOpen && !controller.result.successKey && !controller.result.error) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      {open && mayOpen ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+          <Help>{t("imprest.count.late.help")}</Help>
+          <EnterCountForm
+            businessDate={businessDate}
+            replaces={replaces}
+            controller={controller}
+            idempotencyKey={key}
+            late
+          />
+        </div>
+      ) : controller.result.successKey || !mayOpen ? null : (
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          className={`${TOUCH_FLOOR} self-start`}
+          data-testid={`open-late-count-${businessDate}`}
+          aria-label={t("imprest.count.late.openFor", { date: dateLabel })}
+          onClick={() => setOpen(true)}
+        >
+          {t("imprest.count.late.open")}
+        </Button>
+      )}
       <Outcome controller={controller} />
     </div>
   );
