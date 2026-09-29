@@ -98,6 +98,7 @@ select is(
     where n.nspname = 'api' and p.proname like '%imprest%'
       and p.proname not like '%disbursement%' and p.proname not like '%receipt%'
       and p.proname not like '%settlement%' and p.proname not like '%count%'
+      and p.proname not like '%raise%'
       and p.proname <> 'staff_imprest_spending_position'
       and p.prosecdef and o.rolname = 'fv_definer_owner'),
   7,
