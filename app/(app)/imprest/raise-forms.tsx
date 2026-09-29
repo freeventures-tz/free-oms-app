@@ -119,6 +119,11 @@ export function AskForMore({
     onDone("imprest.spending.success.raiseRequested");
   }, SPENDING_UNCONFIRMED_KEY);
 
+  // An unconfirmed request may already have committed. Until Try again finds out it keeps its key,
+  // and the form stays open with what was typed: closing it would drop the draft and leave the key,
+  // so a different request sent under that key would be refused as a conflict.
+  const unconfirmed = Boolean(controller.retry) && controller.result.error === SPENDING_UNCONFIRMED_KEY;
+
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-3" data-testid="ask-for-more">
       <div>
@@ -127,16 +132,12 @@ export function AskForMore({
           variant="secondary"
           size="small"
           className={TOUCH_FLOOR}
-          disabled={controller.pending}
+          disabled={controller.pending || unconfirmed}
           aria-expanded={open}
           data-testid="ask-for-more-toggle"
           onClick={() => {
-            // An unconfirmed request may already have committed. Keep it, and its key, until Try
-            // again finds out; a fresh key would turn a committed change into a stale refusal.
-            if (!(controller.retry && controller.result.error === SPENDING_UNCONFIRMED_KEY)) {
-              controller.clear();
-              renewKey();
-            }
+            controller.clear();
+            renewKey();
             setOpen(!open);
           }}
         >

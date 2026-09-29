@@ -160,6 +160,34 @@ describe("the Cashier's step while cash is out", () => {
   });
 });
 
+describe("a request whose answer was lost", () => {
+  it("keeps the form open with its draft, and Try again resends the same key", async () => {
+    const user = userEvent.setup();
+    requestRaise.mockRejectedValueOnce(new Error("connection dropped"));
+    requestRaise.mockResolvedValueOnce({ successKey: "imprest.spending.success.raiseRequested" });
+    render(view({ status: "handed_out" }));
+
+    await user.click(screen.getByRole("button", { name: "Ask for more" }));
+    await user.type(screen.getByLabelText(en.imprest.spending.raise.amount), "20000");
+    await user.type(screen.getByLabelText(en.imprest.spending.raise.reason), "The road toll rose");
+    await user.click(screen.getByRole("button", { name: en.imprest.spending.raise.submit }));
+
+    expect(await screen.findByText(/may or may not have been saved/)).toBeInTheDocument();
+    // The request may have committed, so the form cannot be closed and lose its draft under that key.
+    expect(screen.getByTestId("ask-for-more-toggle")).toBeDisabled();
+    expect(screen.getByLabelText(en.imprest.spending.raise.amount)).toHaveValue("20000");
+    expect(screen.getByLabelText(en.imprest.spending.raise.reason)).toHaveValue("The road toll rose");
+
+    await user.click(screen.getByRole("button", { name: en.common.retry }));
+    await waitFor(() => expect(requestRaise).toHaveBeenCalledTimes(2));
+    const first = requestRaise.mock.calls[0][1] as FormData;
+    const second = requestRaise.mock.calls[1][1] as FormData;
+    expect(second.get("idempotencyKey")).toBe(first.get("idempotencyKey"));
+    expect(second.get("amount")).toBe("20000");
+    expect(await screen.findByText(en.imprest.spending.success.raiseRequested)).toBeInTheDocument();
+  });
+});
+
 describe("the Cashier's step while sent back", () => {
   it("can ask for more beside the next cycle", () => {
     render(view({ status: "sent_back" }));
