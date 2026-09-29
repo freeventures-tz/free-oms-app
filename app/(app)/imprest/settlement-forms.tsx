@@ -13,6 +13,7 @@ import { ActionForm, Outcome, TOUCH_FLOOR, useFreshKey } from "@/app/(app)/impre
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FormError, FormSuccess, Help, Input, Label } from "@/components/ui/field";
 import { Card } from "@/components/ui/surface";
+import { AskForMore, RaisePending } from "@/app/(app)/imprest/raise-forms";
 import { publicEnv } from "@/lib/env";
 import type { ReceiptTicket } from "@/lib/imprest/commands";
 import type { EarlierReceipt, SettlementCycle } from "@/lib/imprest/disbursements";
@@ -108,9 +109,11 @@ export function CashierStep({
   sentBack = null,
   previous = null,
   earlier = [],
+  raise = { openRequest: null, awaitingHandOut: null },
 }: {
   status: string;
   disbursement: Target;
+  /** The approved amount, raised approvals included. */
   amount: number;
   /** While sent back: why, from whom and when. */
   sentBack?: SentBackNotice | null;
@@ -118,9 +121,28 @@ export function CashierStep({
   previous?: SettlementCycle | null;
   /** While sent back: receipts earlier cycles cited, which may be cited again. */
   earlier?: EarlierReceipt[];
+  /** A request the Manager has not decided, or a raise whose extra is still to be handed out. */
+  raise?: {
+    openRequest: { id: string; amount: number } | null;
+    awaitingHandOut: { id: string; amount: number } | null;
+  };
 }) {
   const t = useTranslations();
   const [done, setDone] = useState<string | null>(null);
+  // Settling waits for a request to be decided and for a raise to be handed out (issue #70), so the
+  // form gives way to the step that is next. Otherwise the Cashier may ask for more beside it.
+  const raiseOpen = raise.openRequest !== null || raise.awaitingHandOut !== null;
+  const raiseStep = raiseOpen ? (
+    <RaisePending
+      openRequest={raise.openRequest}
+      awaitingHandOut={raise.awaitingHandOut}
+      approved={amount}
+      disbursement={disbursement}
+      onDone={setDone}
+    />
+  ) : (
+    <AskForMore disbursement={disbursement} approved={amount} onDone={setDone} />
+  );
 
   const form =
     status === "approved" ? (
@@ -130,8 +152,11 @@ export function CashierStep({
       </>
     ) : status === "handed_out" ? (
       <>
-        <h2 className="text-lg font-semibold">{t("imprest.spending.settle.title")}</h2>
-        <SettleForm disbursement={disbursement} approved={amount} onDone={setDone} />
+        <h2 className="text-lg font-semibold">
+          {t(raiseOpen ? "imprest.spending.raise.title" : "imprest.spending.settle.title")}
+        </h2>
+        {raiseOpen ? null : <SettleForm disbursement={disbursement} approved={amount} onDone={setDone} />}
+        {raiseStep}
       </>
     ) : status === "sent_back" && sentBack ? (
       <>
@@ -150,13 +175,16 @@ export function CashierStep({
           <p className="text-xs text-muted-foreground">{sentBack.by} · {sentBack.at}</p>
         </section>
         <Help>{t("imprest.spending.settleAgain.help")}</Help>
-        <SettleForm
-          disbursement={disbursement}
-          approved={amount}
-          onDone={setDone}
-          previous={previous}
-          earlier={earlier}
-        />
+        {raiseOpen ? null : (
+          <SettleForm
+            disbursement={disbursement}
+            approved={amount}
+            onDone={setDone}
+            previous={previous}
+            earlier={earlier}
+          />
+        )}
+        {raiseStep}
       </>
     ) : null;
 

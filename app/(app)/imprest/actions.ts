@@ -14,7 +14,9 @@ import {
   decideDisbursement,
   decideFunding,
   enterCount,
+  decideRaise,
   handOutDisbursement,
+  handOutRaise,
   increaseApproval,
   openReceipt,
   proposeDisbursement,
@@ -22,6 +24,7 @@ import {
   registerReceipt,
   reportMismatch,
   requestFunding,
+  requestRaise,
   sendBackCount,
   sendBackSettlement,
   settleDisbursement,
@@ -44,14 +47,18 @@ import {
   disbursementReasonSchema,
   enterCountSchema,
   enterLateCountSchema,
+  handOutRaiseSchema,
   handOutSchema,
   increaseApprovalSchema,
   proposeDisbursementSchema,
   provideFundingSchema,
+  raiseApprovalSchema,
+  refuseRaiseSchema,
   registerReceiptSchema,
   rejectFundingSchema,
   reportMismatchSchema,
   requestFundingSchema,
+  requestRaiseSchema,
   sendBackCountSchema,
   sendBackSchema,
   settleSchema,
@@ -142,6 +149,10 @@ const SPENDING_ERRORS = new Set([
   // Verification (issue #64).
   "not_settled",
   "settlement_not_latest",
+  // Raised approvals (issue #70).
+  "raise_open",
+  "no_raise_request",
+  "raise_not_handed_out",
 ]);
 
 /** The daily count's refusals (issue #68) speak of the tin and the day, not of payments. */
@@ -428,6 +439,52 @@ export async function handOutDisbursementAction(_p: ImprestActionState, data: Fo
     { ...disbursementTarget(data), recipient: data.get("recipient") ?? "" },
     handOutDisbursement,
     "imprest.spending.success.handedOut",
+    SPENDING_MESSAGES,
+  );
+}
+
+// Raised approvals (issue #70): the Cashier asks and hands out the extra, the Manager raises or refuses.
+
+export async function requestRaiseAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    requestRaiseSchema,
+    { ...disbursementTarget(data), amount: data.get("amount") ?? "", reason: data.get("reason") ?? "" },
+    requestRaise,
+    "imprest.spending.success.raiseRequested",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function raiseApprovalAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    raiseApprovalSchema,
+    { ...disbursementTarget(data), raiseId: data.get("raiseId") },
+    (input) => decideRaise({ ...input, raise: true, reason: null }),
+    "imprest.spending.success.raised",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function refuseRaiseAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    refuseRaiseSchema,
+    { ...disbursementTarget(data), raiseId: data.get("raiseId"), reason: data.get("reason") ?? "" },
+    (input) => decideRaise({ ...input, raise: false }),
+    "imprest.spending.success.raiseRefused",
+    SPENDING_MESSAGES,
+  );
+}
+
+export async function handOutRaiseAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["cashier"],
+    handOutRaiseSchema,
+    { ...disbursementTarget(data), raiseId: data.get("raiseId"), recipient: data.get("recipient") ?? "" },
+    handOutRaise,
+    "imprest.spending.success.raiseHandedOut",
     SPENDING_MESSAGES,
   );
 }

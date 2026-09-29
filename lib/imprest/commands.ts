@@ -220,6 +220,44 @@ export const handOutDisbursement = (input: DisbursementTarget & { recipient: str
     p_idempotency_key: input.idempotencyKey,
   });
 
+// Raised approvals (issue #70). The Cashier asks and hands out the extra; the Manager raises or refuses.
+
+/** The increase is a whole number of shillings and the reason says why the need grew. */
+export const requestRaise = (input: DisbursementTarget & { amount: number; reason: string }) =>
+  call("staff_request_imprest_raise", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_amount_tzs: input.amount,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+/**
+ * There is no amount: the Manager raises by the increase that was asked for, or refuses it with a
+ * reason. The request they were shown is the one named.
+ */
+export const decideRaise = (
+  input: DisbursementTarget & { raiseId: string; raise: boolean; reason: string | null },
+) =>
+  call("staff_decide_imprest_raise", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_raise_id: input.raiseId,
+    p_raise: input.raise,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+/** There is no amount: the raised increase is what goes out. */
+export const handOutRaise = (input: DisbursementTarget & { raiseId: string; recipient: string }) =>
+  call("staff_hand_out_imprest_raise", {
+    p_id: input.disbursementId,
+    p_expected_version: input.expectedVersion,
+    p_raise_id: input.raiseId,
+    p_recipient: input.recipient,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
 /** A receipt as the database filed it. `key` is its AES-256 key, base64. */
 export type ReceiptTicket = {
   id: string;

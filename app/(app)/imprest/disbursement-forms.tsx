@@ -7,6 +7,8 @@ import {
   approveDisbursementAction,
   cancelDisbursementAction,
   proposeDisbursementAction,
+  raiseApprovalAction,
+  refuseRaiseAction,
   rejectDisbursementAction,
   sendBackSettlementAction,
   verifyDisbursementAction,
@@ -207,11 +209,17 @@ export function DisbursementActions({
   role,
   isOwn,
   settlement = null,
+  raiseRequest = null,
+  freeToApprove = null,
 }: {
   disbursement: Target;
   role: AppRole;
   isOwn: boolean;
   settlement?: SettlementToVerify | null;
+  /** The request for a raised approval waiting for this Manager (issue #70). */
+  raiseRequest?: { id: string; amount: number } | null;
+  /** Free to approve, shown beside a raise so the Manager sees what it would take. */
+  freeToApprove?: number | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -309,6 +317,58 @@ export function DisbursementActions({
       </form>
     );
     toggles = toggle("reject", "imprest.spending.actions.reject", "danger");
+  } else if (
+    role === "manager" &&
+    (disbursement.status === "handed_out" || disbursement.status === "sent_back") &&
+    raiseRequest
+  ) {
+    // Raise or refuse the request as it was asked (issue #70). There is no field for another figure.
+    direct = (
+      <form
+        className="flex flex-col gap-1"
+        data-testid="raise-approval-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData();
+          for (const [k, v] of Object.entries(hidden)) data.set(k, v);
+          data.set("raiseId", raiseRequest.id);
+          data.set("idempotencyKey", key);
+          setOpen(null);
+          controller.run("raise", raiseApprovalAction, data);
+        }}
+      >
+        <Button
+          type="submit"
+          className={`${TOUCH_FLOOR} self-start`}
+          data-testid="raise-approval"
+          pending={controller.running === "raise"}
+          pendingLabel={t("common.loading")}
+          disabled={controller.pending}
+        >
+          {t("imprest.spending.raise.raiseApproval", { amount: formatTzs(raiseRequest.amount, locale) })}
+        </Button>
+        <Help>
+          {t("imprest.spending.raise.raiseHelp", {
+            amount: formatTzs(raiseRequest.amount, locale),
+            free: freeToApprove === null ? "-" : formatTzs(freeToApprove, locale),
+          })}
+        </Help>
+      </form>
+    );
+    forms.refuseRaise = (
+      <ActionForm
+        {...shared}
+        hidden={{ ...hidden, raiseId: raiseRequest.id }}
+        id="refuse-raise"
+        name="refuseRaise"
+        action={refuseRaiseAction}
+        fields={[{ name: "reason", labelKey: "imprest.spending.raise.refuseReason", kind: "text" }]}
+        submitKey="imprest.spending.raise.refuseConfirm"
+        variant="danger"
+        testId="refuse-raise-form"
+      />
+    );
+    toggles = toggle("refuseRaise", "imprest.spending.raise.refuse", "danger");
   } else if (role === "manager" && disbursement.status === "approved") {
     toggles = toggle("cancel", "imprest.spending.actions.cancel", "danger");
   } else if (role === "manager" && disbursement.status === "settled" && settlement) {

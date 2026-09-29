@@ -2,6 +2,33 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.9.0] — 2026-09-29
+
+A Cashier who needs more than was approved now asks first, and the Manager raises the approval
+before any extra cash goes out. The staff workflows stay closed.
+
+### NEW
+
+- While cash is out for a payment, or its settlement was sent back, the Cashier can ask for more
+  with a reason. The Manager raises the approval, which sets the extra aside straight away, or
+  refuses the request with a reason.
+- A raise the fund can't cover is refused, and the message says how much is free.
+- The Cashier records handing out the extra and who received it. The payment can be settled only
+  after that.
+- Every payment shows its first approval and each request for more: who asked, who decided, when
+  and why. A refused request stays on the page.
+- The Manager's imprest screen lists the payments waiting for a raised approval, oldest first, with
+  what was asked. Directors can read the list.
+
+### IMPROVED
+
+- A payment's approved amount now includes every raise. Settlement, and every later round after a
+  send-back, is checked against it, and only the cash that came back returns to what can be
+  approved.
+- Awaiting verification counts an extra only once the Cashier has recorded handing it out.
+- On slow 4G, all 20 tries at asking for more, and all 20 at raising an approval, were confirmed
+  within 742 ms.
+
 ## [0.8.1] — 2026-09-29
 
 A fix to how the daily count's speed on phones is measured. Nothing changes in the app itself.

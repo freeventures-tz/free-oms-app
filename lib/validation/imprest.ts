@@ -184,6 +184,43 @@ export const handOutSchema = z.object({
   idempotencyKey: spendingKey,
 });
 
+// Raised approvals (issue #70).
+
+/** A whole number of shillings above zero, and why the need grew. */
+export const requestRaiseSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  amount: tzsField(false, "spendingErrors"),
+  reason: textField(true, "spendingErrors.reason_required"),
+  idempotencyKey: spendingKey,
+});
+
+const raiseId = z.string().uuid({ message: "spendingErrors.no_raise_request" });
+
+/** Raise: there is no amount. The increase is the one that was asked for. */
+export const raiseApprovalSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  raiseId,
+  idempotencyKey: spendingKey,
+});
+
+export const refuseRaiseSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  raiseId,
+  reason: textField(true, "spendingErrors.reason_required"),
+  idempotencyKey: spendingKey,
+});
+
+export const handOutRaiseSchema = z.object({
+  disbursementId,
+  expectedVersion: spendingVersion,
+  raiseId,
+  recipient: recipientField,
+  idempotencyKey: spendingKey,
+});
+
 export const registerReceiptSchema = z.object({
   disbursementId,
   fileName: z

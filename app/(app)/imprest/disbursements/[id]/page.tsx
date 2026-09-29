@@ -10,6 +10,7 @@ import { requireAccess } from "@/lib/auth/guard";
 import {
   earlierReceipts,
   loadDisbursement,
+  loadSpendingPosition,
   type DisbursementDetail,
   type SettlementCycle,
 } from "@/lib/imprest/disbursements";
@@ -50,6 +51,9 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
   }
 
   const target = { id: disbursement.id, version: disbursement.version };
+  // What a raise would take out of Free to approve, shown to the Manager who decides it.
+  const position =
+    viewer.role === "manager" && disbursement.openRequest ? await loadSpendingPosition() : null;
   const sentBack = disbursement.sentBack
     ? {
         reason: disbursement.sentBack.reason,
@@ -76,6 +80,12 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
             <dt className="text-xs text-muted-foreground">{t("detail.amount")}</dt>
             <dd className="fv-numeric font-semibold">{formatTzs(disbursement.amount, locale)}</dd>
           </div>
+          {disbursement.raises.some((r) => r.status === "raised" || r.status === "handed_out") ? (
+            <div className="flex flex-col gap-1" data-testid="original-amount">
+              <dt className="text-xs text-muted-foreground">{t("detail.originalAmount")}</dt>
+              <dd className="fv-numeric font-semibold">{formatTzs(disbursement.originalAmount, locale)}</dd>
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1">
             <dt className="text-xs text-muted-foreground">{t("detail.category")}</dt>
             <dd className="font-semibold">{t(`category.${disbursement.category}`)}</dd>
@@ -104,6 +114,16 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         ) : null}
       </Card>
 
+      {disbursement.raises.length > 0 ? <ApprovalHistory disbursement={disbursement} /> : null}
+
+      {disbursement.openRequest ? (
+        <RequestForMore
+          request={disbursement.openRequest}
+          approved={disbursement.amount}
+          name={disbursement.proposedBy}
+        />
+      ) : null}
+
       {disbursement.cycles.map((cycle) => (
         <Breakdown key={cycle.id} disbursement={disbursement} cycle={cycle} />
       ))}
@@ -119,6 +139,12 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
           }}
           role={viewer.role}
           isOwn={isOwn}
+          raiseRequest={
+            disbursement.openRequest
+              ? { id: disbursement.openRequest.id, amount: disbursement.openRequest.amount }
+              : null
+          }
+          freeToApprove={position?.freeToApprove ?? null}
           settlement={
             disbursement.status === "settled" && disbursement.settlement
               ? {
@@ -136,6 +162,11 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         {disbursement.status === "handed_out" && viewer.role !== "cashier" ? (
           <p className="text-sm text-muted-foreground" data-testid="handed-out-note">
             {t("detail.handedOutNote")}
+          </p>
+        ) : null}
+        {disbursement.awaitingHandOut && viewer.role !== "cashier" ? (
+          <p className="text-sm text-muted-foreground" data-testid="raise-hand-out-note">
+            {t("raise.waitingHandOut")}
           </p>
         ) : null}
         {disbursement.status === "settled" && viewer.role === "director" ? (
@@ -171,6 +202,14 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
           status={disbursement.status}
           disbursement={target}
           amount={disbursement.amount}
+          raise={{
+            openRequest: disbursement.openRequest
+              ? { id: disbursement.openRequest.id, amount: disbursement.openRequest.amount }
+              : null,
+            awaitingHandOut: disbursement.awaitingHandOut
+              ? { id: disbursement.awaitingHandOut.id, amount: disbursement.awaitingHandOut.amount }
+              : null,
+          }}
           sentBack={sentBack}
           previous={disbursement.status === "sent_back" ? (disbursement.cycles.at(-1) ?? null) : null}
           earlier={disbursement.status === "sent_back" ? earlierReceipts(disbursement.cycles) : []}
@@ -200,6 +239,111 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
         </ol>
       </section>
     </>
+  );
+}
+
+/**
+ * The Cashier's request for more and the decision it waits for (issue #70), in words for everyone who
+ * can read the disbursement. The Manager's controls are in the actions card below.
+ */
+async function RequestForMore({
+  request,
+  approved,
+  name,
+}: {
+  request: DisbursementDetail["raises"][number];
+  approved: number;
+  name: string;
+}) {
+  const t = await getTranslations("imprest.spending");
+  const roles = await getTranslations("admin.roles");
+  const locale = await getLocale();
+  return (
+    <Card className="flex flex-col gap-2" data-testid="raise-request">
+      <h2 className="text-lg font-semibold">{t("raise.requestTitle")}</h2>
+      <p className="fv-numeric text-sm">
+        {t("raise.requestLine", {
+          name: name || roles("cashier"),
+          amount: formatTzs(request.amount, locale),
+          approved: formatTzs(approved, locale),
+          total: formatTzs(approved + request.amount, locale),
+        })}
+      </p>
+      <p className="text-sm" data-testid="raise-request-reason">
+        <span className="font-medium">{t("raise.requestReason")}</span> {request.reason}
+      </p>
+    </Card>
+  );
+}
+
+/**
+ * The original approval and every raise, each with who, when and why, and the approved amount as
+ * their sum (issue #70). Nothing here is typed: the total is the database's calculation.
+ */
+async function ApprovalHistory({ disbursement }: { disbursement: DisbursementDetail }) {
+  const t = await getTranslations("imprest.spending");
+  const roles = await getTranslations("admin.roles");
+  const locale = await getLocale();
+  const stamp = (at: string) => formatBusinessStamp(at, locale);
+  return (
+    <Card className="flex flex-col gap-3" data-testid="approval-history">
+      <h2 className="text-lg font-semibold">{t("approval.title")}</h2>
+      <ol className="flex flex-col gap-3">
+        <li className="flex items-start justify-between gap-3" data-testid="approval-first">
+          <span className="font-medium">{t("approval.first")}</span>
+          <span className="fv-numeric font-semibold">{formatTzs(disbursement.originalAmount, locale)}</span>
+        </li>
+        {disbursement.raises.map((raise) => (
+          <li
+            key={raise.id}
+            className="flex flex-col gap-1 border-t border-border pt-3"
+            data-testid={"raise-" + raise.raiseNo}
+            data-status={raise.status}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="font-medium">{t("approval.raiseLine", { number: raise.raiseNo })}</span>
+              <span
+                className={
+                  "fv-numeric font-semibold " +
+                  (raise.status === "refused" ? "text-muted-foreground line-through" : "")
+                }
+              >
+                {formatTzs(raise.amount, locale)}
+              </span>
+            </div>
+            <span className="text-xs text-muted-foreground" data-testid="raise-status">
+              {t("approval.status." + raise.status)}
+            </span>
+            <span className="text-sm">{raise.reason}</span>
+            <span className="text-xs text-muted-foreground">
+              {t("approval.requestedBy", {
+                name: disbursement.proposedBy || roles("cashier"),
+                at: stamp(raise.requestedAt),
+              })}
+            </span>
+            {raise.decidedAt ? (
+              <span className="text-xs text-muted-foreground">
+                {t("approval.decidedBy", { name: raise.decidedBy || roles("manager"), at: stamp(raise.decidedAt) })}
+              </span>
+            ) : null}
+            {raise.status === "refused" && raise.refusalReason ? (
+              <span className="text-sm" data-testid="raise-refusal">
+                {t("approval.refusedBecause", { reason: raise.refusalReason })}
+              </span>
+            ) : null}
+            {raise.status === "handed_out" && raise.handedOutAt ? (
+              <span className="text-xs text-muted-foreground">
+                {t("approval.handedOut", { recipient: raise.recipient ?? "", at: stamp(raise.handedOutAt) })}
+              </span>
+            ) : null}
+          </li>
+        ))}
+        <li className="flex items-start justify-between gap-3 border-t border-border pt-3" data-testid="approval-total">
+          <span className="font-semibold">{t("approval.total")}</span>
+          <span className="fv-numeric font-semibold">{formatTzs(disbursement.amount, locale)}</span>
+        </li>
+      </ol>
+    </Card>
   );
 }
 
@@ -250,7 +394,8 @@ async function Breakdown({ disbursement, cycle }: { disbursement: DisbursementDe
   const latest = disbursement.settlement?.id === cycle.id;
   const several = disbursement.cycles.length > 1;
   const figures = [
-    { key: "approved", value: disbursement.amount },
+    // What this cycle explained: a later raise leaves an earlier cycle at the amount it was held to.
+    { key: "approved", value: settlement.approved },
     { key: "used", value: settlement.used },
     { key: "returned", value: settlement.returned },
     ...(settlement.unaccounted > 0 ? [{ key: "notAccounted", value: settlement.unaccounted }] : []),
