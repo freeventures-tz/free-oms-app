@@ -2,6 +2,35 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.11.0] — 2026-09-29
+
+The imprest fund can now be retired. Its balance carries into the next fund, and nothing that
+was still unresolved is hidden. The staff workflows stay closed.
+
+### NEW
+
+- The Manager can submit the fund's retirement, with a reason, once every payment, funding,
+  raised approval and reversal in it is finished and today's count is confirmed after the last
+  posting. Until then the imprest screen lists what is still open, each with a link.
+- A Director approves or rejects it, with a reason when rejecting. Approving asks once more, because
+  it can't be undone.
+- No cash is handed back. The cash stays in the tin, and the closing balance opens the next fund.
+  The next funding adds to it.
+- The retired fund keeps every figure, posting, count, shortage, unexplained loss and decision still
+  waiting for a Director, and nothing can be added to it. Its deficit is shown as a deficit, and any
+  count excess is shown beside it without being taken off.
+- Days nobody counted stay Not counted on the retired fund's record, and are listed on the
+  submission.
+- The Manager and Directors see the balance carried into the new fund, and a list of retired funds
+  with their dates, closing balance and anything unresolved. Each one opens a read-only record.
+
+### IMPROVED
+
+- The day counted just before a retirement isn't asked for again: counting starts on the next day.
+- A payment proposed or a count entered while a retirement is being approved waits for it, then
+  goes into the new fund.
+- @@BENCHMARK@@
+
 ## [0.10.0] — 2026-09-29
 
 A verified expense or loss that turns out to be wrong can now be corrected, with a Director's

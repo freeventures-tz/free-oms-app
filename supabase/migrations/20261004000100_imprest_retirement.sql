@@ -27,8 +27,9 @@
 -- approval if that is later. The next fund's start the day after, or on the day it opened if that is
 -- later. So the day the closing count covered is not due twice, and no day falls between the two.
 --
--- THREE RELEASED OBJECTS ARE REPLACED, signatures unchanged: the spending figures (the opening
--- balance is part of the posted balance), the fund's first count day and the count days.
+-- FIVE RELEASED OBJECTS ARE REPLACED, signatures unchanged: the spending figures (the opening
+-- balance is part of the posted balance), the fund's first count day, the count days, and the
+-- wrappers of the proposal and the count, which now wait for a retirement being approved.
 
 begin;
 
@@ -794,11 +795,13 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'no_retirement');
   end if;
 
-  -- The locks in the order every other writer takes them: the fund's spending lock, the lock a first
-  -- funding request opens a fund under, then the rows. A write into the fund that holds the fund row
-  -- has committed before this reads the blockers, or waits and is refused once the fund is retired.
-  perform pg_advisory_xact_lock(hashtextextended('imprest_fund_spend:' || v_r.fund_id::text, 0));
+  -- The locks in the order every other writer takes them: the active fund's lock, which a proposal,
+  -- a count and a first funding request take before they choose the fund, then the fund's spending
+  -- lock, then the rows. A command that chose this fund has committed before the blockers are read;
+  -- one that has not yet chosen waits, and then chooses the next fund. Anything else writing into the
+  -- fund holds the fund row, and is refused once the fund is retired.
   perform pg_advisory_xact_lock(hashtextextended('imprest:active_fund', 0));
+  perform pg_advisory_xact_lock(hashtextextended('imprest_fund_spend:' || v_r.fund_id::text, 0));
   perform 1 from public.imprest_funds where id = v_r.fund_id for update;
 
   select * into v_r from public.imprest_retirements where id = p_retirement_id for update;
@@ -904,6 +907,50 @@ end $$;
 comment on function api.admin_decide_imprest_retirement(uuid, integer, boolean, text, text) is
   'A Director approves a submitted retirement, which retires the fund and carries its closing '
   'balance into the next fund as its opening balance, or rejects it with a reason (issue #72).';
+
+-- ---------------------------------------------------------------------------
+-- Replaced · the two commands that choose the active fund wait for a retirement being approved
+--
+-- A proposal and a count read which fund is active, then write into it. Taken during an approval,
+-- that read could find the fund being retired, and the write be refused by the fund's guard as an
+-- error. Each now shares the active fund's lock, which the approval holds exclusively, so it chooses
+-- the next fund once the approval commits. Their bodies are unchanged; only the wrappers are
+-- replaced, signatures included.
+-- ---------------------------------------------------------------------------
+create or replace function api.staff_propose_imprest_disbursement(
+  p_amount_tzs bigint, p_category text, p_purpose text, p_idempotency_key text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v jsonb;
+begin
+  perform pg_advisory_xact_lock_shared(hashtextextended('imprest:active_fund', 0));
+  v := private.impl_staff_propose_imprest_disbursement(p_amount_tzs, p_category, p_purpose,
+                                                        p_idempotency_key);
+  if coalesce((v ->> 'ok')::boolean, false) then return v; end if;
+  return private.refuse('api.staff_propose_imprest_disbursement', 'imprest_disbursement', null, v);
+end $$;
+
+comment on function api.staff_propose_imprest_disbursement(bigint, text, text, text) is
+  'The Cashier proposes a payment out of the imprest fund (§13.3 point 1). Sets nothing aside. Waits '
+  'for a retirement being approved, and then joins the next fund (issue #72).';
+
+create or replace function api.staff_enter_imprest_count(
+  p_business_date date, p_previous_count_id uuid, p_counted_tzs bigint, p_note text,
+  p_late_reason text, p_idempotency_key text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v jsonb;
+begin
+  perform pg_advisory_xact_lock_shared(hashtextextended('imprest:active_fund', 0));
+  v := private.impl_staff_enter_imprest_count(p_business_date, p_previous_count_id, p_counted_tzs,
+                                               p_note, p_late_reason, p_idempotency_key);
+  if coalesce((v ->> 'ok')::boolean, false) then return v; end if;
+  return private.refuse('api.staff_enter_imprest_count', 'imprest_count', p_previous_count_id, v);
+end $$;
+
+comment on function api.staff_enter_imprest_count(date, uuid, bigint, text, text, text) is
+  'The Cashier enters a count of the cash in the tin, in whole shillings of 0 or more, with an '
+  'optional note: today''s, or a past Not counted day''s with a late reason of 3 to 500 characters '
+  '(issues #68 and #69). Expected cash is calculated as it stands and kept with it. Waits for a '
+  'retirement being approved, and then counts the next fund (issue #72).';
 
 -- ---------------------------------------------------------------------------
 -- Reads
@@ -1148,6 +1195,7 @@ begin
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where (n.nspname = 'api'
             and p.proname in ('staff_submit_imprest_retirement', 'admin_decide_imprest_retirement',
+                              'staff_propose_imprest_disbursement', 'staff_enter_imprest_count',
                               'staff_imprest_fund_state', 'staff_imprest_retired_funds',
                               'staff_imprest_fund_record'))
         or (n.nspname = 'private'

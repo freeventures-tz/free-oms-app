@@ -13,15 +13,17 @@ import { BaseSequencer, type TestSpecification } from "vitest/node";
 const RUN_FIRST = ["tests/integration/imprest-funding.test.ts"];
 
 /**
- * Integration files that run after every other file. `imprest-not-counted.test.ts` counts past days
- * late, and `imprest-daily-count.test.ts` begins by proving the fund holds no count at all, so the
- * late counts must come after it.
+ * Integration files that run after every other file, in this order. `imprest-not-counted.test.ts`
+ * counts past days late, and `imprest-daily-count.test.ts` begins by proving the fund holds no count
+ * at all, so the late counts must come after it. `imprest-retirement.test.ts` closes the shared fund
+ * and opens funds of its own (issue #72), so nothing may follow it.
  */
-const RUN_LAST = ["tests/integration/imprest-not-counted.test.ts"];
+const RUN_LAST = ["tests/integration/imprest-not-counted.test.ts", "tests/integration/imprest-retirement.test.ts"];
 
 function rank(spec: TestSpecification): number {
   const path = spec.moduleId.replaceAll("\\", "/");
-  if (RUN_LAST.some((file) => path.endsWith(file))) return RUN_FIRST.length + 1;
+  const last = RUN_LAST.findIndex((file) => path.endsWith(file));
+  if (last !== -1) return RUN_FIRST.length + 1 + last;
   const index = RUN_FIRST.findIndex((file) => path.endsWith(file));
   return index === -1 ? RUN_FIRST.length : index;
 }
