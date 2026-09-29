@@ -74,6 +74,7 @@ describe("the send-back input", () => {
 const cycle = (n: number, receipts: (string | null)[]): SettlementCycle => ({
   id: `s${n}`,
   cycle: n,
+  approved: 0,
   used: 0,
   returned: 0,
   unaccounted: 0,

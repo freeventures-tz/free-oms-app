@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 /**
+ * Issue #70 adds THE v0.8.0 PHASE. It resets to the 50th and last released migration (Not counted),
+ * builds the v0.7.0 phase's ground plus a missed day counted late and confirmed, and applies the
+ * raised approval migration. Its preservation query adds every count's late reason to the business
+ * rows and brings the Not counted objects into the released surface. The four released functions
+ * the migration replaces are pinned exactly on both sides instead, and a payment handed out before
+ * the upgrade and one sent back before it are each asked for more, raised, handed out, settled
+ * against the raised amount and verified, committed.
+ *
  * Issue #69 adds THE v0.7.0 PHASE. It resets to the 49th and last released migration (the daily
  * count), builds the v0.6.0 phase's ground plus a day counted, sent back, counted again and
  * confirmed short, moved two days into the past as production would hold it, and applies the Not
@@ -176,8 +184,13 @@ const SEND_BACK_VERSION = "20260929000200";
  * migration.
  */
 const DAILY_COUNT_VERSION = "20260930000100";
-/** Issue #69: the Not counted migration, the last of this release. */
+/**
+ * Issue #69: the Not counted migration. Since v0.8.0 it is also the 50th and last RELEASED
+ * migration.
+ */
 const NOT_COUNTED_VERSION = "20261001000100";
+/** Issue #70: the raised approval migration, the last of this release. */
+const RAISED_APPROVAL_VERSION = "20261002000100";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -212,6 +225,9 @@ const ASSERT_DAILY_COUNT = join(SQL_DIR, "42_assert_daily_count_upgrade.sql");
 const MARK_V070 = join(SQL_DIR, "44_mark_v070_boundary.sql");
 const BUILD_V070_COUNTS = join(SQL_DIR, "45_build_v070_counts.sql");
 const ASSERT_NOT_COUNTED = join(SQL_DIR, "46_assert_not_counted_upgrade.sql");
+const MARK_V080 = join(SQL_DIR, "48_mark_v080_boundary.sql");
+const BUILD_V080_LATE_COUNT = join(SQL_DIR, "49_build_v080_late_count.sql");
+const ASSERT_RAISED_APPROVAL = join(SQL_DIR, "50_assert_raised_approval_upgrade.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -248,6 +264,7 @@ const COUNTEREXAMPLE_SETTLEMENT_LINE = join(SQL_DIR, "35_counterexample_settleme
 const COUNTEREXAMPLE_VERIFICATION = join(SQL_DIR, "39_counterexample_verification.sql");
 const COUNTEREXAMPLE_SEND_BACK = join(SQL_DIR, "43_counterexample_send_back.sql");
 const COUNTEREXAMPLE_COUNT = join(SQL_DIR, "47_counterexample_count_confirmation.sql");
+const COUNTEREXAMPLE_LATE_COUNT = join(SQL_DIR, "51_counterexample_late_count.sql");
 /**
  * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
  *
@@ -271,12 +288,13 @@ const V040_PRESERVATION = join("supabase", "release-checks", "v040_preservation.
 const V050_PRESERVATION = join("supabase", "release-checks", "v050_preservation.sql");
 const V060_PRESERVATION = join("supabase", "release-checks", "v060_preservation.sql");
 const V070_PRESERVATION = join("supabase", "release-checks", "v070_preservation.sql");
+const V080_PRESERVATION = join("supabase", "release-checks", "v080_preservation.sql");
 
 /**
- * All 49 released migrations (issue #69). Its first 48 lines are the v0.6.0 manifest unchanged, so
- * this checks everything that one did and the daily count migration v0.7.0 released since.
+ * All 50 released migrations (issue #70). Its first 49 lines are the v0.7.0 manifest unchanged, so
+ * this checks everything that one did and the Not counted migration v0.8.0 released since.
  */
-const MIGRATION_MANIFEST = join("supabase", "release-checks", "v070_migration_manifest.txt");
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v080_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -640,6 +658,54 @@ const PHASES = [
           { name: "a verification reattributed to another person", file: COUNTEREXAMPLE_VERIFICATION },
           { name: "a send-back's reason rewritten in place", file: COUNTEREXAMPLE_SEND_BACK },
           { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the imprest raised approval migration",
+    what: "the v0.8.0 database",
+    version: NOT_COUNTED_VERSION,
+    upTo: RAISED_APPROVAL_VERSION,
+    describes: "v0.8.0, before raised approvals",
+    query: V080_PRESERVATION,
+    fixtures: [
+      {
+        name: "sales, money, dispatch, production, imprest funding, a delivered report, disbursements in every status, a verification, a settlement sent back, a day counted AND a missed day counted late",
+        setup: [
+          MARK_V080,
+          BUILD_V005,
+          BUILD_V010_FUNDING,
+          BUILD_V020_REPORT,
+          BUILD_V030_DISBURSEMENTS,
+          BUILD_V040_SETTLEMENTS,
+          BUILD_V050_VERIFICATIONS,
+          BUILD_V060_SEND_BACK,
+          BUILD_V070_COUNTS,
+          BUILD_V080_LATE_COUNT,
+        ],
+        assertions: [ASSERT_RAISED_APPROVAL],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "what a batch consumed and yielded, rewritten in place",
+            file: COUNTEREXAMPLE_PRODUCTION,
+          },
+          {
+            name: "a disputed imprest handover's amount rewritten in place",
+            file: COUNTEREXAMPLE_FUNDING,
+          },
+          { name: "a delivered report's content rewritten in place", file: COUNTEREXAMPLE_REPORT },
+          { name: "a label added to a released enum", file: COUNTEREXAMPLE_ENUM },
+          { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
+          { name: "a rejected disbursement's reason rewritten in place", file: COUNTEREXAMPLE_DISBURSEMENT },
+          { name: "a settlement line's purpose rewritten in place", file: COUNTEREXAMPLE_SETTLEMENT_LINE },
+          { name: "a verification reattributed to another person", file: COUNTEREXAMPLE_VERIFICATION },
+          { name: "a send-back's reason rewritten in place", file: COUNTEREXAMPLE_SEND_BACK },
+          { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
+          { name: "a late count's reason rewritten in place", file: COUNTEREXAMPLE_LATE_COUNT },
         ],
       },
     ],
