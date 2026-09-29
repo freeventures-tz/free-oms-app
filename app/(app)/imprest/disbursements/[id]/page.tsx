@@ -204,7 +204,8 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
             {t("detail.verifiedNote")}
           </p>
         ) : null}
-        {viewer.role === "director" ? (
+        {/* Directors read a payment's steps; a reversal waiting for them is theirs to decide (issue #71). */}
+        {viewer.role === "director" && disbursement.openReversals === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="read-only">
             {t("detail.readOnly")}
           </p>
