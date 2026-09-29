@@ -31,6 +31,8 @@ export type DisbursementStatus =
 export type SettlementSummary = {
   id: string;
   cycle: number;
+  /** The approved amount this cycle explained, raised approvals included (issue #70). */
+  approved: number;
   used: number;
   returned: number;
   unaccounted: number;
@@ -64,12 +66,48 @@ export type SettlementReturn = {
   returnedBy: string;
 };
 
+export type RaiseStatus = "requested" | "raised" | "refused" | "handed_out";
+
+/**
+ * One request for a raised approval (issue #70) and what became of it. Names are "" when the viewer
+ * may not read the profile (a Cashier reads only their own).
+ */
+export type Raise = {
+  id: string;
+  raiseNo: number;
+  status: RaiseStatus;
+  /** The increase asked for, in whole shillings. */
+  amount: number;
+  reason: string;
+  requestedById: string;
+  requestedAt: string;
+  decidedById: string | null;
+  decidedBy: string;
+  decidedAt: string | null;
+  /** Why the Manager refused it. */
+  refusalReason: string | null;
+  handedOutAt: string | null;
+  recipient: string | null;
+};
+
 export type Disbursement = {
   id: string;
   disbursementNo: string;
   status: DisbursementStatus;
   version: number;
+  /**
+   * The approved amount, calculated by the database: the original approval plus every raise that
+   * was raised or handed out. Never typed (issue #70).
+   */
   amount: number;
+  /** What the Manager first approved. It never changes. */
+  originalAmount: number;
+  /** Every request for a raised approval, oldest first, and what became of it. */
+  raises: Raise[];
+  /** The request the Manager has not decided yet, if there is one. */
+  openRequest: Raise | null;
+  /** A raise that was raised and whose extra the Cashier has not yet handed out. */
+  awaitingHandOut: Raise | null;
   category: ImprestCategory;
   purpose: string;
   proposedBy: string;
@@ -100,7 +138,11 @@ export type DisbursementEvent = {
     | "verified"
     | "rejected"
     | "withdrawn"
-    | "cancelled";
+    | "cancelled"
+    | "raise_requested"
+    | "raise_raised"
+    | "raise_refused"
+    | "raise_handed_out";
   at: string;
   /** The person's name, or "" when the viewer may not read it (a Cashier reads only their own). */
   by: string;
@@ -177,12 +219,15 @@ export async function loadSpendingPosition(): Promise<SpendingPosition | null> {
 }
 
 const COLUMNS = `
-  id, disbursement_no, status, version, amount_tzs, category, purpose, proposed_by, proposed_at,
+  id, disbursement_no, status, version, amount_tzs, approved_tzs:imprest_disbursement_approved_tzs,
+  category, purpose, proposed_by, proposed_at,
   approved_by, approved_at, rejected_by, rejected_at, rejection_reason, withdrawn_at,
   withdrawal_reason, cancelled_by, cancelled_at, cancellation_reason,
   imprest_disbursement_handouts(recipient, handed_out_at),
-  imprest_settlements(id, cycle, used_tzs, returned_tzs, unaccounted_tzs, unaccounted_explanation,
-                      line_count, no_receipt_lines, settled_at),
+  imprest_settlements(id, cycle, approved_tzs, used_tzs, returned_tzs, unaccounted_tzs,
+                      unaccounted_explanation, line_count, no_receipt_lines, settled_at),
+  imprest_approval_raises(id, raise_no, status, amount_tzs, reason, requested_by, requested_at,
+                          decided_by, decided_at, refusal_reason, handed_out_at, recipient),
   imprest_verifications(settlement_id, verified_by, verified_at),
   imprest_postings(kind, amount_tzs),
   imprest_settlement_returns(settlement_id, reason, returned_by, returned_at)
@@ -191,6 +236,7 @@ const COLUMNS = `
 type SettlementRow = {
   id: string;
   cycle: number;
+  approved_tzs: number;
   used_tzs: number;
   returned_tzs: number;
   unaccounted_tzs: number;
@@ -206,6 +252,7 @@ type Row = {
   status: DisbursementStatus;
   version: number;
   amount_tzs: number;
+  approved_tzs: number;
   category: ImprestCategory;
   purpose: string;
   proposed_by: string;
@@ -227,6 +274,22 @@ type Row = {
   imprest_verifications: { settlement_id: string; verified_by: string; verified_at: string } | null;
   imprest_postings: { kind: "expense" | "unexplained_loss"; amount_tzs: number }[] | null;
   imprest_settlement_returns: ReturnRow[] | null;
+  imprest_approval_raises: RaiseRow[] | null;
+};
+
+type RaiseRow = {
+  id: string;
+  raise_no: number;
+  status: RaiseStatus;
+  amount_tzs: number;
+  reason: string;
+  requested_by: string;
+  requested_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  refusal_reason: string | null;
+  handed_out_at: string | null;
+  recipient: string | null;
 };
 
 type ReturnRow = { settlement_id: string; reason: string; returned_by: string; returned_at: string };
@@ -234,6 +297,7 @@ type ReturnRow = { settlement_id: string; reason: string; returned_by: string; r
 const summaryOf = (s: SettlementRow): SettlementSummary => ({
   id: s.id,
   cycle: s.cycle,
+  approved: Number(s.approved_tzs),
   used: Number(s.used_tzs),
   returned: Number(s.returned_tzs),
   unaccounted: Number(s.unaccounted_tzs),
@@ -241,6 +305,22 @@ const summaryOf = (s: SettlementRow): SettlementSummary => ({
   lineCount: s.line_count,
   noReceiptLines: s.no_receipt_lines,
   settledAt: s.settled_at,
+});
+
+const raiseOf = (r: RaiseRow, names: Map<string, string>): Raise => ({
+  id: r.id,
+  raiseNo: r.raise_no,
+  status: r.status,
+  amount: Number(r.amount_tzs),
+  reason: r.reason,
+  requestedById: r.requested_by,
+  requestedAt: r.requested_at,
+  decidedById: r.decided_by,
+  decidedBy: r.decided_by ? (names.get(r.decided_by) ?? "") : "",
+  decidedAt: r.decided_at,
+  refusalReason: r.refusal_reason,
+  handedOutAt: r.handed_out_at,
+  recipient: r.recipient,
 });
 
 const returnOf = (r: ReturnRow, names: Map<string, string>): SettlementReturn => ({
@@ -272,6 +352,9 @@ function fromRow(row: Row, names: Map<string, string>): Disbursement {
   const settlements = [...(row.imprest_settlements ?? [])].sort((a, b) => b.cycle - a.cycle);
   const latest = settlements[0];
   const verified = row.imprest_verifications;
+  const raises = [...(row.imprest_approval_raises ?? [])]
+    .sort((a, b) => a.raise_no - b.raise_no)
+    .map((r) => raiseOf(r, names));
   const posted = (kind: "expense" | "unexplained_loss") => {
     const found = (row.imprest_postings ?? []).find((p) => p.kind === kind);
     return found ? Number(found.amount_tzs) : null;
@@ -281,7 +364,11 @@ function fromRow(row: Row, names: Map<string, string>): Disbursement {
     disbursementNo: row.disbursement_no,
     status: row.status,
     version: row.version,
-    amount: Number(row.amount_tzs),
+    amount: Number(row.approved_tzs),
+    originalAmount: Number(row.amount_tzs),
+    raises,
+    openRequest: raises.find((r) => r.status === "requested") ?? null,
+    awaitingHandOut: raises.find((r) => r.status === "raised") ?? null,
     category: row.category,
     purpose: row.purpose,
     proposedBy: names.get(row.proposed_by) ?? "",
@@ -340,6 +427,7 @@ type QueueOrder =
   | "imprest_disbursement_handouts(handed_out_at)"
   | "imprest_disbursement_settled_at"
   | "imprest_disbursement_sent_back_at"
+  | "imprest_disbursement_raise_requested_at"
   | "imprest_verifications(verified_at)";
 
 async function byStatus(
@@ -383,6 +471,29 @@ export const loadSettledWaiting = (pageNo = 1) =>
  */
 export const loadSentBack = (pageNo = 1) =>
   byStatus("imprest.sent_back", "sent_back", "imprest_disbursement_sent_back_at", pageNo);
+
+/**
+ * Handed out or sent back, with a request for a raised approval waiting for the Manager (issue
+ * #70), longest waiting first.
+ */
+export async function loadWaitingForRaise(pageNo = 1): Promise<Page<Disbursement>> {
+  const supabase = await createServerSupabase();
+  const result = await page("imprest.waiting_for_raise", pageNo, (from, to) =>
+    supabase
+      .from("imprest_disbursements")
+      .select(COLUMNS, { count: "exact" })
+      .not("imprest_disbursement_raise_requested_at", "is", null)
+      .order("imprest_disbursement_raise_requested_at", { ascending: true })
+      .order("id")
+      .range(from, to) as unknown as Counted,
+  );
+  // Every row here carries the request it is waiting on. Without it the list would name a waiting
+  // request it cannot show, which is a failed read, not a fact.
+  if (result.rows.some((d) => !d.openRequest)) {
+    throw new Error(`${DATA_UNAVAILABLE}: imprest.waiting_for_raise.request`);
+  }
+  return result;
+}
 
 /**
  * Verified payments, most recently verified first (issue #64), so the Manager and Directors can
@@ -523,6 +634,7 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
     row.cancelled_by,
     row.imprest_verifications?.verified_by ?? null,
     ...(row.imprest_settlement_returns ?? []).map((r) => r.returned_by),
+    ...(row.imprest_approval_raises ?? []).map((r) => r.decided_by),
   ]);
   const who = (person: string | null) => (person ? (names.get(person) ?? "") : "");
   const disbursement = fromRow(row, names);
@@ -621,6 +733,37 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
       role: "manager",
       text: row.cancellation_reason,
     });
+  }
+  // Every step of every raise: who asked and why, what the Manager decided, and the extra handed out.
+  for (const raise of disbursement.raises) {
+    events.push({
+      kind: "raise_requested",
+      at: raise.requestedAt,
+      by: who(raise.requestedById),
+      role: "cashier",
+      text: raise.reason,
+    });
+    if (raise.status !== "requested") {
+      // A decided raise always carries who decided it and when.
+      if (!raise.decidedAt || !raise.decidedById) throw new Error(`${DATA_UNAVAILABLE}: imprest.raise_decision`);
+      events.push({
+        kind: raise.status === "refused" ? "raise_refused" : "raise_raised",
+        at: raise.decidedAt,
+        by: who(raise.decidedById),
+        role: "manager",
+        text: raise.status === "refused" ? raise.refusalReason : null,
+      });
+    }
+    if (raise.status === "handed_out") {
+      if (!raise.handedOutAt) throw new Error(`${DATA_UNAVAILABLE}: imprest.raise_handout`);
+      events.push({
+        kind: "raise_handed_out",
+        at: raise.handedOutAt,
+        by: who(row.proposed_by),
+        role: "cashier",
+        text: raise.recipient,
+      });
+    }
   }
   if (events.some((event) => !event.at)) throw new Error(`${DATA_UNAVAILABLE}: imprest.disbursement`);
   events.sort((a, b) => a.at.localeCompare(b.at));

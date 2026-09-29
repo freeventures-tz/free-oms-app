@@ -1260,7 +1260,14 @@
         "sentBackNote": "The Cashier corrects each one and settles it again. It stays set aside until you verify it.",
         "sentBackNoteDirector": "The Cashier corrects each one and settles it again, then the Manager checks it. Directors read them here.",
         "sentBackReason": "Why: {reason}",
-        "nextSettleAgain": "Next: settle again"
+        "nextSettleAgain": "Next: settle again",
+        "raise": "Waiting for a raised approval ({count})",
+        "raiseEmpty": "No one is waiting for a raised approval.",
+        "raiseNote": "The Cashier needs more than was approved. Open one to raise the approval or refuse it.",
+        "raiseNoteDirector": "The Cashier asked for more than was approved, and the Manager decides. Directors read them here.",
+        "raiseAsked": "Asked for {amount} more: {reason}",
+        "nextRaiseWait": "Waiting for the Manager to decide your request for more",
+        "nextHandOutExtra": "Next: hand out the extra"
       },
       "fields": {
         "rejectionReason": "Reason for rejecting",
@@ -1286,11 +1293,15 @@
         "handedOut": "Hand-out recorded. Settle it when the spending is done.",
         "settled": "Settled. It now waits for the Manager to verify it, and stays set aside until then.",
         "verified": "Verified. It is posted and no longer set aside.",
-        "sentBack": "Sent back. The Cashier sees your reason and settles it again. It stays set aside until then."
+        "sentBack": "Sent back. The Cashier sees your reason and settles it again. It stays set aside until then.",
+        "raiseRequested": "Request sent. Don't pay more than the approved amount until the Manager raises it.",
+        "raised": "Approval raised. The extra is set aside. The Cashier hands it out next.",
+        "raiseRefused": "Request refused. The approval stays as it was.",
+        "raiseHandedOut": "Extra hand-out recorded. You can settle when the spending is done."
       },
       "detail": {
         "back": "Back to imprest",
-        "amount": "Amount",
+        "amount": "Approved amount",
         "category": "Category",
         "proposedBy": "Proposed by",
         "waitingManager": "Waiting for the Manager to approve or reject it. Don't pay yet.",
@@ -1304,7 +1315,8 @@
         "saveFile": "Save {name}",
         "viewReceipt": "View receipt",
         "verifiedNote": "Verified. It is posted and can't be changed.",
-        "sentBackNote": "Sent back. Waiting for the Cashier to settle it again."
+        "sentBackNote": "Sent back. Waiting for the Cashier to settle it again.",
+        "originalAmount": "First approved"
       },
       "history": {
         "proposed": "Proposed",
@@ -1316,7 +1328,11 @@
         "settled": "Settled",
         "verified": "Verified and posted",
         "sent_back": "Sent back",
-        "cycle": "Settlement {cycle}"
+        "cycle": "Settlement {cycle}",
+        "raise_requested": "Asked for more",
+        "raise_raised": "Approval raised and set aside",
+        "raise_refused": "Request for more refused",
+        "raise_handed_out": "Extra cash handed out"
       },
       "flags": {
         "noReceipt": "No receipt",
@@ -1413,6 +1429,44 @@
         "title": "Settle again",
         "reasonHeading": "Why the Manager sent it back",
         "help": "Correct the settlement and submit it again. Your earlier settlement stays on the record as it was. The lines below start from it."
+      },
+      "raise": {
+        "open": "Ask for more",
+        "title": "Ask for more",
+        "help": "Ask only when you need to pay more than the approved {amount}. The Manager raises the approval first, and only then do you hand out the extra.",
+        "amount": "How much more (TZS)",
+        "reason": "Why more is needed",
+        "submit": "Send request",
+        "waiting": "Waiting for the Manager to decide your request for {amount} more. Don't pay more than {approved} until the approval is raised.",
+        "handOutTitle": "Hand out the extra",
+        "handOutHelp": "The Manager raised the approval by {amount}. Record that you handed it out and who received it. You can settle once that is recorded.",
+        "handOutSubmit": "Record extra hand-out",
+        "recipient": "Who received it",
+        "requestTitle": "Request for more",
+        "requestLine": "{name} asks for {amount} more, taking the approval from {approved} to {total}.",
+        "requestReason": "Reason:",
+        "raiseApproval": "Raise approval by {amount}",
+        "raiseHelp": "This sets {amount} aside at once and can't be undone. Free to approve now: {free}.",
+        "refuse": "Refuse",
+        "refuseReason": "Why you are refusing",
+        "refuseConfirm": "Refuse request",
+        "waitingHandOut": "The approval was raised. Waiting for the Cashier to hand out the extra."
+      },
+      "approval": {
+        "title": "Approval",
+        "first": "First approval",
+        "raiseLine": "Raise {number}",
+        "total": "Approved amount",
+        "requestedBy": "Asked by {name} on {at}",
+        "decidedBy": "{name} on {at}",
+        "handedOut": "Handed out to {recipient} on {at}",
+        "refusedBecause": "Refused: {reason}",
+        "status": {
+          "requested": "Waiting for the Manager",
+          "raised": "Raised, extra not yet handed out",
+          "refused": "Refused",
+          "handed_out": "Raised and handed out"
+        }
       }
     },
     "count": {
@@ -1641,7 +1695,10 @@
     "receipt_pending": "Wait for the receipts to finish uploading, then settle.",
     "receipt_not_uploaded_yet": "A receipt didn't upload. Press Try again on it, or remove that line.",
     "not_settled": "Only a settled payment waiting for the Manager can be verified or sent back, and this one isn't waiting for that.",
-    "settlement_not_latest": "The settlement changed since you opened it. Reload to see the latest one."
+    "settlement_not_latest": "The settlement changed since you opened it. Reload to see the latest one.",
+    "raise_open": "There is already a request for more on this payment, or a raise still to be handed out.",
+    "no_raise_request": "That request can't be found, or it has already been decided.",
+    "raise_not_handed_out": "Ask for more, wait for the Manager to raise it, and hand out the extra before you settle."
   },
   "countErrors": {
     "not_permitted": "Your account may not do this.",

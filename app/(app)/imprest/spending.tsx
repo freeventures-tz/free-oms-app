@@ -180,7 +180,20 @@ export async function DisbursementList({
 
   const progress = new Map<string, React.ReactNode>();
   for (const d of page.rows) {
-    if (d.status === "handed_out" && d.handedOutAt) {
+    if (d.openRequest && (d.status === "handed_out" || d.status === "sent_back")) {
+      // Handed out with a request waiting (issue #70): what was asked and how long it has waited.
+      progress.set(
+        d.id,
+        <>
+          <span className="line-clamp-2 max-w-xs text-xs md:text-right" data-testid="raise-asked">
+            {t("lists.raiseAsked", { amount: formatTzs(d.openRequest.amount, locale), reason: d.openRequest.reason })}
+          </span>
+          <span className="text-xs text-muted-foreground" data-testid="waiting-for">
+            {t("lists.waitingFor", { age: await ageText(d.openRequest.requestedAt, now) })}
+          </span>
+        </>,
+      );
+    } else if (d.status === "handed_out" && d.handedOutAt) {
       progress.set(
         d.id,
         <span className="text-xs text-muted-foreground" data-testid="handed-out-to">
@@ -229,12 +242,23 @@ export async function DisbursementList({
   }
 
   const NEXT = { approved: "lists.nextHandOut", handed_out: "lists.nextSettle", sent_back: "lists.nextSettleAgain" } as const;
-  const nextStep = (d: Disbursement) =>
-    showNextStep && d.status in NEXT ? (
+  // A raise in progress is the step that is next (issue #70): the request waits for the Manager, and a
+  // raised approval waits for its extra to be handed out. Settling comes after both.
+  const nextKey = (d: Disbursement): string | null => {
+    if (d.status === "handed_out" || d.status === "sent_back") {
+      if (d.openRequest) return "lists.nextRaiseWait";
+      if (d.awaitingHandOut) return "lists.nextHandOutExtra";
+    }
+    return d.status in NEXT ? NEXT[d.status as keyof typeof NEXT] : null;
+  };
+  const nextStep = (d: Disbursement) => {
+    const key = showNextStep ? nextKey(d) : null;
+    return key ? (
       <span className="text-xs font-medium underline underline-offset-4" data-testid="next-step">
-        {t(NEXT[d.status as keyof typeof NEXT])}
+        {t(key)}
       </span>
     ) : null;
+  };
 
   return (
     <section className="flex flex-col gap-3" aria-labelledby={`${id}-heading`} data-testid={id}>

@@ -1260,7 +1260,14 @@
         "sentBackNote": "Keshia anarekebisha kila moja na kufunga hesabu upya. Inabaki imetengwa hadi uihakiki.",
         "sentBackNoteDirector": "Keshia anarekebisha kila moja na kufunga hesabu upya, kisha Meneja anaikagua. Wakurugenzi wanazisoma hapa.",
         "sentBackReason": "Sababu: {reason}",
-        "nextSettleAgain": "Hatua inayofuata: funga hesabu upya"
+        "nextSettleAgain": "Hatua inayofuata: funga hesabu upya",
+        "raise": "Yanasubiri idhini iliyoongezwa ({count})",
+        "raiseEmpty": "Hakuna anayesubiri idhini iliyoongezwa.",
+        "raiseNote": "Keshia anahitaji zaidi ya kilichoidhinishwa. Fungua moja uongeze idhini au uikatae.",
+        "raiseNoteDirector": "Keshia ameomba zaidi ya kilichoidhinishwa, na Meneja ndiye anayeamua. Wakurugenzi wanasoma hapa.",
+        "raiseAsked": "Ameomba {amount} zaidi: {reason}",
+        "nextRaiseWait": "Inasubiri Meneja aamue ombi lako la kuongeza",
+        "nextHandOutExtra": "Hatua inayofuata: toa fedha za ziada"
       },
       "fields": {
         "rejectionReason": "Sababu ya kukataa",
@@ -1286,11 +1293,15 @@
         "handedOut": "Utoaji umeandikwa. Funga hesabu matumizi yakikamilika.",
         "settled": "Hesabu imefungwa. Sasa inasubiri Meneja aihakiki, na inabaki imetengwa hadi hapo.",
         "verified": "Imehakikiwa. Imeandikwa na haijatengwa tena.",
-        "sentBack": "Imerudishwa. Keshia ataona sababu yako na kufunga hesabu upya. Inabaki imetengwa hadi hapo."
+        "sentBack": "Imerudishwa. Keshia ataona sababu yako na kufunga hesabu upya. Inabaki imetengwa hadi hapo.",
+        "raiseRequested": "Ombi limetumwa. Usilipe zaidi ya kiasi kilichoidhinishwa hadi Meneja akiongeze.",
+        "raised": "Idhini imeongezwa. Fedha za ziada zimetengwa. Keshia atazitoa baadaye.",
+        "raiseRefused": "Ombi limekataliwa. Idhini inabaki kama ilivyokuwa.",
+        "raiseHandedOut": "Utoaji wa ziada umeandikwa. Unaweza kufunga hesabu matumizi yakikamilika."
       },
       "detail": {
         "back": "Rudi kwenye imprest",
-        "amount": "Kiasi",
+        "amount": "Kiasi kilichoidhinishwa",
         "category": "Aina",
         "proposedBy": "Imependekezwa na",
         "waitingManager": "Inasubiri Meneja aidhinishe au akatae. Usilipe bado.",
@@ -1304,7 +1315,8 @@
         "saveFile": "Hifadhi {name}",
         "viewReceipt": "Angalia risiti",
         "verifiedNote": "Imehakikiwa. Imeandikwa na haiwezi kubadilishwa.",
-        "sentBackNote": "Imerudishwa. Inamsubiri Keshia afunge hesabu upya."
+        "sentBackNote": "Imerudishwa. Inamsubiri Keshia afunge hesabu upya.",
+        "originalAmount": "Kilichoidhinishwa mwanzoni"
       },
       "history": {
         "proposed": "Imependekezwa",
@@ -1316,7 +1328,11 @@
         "settled": "Hesabu imefungwa",
         "verified": "Imehakikiwa na kuandikwa",
         "sent_back": "Imerudishwa",
-        "cycle": "Hesabu ya awamu {cycle}"
+        "cycle": "Hesabu ya awamu {cycle}",
+        "raise_requested": "Ameomba zaidi",
+        "raise_raised": "Idhini imeongezwa na kutengwa",
+        "raise_refused": "Ombi la kuongeza limekataliwa",
+        "raise_handed_out": "Fedha za ziada zimetolewa"
       },
       "flags": {
         "noReceipt": "Hakuna risiti",
@@ -1413,6 +1429,44 @@
         "title": "Funga hesabu upya",
         "reasonHeading": "Kwa nini Meneja aliirudisha",
         "help": "Rekebisha hesabu na uiwasilishe tena. Hesabu yako ya awali inabaki kwenye kumbukumbu kama ilivyokuwa. Mistari hapa chini inaanzia hapo."
+      },
+      "raise": {
+        "open": "Omba zaidi",
+        "title": "Omba zaidi",
+        "help": "Omba tu unapohitaji kulipa zaidi ya {amount} zilizoidhinishwa. Meneja anaongeza idhini kwanza, kisha ndipo unatoa fedha za ziada.",
+        "amount": "Zaidi kiasi gani (TZS)",
+        "reason": "Kwa nini zaidi inahitajika",
+        "submit": "Tuma ombi",
+        "waiting": "Inasubiri Meneja aamue ombi lako la {amount} zaidi. Usilipe zaidi ya {approved} hadi idhini iongezwe.",
+        "handOutTitle": "Toa fedha za ziada",
+        "handOutHelp": "Meneja ameongeza idhini kwa {amount}. Andika kwamba umezitoa na nani amezipokea. Unaweza kufunga hesabu baada ya hilo kuandikwa.",
+        "handOutSubmit": "Andika utoaji wa ziada",
+        "recipient": "Aliyepokea",
+        "requestTitle": "Ombi la kuongeza",
+        "requestLine": "{name} anaomba {amount} zaidi, idhini ipande kutoka {approved} hadi {total}.",
+        "requestReason": "Sababu:",
+        "raiseApproval": "Ongeza idhini kwa {amount}",
+        "raiseHelp": "Hii inatenga {amount} mara moja na haiwezi kutenduliwa. Kinachoweza kuidhinishwa sasa: {free}.",
+        "refuse": "Kataa",
+        "refuseReason": "Kwa nini unakataa",
+        "refuseConfirm": "Kataa ombi",
+        "waitingHandOut": "Idhini imeongezwa. Inamsubiri Keshia atoe fedha za ziada."
+      },
+      "approval": {
+        "title": "Idhini",
+        "first": "Idhini ya kwanza",
+        "raiseLine": "Nyongeza {number}",
+        "total": "Kiasi kilichoidhinishwa",
+        "requestedBy": "Ameomba {name} tarehe {at}",
+        "decidedBy": "{name} tarehe {at}",
+        "handedOut": "Imetolewa kwa {recipient} tarehe {at}",
+        "refusedBecause": "Imekataliwa: {reason}",
+        "status": {
+          "requested": "Inasubiri Meneja",
+          "raised": "Imeongezwa, fedha za ziada bado hazijatolewa",
+          "refused": "Imekataliwa",
+          "handed_out": "Imeongezwa na kutolewa"
+        }
       }
     },
     "count": {
@@ -1641,7 +1695,10 @@
     "receipt_pending": "Subiri risiti zimalize kupakiwa, kisha funga hesabu.",
     "receipt_not_uploaded_yet": "Risiti moja haikupakiwa. Bonyeza Jaribu tena juu yake, au ondoa mstari huo.",
     "not_settled": "Malipo yaliyofungwa hesabu na yanayomsubiri Meneja pekee ndiyo yanaweza kuhakikiwa au kurudishwa, na haya hayasubiri hilo.",
-    "settlement_not_latest": "Hesabu imebadilika tangu uifungue. Pakia upya uone ya karibuni."
+    "settlement_not_latest": "Hesabu imebadilika tangu uifungue. Pakia upya uone ya karibuni.",
+    "raise_open": "Tayari kuna ombi la kuongeza kwenye malipo haya, au nyongeza inayosubiri kutolewa.",
+    "no_raise_request": "Ombi hilo halipatikani, au tayari limeamuliwa.",
+    "raise_not_handed_out": "Omba zaidi, subiri Meneja aongeze, na utoe fedha za ziada kabla ya kufunga hesabu."
   },
   "countErrors": {
     "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",

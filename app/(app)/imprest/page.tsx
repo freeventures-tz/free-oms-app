@@ -16,6 +16,7 @@ import {
   loadSentBack,
   loadSettledWaiting,
   loadVerified,
+  loadWaitingForRaise,
   loadOwnDisbursements,
   loadRecentPurposes,
   loadSpendingPosition,
@@ -70,7 +71,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
 
   const countPage = pageNumber(params.counts);
   const today = businessDate();
-  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, settled, back, verified, fundings] = await Promise.all([
+  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, raising, settled, back, verified, fundings] = await Promise.all([
     loadSpendingPosition(),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
@@ -81,6 +82,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     loadAwaitingDecision(pageNumber(params.waiting)),
     loadOpenApprovals(pageNumber(params.open)),
     loadHandedOut(pageNumber(params.out)),
+    loadWaitingForRaise(pageNumber(params.raise)),
     loadSettledWaiting(pageNumber(params.settled)),
     loadSentBack(pageNumber(params.back)),
     loadVerified(pageNumber(params.verified)),
@@ -91,6 +93,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     waiting: waiting.page,
     open: open.page,
     out: out.page,
+    raise: raising.page,
     settled: settled.page,
     back: back.page,
     verified: verified.page,
@@ -151,6 +154,17 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
         page={out}
         param="out"
         otherParams={others("out")}
+      />
+
+      {/* The Cashier needs more than was approved (issue #70). The Manager decides; Directors read. */}
+      <DisbursementList
+        id="disbursements-raise"
+        title={t("spending.lists.raise", { count: raising.total })}
+        empty={t("spending.lists.raiseEmpty")}
+        note={t(viewer.role === "manager" ? "spending.lists.raiseNote" : "spending.lists.raiseNoteDirector")}
+        page={raising}
+        param="raise"
+        otherParams={others("raise")}
       />
 
       {/* The Manager opens one to verify it (issue #64); Directors read the same list. */}
