@@ -166,6 +166,27 @@ describe("a Director's decision", () => {
     expect(screen.queryByTestId("approve-reversal")).toBeNull();
   });
 
+  it("keeps a lost approval on its own key: only Try again, never a rejection under it", async () => {
+    const user = userEvent.setup();
+    approveReversal.mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce({
+      successKey: "imprest.reversal.success.approved",
+    });
+    render(intl(<DecideReversal reversal={reversal} open postedBalance={150000} freeToApprove={140000} />));
+
+    await user.click(screen.getByTestId("approve-reversal"));
+    expect(await screen.findByText(en.reversalErrors.unconfirmed)).toBeInTheDocument();
+    expect(screen.getByTestId("reject-reversal-toggle")).toBeDisabled();
+    expect(screen.getByTestId("approve-reversal")).toBeDisabled();
+    expect(rejectReversal).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: en.common.retry }));
+    await waitFor(() => expect(approveReversal).toHaveBeenCalledTimes(2));
+    const first = approveReversal.mock.calls[0][1] as FormData;
+    const second = approveReversal.mock.calls[1][1] as FormData;
+    expect(second.get("idempotencyKey")).toBe(first.get("idempotencyKey"));
+    expect(await screen.findByRole("status")).toHaveTextContent(en.imprest.reversal.success.approved);
+  });
+
   it("names a pure undo as having no replacement", () => {
     render(
       intl(

@@ -157,7 +157,10 @@ export function DecideReversal({
             data-testid="approve-reversal"
             pending={controller.running === "approve"}
             pendingLabel={t("common.loading")}
-            disabled={controller.pending}
+            // An unconfirmed decision may already have committed under this key. Until Try again finds
+            // out, the other decision is closed: sent under the same key it could only conflict, or
+            // take the key and leave the first decision unknowable.
+            disabled={controller.pending || unconfirmed}
           >
             {t("imprest.reversal.approve")}
           </Button>
@@ -166,15 +169,12 @@ export function DecideReversal({
             variant={rejecting ? "secondary" : "danger"}
             size="small"
             className={TOUCH_FLOOR}
-            disabled={controller.pending}
+            disabled={controller.pending || unconfirmed}
             aria-expanded={rejecting}
             data-testid="reject-reversal-toggle"
             onClick={() => {
-              // Keep an unconfirmed decision's key until Try again finds out whether it committed.
-              if (!unconfirmed) {
-                controller.clear();
-                renewKey();
-              }
+              controller.clear();
+              renewKey();
               setRejecting(!rejecting);
             }}
           >
