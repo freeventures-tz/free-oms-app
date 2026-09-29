@@ -15,6 +15,7 @@ import {
   decideFunding,
   enterCount,
   decideRaise,
+  decideRetirement,
   decideReversal,
   handOutDisbursement,
   handOutRaise,
@@ -27,6 +28,7 @@ import {
   requestFunding,
   requestRaise,
   requestReversal,
+  submitRetirement,
   sendBackCount,
   sendBackSettlement,
   settleDisbursement,
@@ -43,6 +45,7 @@ import { fieldErrors } from "@/lib/validation/auth";
 import {
   approveDisbursementSchema,
   approveFundingSchema,
+  approveRetirementSchema,
   approveReversalSchema,
   confirmCountSchema,
   confirmReceivedSchema,
@@ -59,12 +62,14 @@ import {
   refuseRaiseSchema,
   registerReceiptSchema,
   rejectFundingSchema,
+  rejectRetirementSchema,
   rejectReversalSchema,
   reportMismatchSchema,
   requestFundingSchema,
   requestRaiseSchema,
   requestReversalSchema,
   sendBackCountSchema,
+  submitRetirementSchema,
   sendBackSchema,
   settleSchema,
   verifyDisbursementSchema,
@@ -212,14 +217,33 @@ const REVERSAL_ERRORS = new Set([
   "no_reversal",
 ]);
 
+/** A retirement's refusals (issue #72) speak of closing the fund. */
+const RETIREMENT_ERRORS = new Set([
+  "not_permitted",
+  "generic",
+  "unconfirmed",
+  "idempotency_key_conflict",
+  "reason_required",
+  "stale",
+  "not_awaiting_decision",
+  "decision_required",
+  "no_fund",
+  "no_retirement",
+  "retirement_open",
+  "blocked",
+  "count_required",
+  "count_before_last_posting",
+]);
+
 type Messages = {
-  namespace: "imprestErrors" | "spendingErrors" | "countErrors" | "reversalErrors";
+  namespace: "imprestErrors" | "spendingErrors" | "countErrors" | "reversalErrors" | "retirementErrors";
   known: Set<string>;
 };
 const FUNDING_MESSAGES: Messages = { namespace: "imprestErrors", known: KNOWN_ERRORS };
 const SPENDING_MESSAGES: Messages = { namespace: "spendingErrors", known: SPENDING_ERRORS };
 const COUNT_MESSAGES: Messages = { namespace: "countErrors", known: COUNT_ERRORS };
 const REVERSAL_MESSAGES: Messages = { namespace: "reversalErrors", known: REVERSAL_ERRORS };
+const RETIREMENT_MESSAGES: Messages = { namespace: "retirementErrors", known: RETIREMENT_ERRORS };
 
 export type ImprestActionState = {
   error?: string;
@@ -579,6 +603,47 @@ export async function rejectReversalAction(_p: ImprestActionState, data: FormDat
     (input) => decideReversal({ ...input, approve: false }),
     "imprest.reversal.success.rejected",
     REVERSAL_MESSAGES,
+  );
+}
+
+// Retirement (issue #72): the Manager submits, a Director approves or rejects.
+
+export async function submitRetirementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["manager"],
+    submitRetirementSchema,
+    { countId: data.get("countId"), reason: data.get("reason") ?? "", idempotencyKey: data.get("idempotencyKey") },
+    submitRetirement,
+    "imprest.retirement.success.submitted",
+    RETIREMENT_MESSAGES,
+  );
+}
+
+const retirementTarget = (data: FormData) => ({
+  retirementId: data.get("retirementId"),
+  expectedVersion: data.get("expectedVersion"),
+  idempotencyKey: data.get("idempotencyKey"),
+});
+
+export async function approveRetirementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["director"],
+    approveRetirementSchema,
+    retirementTarget(data),
+    (input) => decideRetirement({ ...input, approve: true, reason: null }),
+    "imprest.retirement.success.approved",
+    RETIREMENT_MESSAGES,
+  );
+}
+
+export async function rejectRetirementAction(_p: ImprestActionState, data: FormData) {
+  return run(
+    ["director"],
+    rejectRetirementSchema,
+    { ...retirementTarget(data), reason: data.get("reason") ?? "" },
+    (input) => decideRetirement({ ...input, approve: false }),
+    "imprest.retirement.success.rejected",
+    RETIREMENT_MESSAGES,
   );
 }
 

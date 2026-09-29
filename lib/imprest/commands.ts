@@ -65,6 +65,10 @@ async function callFor(
     const value = result[key];
     if (typeof value === "number" || typeof value === "string") context[key] = value;
   }
+  // A retirement refused as `blocked` (issue #72) names each blocker by its number.
+  if (Array.isArray(result.blockers)) {
+    context.blockers = (result.blockers as { number?: unknown }[]).map((b) => String(b.number ?? "")).join(", ");
+  }
   return {
     ok: false,
     reason: typeof result.reason === "string" ? result.reason : "generic",
@@ -284,6 +288,31 @@ export const decideReversal = (input: {
 }) =>
   call("admin_decide_imprest_reversal", {
     p_reversal_id: input.reversalId,
+    p_expected_version: input.expectedVersion,
+    p_approve: input.approve,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+// Retirement (issue #72). The Manager submits, naming today's closing count; a Director decides.
+
+export const submitRetirement = (input: { countId: string; reason: string; idempotencyKey: string }) =>
+  call("staff_submit_imprest_retirement", {
+    p_count_id: input.countId,
+    p_reason: input.reason,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+/** Approval is final: the fund closes and its closing balance opens the next one. */
+export const decideRetirement = (input: {
+  retirementId: string;
+  expectedVersion: number;
+  approve: boolean;
+  reason: string | null;
+  idempotencyKey: string;
+}) =>
+  call("admin_decide_imprest_retirement", {
+    p_retirement_id: input.retirementId,
     p_expected_version: input.expectedVersion,
     p_approve: input.approve,
     p_reason: input.reason,

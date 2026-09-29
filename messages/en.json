@@ -1633,7 +1633,8 @@
           "confirmed": "Raised {raised}. Resolved {resolved}, when the Manager confirmed it.",
           "sent_back": "Raised {raised}. Resolved {resolved}, when the Manager sent it back."
         }
-      }
+      },
+      "notYet": "Today was counted before the last fund retired. Counting starts again on {date}."
     },
     "reversal": {
       "title": "Corrections",
@@ -1673,6 +1674,136 @@
         "requested": "Request sent. A Director approves or rejects it, and the posting stays as it is until then.",
         "approved": "Approved. The reversal and the replacement are posted.",
         "rejected": "Request rejected. The posting stays as it was."
+      }
+    },
+    "retirement": {
+      "title": "Retire the fund",
+      "help": {
+        "manager": "When everything in the fund is finished and today's count is confirmed, submit the fund's retirement. A Director approves it. No cash is handed back: the cash stays in the tin, and the closing balance opens the next fund.",
+        "director": "The Manager submits the fund's retirement, and you approve or reject it. No cash is handed back: the closing balance opens the next fund."
+      },
+      "rejected": "The last submission was rejected by {name} on {when}: {reason}",
+      "blockers": {
+        "title": "Still open ({count}). Each must be finished before the fund can retire:",
+        "disbursement": "payment not finished",
+        "funding": "funding not received or rejected",
+        "raise": "asks for a raised approval",
+        "reversal": "reversal waiting for a Director",
+        "count": "count waiting for the Manager"
+      },
+      "count": {
+        "required": "Today's count must be confirmed first.",
+        "ready": "Today's count is confirmed and nothing has posted since. The closing balance is the cash counted: {amount}.",
+        "beforeLastPosting": "Money posted after today's count, so the count no longer shows what the tin holds. Count on the next business day, then submit."
+      },
+      "reason": "Why the fund is being retired",
+      "reasonHelp": "3 to 500 characters.",
+      "submit": "Submit retirement",
+      "submittedBy": "Submitted by {name} on {when}",
+      "waiting": "Waiting for a Director",
+      "waitingManager": "A Director approves or rejects it. Until then the fund stays open.",
+      "reasonLine": "Reason: {reason}",
+      "figures": {
+        "funding": "Funding received",
+        "counted": "Counted on {date}",
+        "closing": "Closing balance"
+      },
+      "carryHelp": "Once approved, the fund closes and {amount} opens the next fund. The cash stays in the tin.",
+      "approve": "Approve retirement",
+      "confirmHelp": "This closes the fund for good and carries its closing balance into a new fund. It can't be undone. Anything unresolved stays unresolved.",
+      "confirm": "Yes, retire the fund",
+      "reject": "Reject",
+      "rejectReason": "Why you are rejecting it",
+      "rejectConfirm": "Reject retirement",
+      "success": {
+        "submitted": "Retirement submitted. A Director will approve or reject it.",
+        "approved": "The fund is retired. Its closing balance opened the next fund.",
+        "rejected": "Retirement rejected. The fund stays open."
+      },
+      "carried": {
+        "label": "Carried from the retired fund",
+        "help": "The closing balance of the fund retired on {date}. It is part of the posted balance above.",
+        "open": "See the retired fund"
+      },
+      "unresolved": {
+        "title": "Unresolved",
+        "none": "Nothing unresolved: no loss or shortage waits for a Director, and no day is Not counted.",
+        "notResolved": "Retirement does not resolve these. They stay on the fund's record.",
+        "deficit": "Deficit: {amount}",
+        "losses": "Unexplained losses waiting for a Director ({count})",
+        "shortages": "Count shortages waiting for a Director ({count})",
+        "excess": "Count excesses: {amount}. Shown on their own, never taken off the deficit.",
+        "notCounted": "Not counted days ({count})"
+      },
+      "retired": {
+        "title": "Retired funds ({count})",
+        "empty": "No fund has been retired yet.",
+        "dates": "Opened {opened}, retired {retired}",
+        "people": "Submitted by {submitted}, approved by {approved}",
+        "deficit": "Deficit {amount}",
+        "losses": "Losses waiting ({count})",
+        "shortages": "Shortages waiting ({count})",
+        "notCounted": "Not counted days ({count})",
+        "clear": "Nothing unresolved",
+        "closing": "Closing balance {amount}"
+      }
+    },
+    "fundRecord": {
+      "titleRetired": "Fund retired {date}",
+      "titleActive": "Current fund",
+      "description": "Opened {opened}. This record is read-only.",
+      "active": "Open",
+      "retired": "Retired",
+      "back": "Back to imprest",
+      "figures": {
+        "title": "Figures",
+        "opening": "Opening balance",
+        "funding": "Funding received",
+        "expenses": "Expenses",
+        "losses": "Unexplained losses",
+        "shortages": "Count shortages",
+        "excesses": "Count excesses",
+        "closing": "Closing balance",
+        "balance": "Posted balance"
+      },
+      "carriedFrom": "Opened with {amount} carried from the fund before it.",
+      "openFund": "See that fund",
+      "carriedInto": "Its closing balance of {amount} opened the next fund on {when}.",
+      "retirements": "Retirement",
+      "noRetirement": "Not submitted for retirement.",
+      "status": {
+        "submitted": "Waiting for a Director",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "closingAt": "Closing balance {amount}, counted on {date}",
+      "listedNotCounted": "Not counted days listed: {days}",
+      "approvedBy": "Approved by {name} on {when}",
+      "rejectedBy": "Rejected by {name} on {when}: {reason}",
+      "days": "Days",
+      "noDays": "No business days.",
+      "counts": "Counts",
+      "noCounts": "No counts.",
+      "countLine": "{date}, count {attempt}, by {name}",
+      "late": "Counted late: {reason}",
+      "countFigures": "Counted {counted}, expected {expected}",
+      "fundings": "Funding",
+      "noFundings": "No funding.",
+      "fundingRequested": "Asked for {amount}, not received",
+      "fundingReceived": "Received {amount}",
+      "postings": "Postings",
+      "noPostings": "No postings.",
+      "posting": {
+        "expense": {
+          "original": "Expense",
+          "reversal": "Expense reversed",
+          "replacement": "Expense, corrected"
+        },
+        "unexplained_loss": {
+          "original": "Unexplained loss",
+          "reversal": "Unexplained loss reversed",
+          "replacement": "Unexplained loss, corrected"
+        }
       }
     }
   },
@@ -1960,5 +2091,21 @@
       "imprest_reversal": "Imprest reversal",
       "imprest_retirement": "Imprest retirement"
     }
+  },
+  "retirementErrors": {
+    "not_permitted": "Your account may not do this.",
+    "generic": "Something went wrong and nothing was changed. Try again.",
+    "unconfirmed": "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which can't be recorded twice.",
+    "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
+    "reason_required": "Give a reason of 3 to 500 characters.",
+    "stale": "The fund changed since you opened this. Reload to see where it stands.",
+    "not_awaiting_decision": "This retirement has already been decided.",
+    "decision_required": "Choose to approve or reject.",
+    "no_fund": "There is no fund to retire.",
+    "no_retirement": "This retirement can't be found.",
+    "retirement_open": "A retirement of this fund is already waiting for a Director.",
+    "blocked": "The fund can't retire while these are open: {blockers}. Finish each one first. Nothing was changed.",
+    "count_required": "Count today's cash and confirm the count first.",
+    "count_before_last_posting": "Money posted after the count of {business_date}, so it no longer shows what the tin holds. Nothing was changed."
   }
 }

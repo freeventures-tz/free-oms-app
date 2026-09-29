@@ -139,10 +139,16 @@ export async function DailyCountSection({
   today,
   todays,
   history,
+  countingStartsOn = null,
   otherParams = {},
   children,
 }: {
   role: AppRole;
+  /**
+   * The active fund's first day to count (issue #72). After a retirement approved on the day of its
+   * closing count, that day was counted already, and counting starts again the next day.
+   */
+  countingStartsOn?: string | null;
   /** What must be seen before the history: the days not closed (issue #69). */
   children?: React.ReactNode;
   /** Today's business date, `YYYY-MM-DD` in Africa/Dar_es_Salaam. */
@@ -157,6 +163,7 @@ export async function DailyCountSection({
   const t = await getTranslations("imprest.count");
   const locale = await getLocale();
   const { state, latest } = dayState(todays, today);
+  const notYet = countingStartsOn !== null && today < countingStartsOn && latest === null;
   // An earlier day's count still waiting for the Manager. The fund holds one waiting count at most,
   // and it blocks today's until the Manager decides it, so it is shown here with its controls.
   const earlier = todays.find((c) => c.status === "awaiting_confirmation" && c.businessDate < today) ?? null;
@@ -173,7 +180,7 @@ export async function DailyCountSection({
   };
 
   return (
-    <section className="flex flex-col gap-3" aria-labelledby="daily-count-heading" data-testid="daily-count">
+    <section id="daily-count" className="flex flex-col gap-3" aria-labelledby="daily-count-heading" data-testid="daily-count">
       <h2 id="daily-count-heading" className="text-lg font-semibold">
         {t("title")}
       </h2>
@@ -181,10 +188,12 @@ export async function DailyCountSection({
       <Card className="flex flex-col gap-4" data-testid="count-today">
         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
           <span className="text-sm text-muted-foreground">{formatBusinessDate(today, locale)}</span>
-          <CountStateChip state={state} />
+          {notYet ? null : <CountStateChip state={state} />}
         </div>
-        <p className="text-sm">
-          {earlier
+        <p className="text-sm" data-testid={notYet ? "count-not-yet" : undefined}>
+          {notYet
+            ? t("notYet", { date: formatBusinessDate(countingStartsOn, locale) })
+            : earlier
             ? t(`earlier.${role === "cashier" ? "cashier" : role === "manager" ? "manager" : "other"}`, {
                 date: formatBusinessDate(earlier.businessDate, locale),
               })
@@ -208,7 +217,7 @@ export async function DailyCountSection({
           <CountControls
             role={role}
             businessDate={today}
-            mayCount={!earlier && (state === "due" || state === "sent_back")}
+            mayCount={!notYet && !earlier && (state === "due" || state === "sent_back")}
             replaces={
               state === "sent_back" && latest ? { id: latest.id, reason: latest.returnReason ?? "" } : null
             }

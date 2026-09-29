@@ -246,6 +246,29 @@ export const rejectReversalSchema = z.object({
   reason: textField(true, "reversalErrors.reason_required"),
 });
 
+// Retirement (issue #72). Its refusals speak of closing the fund.
+
+const retirementKey = z.string().uuid({ message: "retirementErrors.idempotency_key_conflict" });
+
+export const submitRetirementSchema = z.object({
+  countId: z.string().uuid({ message: "retirementErrors.count_required" }),
+  reason: textField(true, "retirementErrors.reason_required"),
+  idempotencyKey: retirementKey,
+});
+
+const retirementTarget = {
+  retirementId: z.string().uuid({ message: "retirementErrors.no_retirement" }),
+  expectedVersion: z.coerce.number().int().min(1, { message: "retirementErrors.stale" }),
+  idempotencyKey: retirementKey,
+};
+
+export const approveRetirementSchema = z.object(retirementTarget);
+
+export const rejectRetirementSchema = z.object({
+  ...retirementTarget,
+  reason: textField(true, "retirementErrors.reason_required"),
+});
+
 export const registerReceiptSchema = z.object({
   disbursementId,
   fileName: z
