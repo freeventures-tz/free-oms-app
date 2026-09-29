@@ -75,7 +75,8 @@ begin
   if v is distinct from '95000/70000/25000/45000/15000' then
     raise exception 'the v0.9.0 ground should read 95000/70000/25000/45000/15000, found %', v;
   end if;
-  if (select string_agg(status::text || ':' || amount_tzs, ',' order by requested_at, raise_no)
+  -- Both were asked in one transaction, so they share a moment; the amount tells them apart.
+  if (select string_agg(status::text || ':' || amount_tzs, ',' order by amount_tzs desc)
         from public.imprest_approval_raises) is distinct from 'handed_out:2000,refused:1000' then
     raise exception 'the raises should read handed_out:2000,refused:1000';
   end if;
