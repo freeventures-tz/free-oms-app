@@ -43,8 +43,11 @@ Everyone has exactly one role, and sees only the work that role does.
 - **Reconciliation, reports and accountability history** — daily counts, differences explained, and
   a history that shows who did what
 
-**Available today: user accounts and access.** The other areas are being built in order —
-[CHANGELOG.md](CHANGELOG.md) records what each release adds.
+**Available today:** accounts and access, products, suppliers and inventory, sales, payments and
+dispatch, brick production, the whole imprest workflow from funding to retirement, and the
+scheduled daily report. **Still being built:** the till and stock counts, Directors' accountability
+decisions, manual reports and the dashboard. [CHANGELOG.md](CHANGELOG.md) records what each release
+adds. Staff accounts are not yet open for day-to-day use.
 
 ---
 

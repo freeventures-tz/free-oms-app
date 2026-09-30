@@ -12,7 +12,7 @@
 2. **Isolate**: `new-feature`. Every task gets its own worktree. Claude Code: harness worktree, branch `claude/<task>`. Codex: `.worktrees/<task>` (gitignored), branch `codex/<task>`. Claim the ticket first with a comment `Claimed by <claude|codex> on <branch>`; skip tickets that already carry a claim.
 3. **Build**: `implement` → `tdd`, to the invariants below.
 4. **Prove**: `evidence-driven-testing`. Capture *before* while reproducing, *after* once it works.
-5. **Ship**: `code-review` → cross-review (the human starts the other agent on `code-review` for the PR) → `before-and-after` (production vs PR preview) → PR → `greploop` (`greploop-apps` over the file limit) until **5/5, zero unresolved**. End by presenting the PR URL. **Stop**: merge is the human's.
+5. **Ship**: `code-review` → `before-and-after` (production vs PR preview) → PR → `greploop` (`greploop-apps` over the file limit) until **5/5, zero unresolved**. End by presenting the PR URL. **Stop**: merge is the human's.
 6. **Release**: when the human says "merge", merge, tag, release and housekeep. See *Releasing*.
 
 End an unfinished session with `handoff`.
