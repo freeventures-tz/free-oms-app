@@ -508,6 +508,23 @@ select is(
   1, 'and a conflicting retry against the supplier');
 
 -- ---------------------------------------------------------------------------
+-- Every paid-out payment is offered, however many the fund holds
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  for i in 1..51 loop
+    perform tests.pay('cashier_b', 'bulk-' || i, 100, 'other', 'Bulk ' || i, 'handed_out');
+  end loop;
+end $$;
+select tests.manager();
+select is(jsonb_array_length(api.staff_imprest_receipt_payment_options()), 56,
+          'the picker is not cut short: all 56 paid-out payments are offered, the oldest included');
+select ok(
+  exists (select 1 from jsonb_array_elements(api.staff_imprest_receipt_payment_options()) o
+           where (o ->> 'id')::uuid = tests.did('sand')),
+  'the first payment handed out is still there');
+
+-- ---------------------------------------------------------------------------
 -- The active fund only
 -- ---------------------------------------------------------------------------
 -- The fund is retired and the next one opened, directly: retirement itself is proved in 026.

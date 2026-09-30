@@ -472,8 +472,9 @@ comment on function api.staff_enter_stock_receipt(uuid, text, date, text, jsonb,
 -- Reads
 -- ---------------------------------------------------------------------------
 -- The disbursements a receipt can be linked to: the active fund's that paid out, newest hand-out
--- first. The Manager sees all of them and a Cashier their own. At most 50, which is more than a fund
--- holds between counts.
+-- first. The Manager sees all of them and a Cashier their own. Not capped: a verified payment stays
+-- pickable until the fund retires, and a cap would drop the oldest from the list without saying so.
+-- The fund's own life bounds how many there are.
 create or replace function api.staff_imprest_receipt_payment_options()
 returns jsonb
 language plpgsql
@@ -486,22 +487,19 @@ declare
   v_role  public.app_role := private.live_role_of(v_actor);
 begin
   return coalesce((
-    select jsonb_agg(private.stock_receipt_disbursement_summary(o.id) order by o.handed_out_at desc,
-                                                                               o.id)
-      from (select d.id, h.handed_out_at
-              from public.imprest_disbursements d
-              join public.imprest_funds f on f.id = d.fund_id and f.is_active
-              join public.imprest_disbursement_handouts h on h.disbursement_id = d.id
-             where d.status::text in ('handed_out', 'settled', 'sent_back', 'verified')
-               and (v_role = 'manager' or d.proposed_by = v_actor)
-             order by h.handed_out_at desc, d.id
-             limit 50) o), '[]'::jsonb);
+    select jsonb_agg(private.stock_receipt_disbursement_summary(d.id) order by h.handed_out_at desc,
+                                                                               d.id)
+      from public.imprest_disbursements d
+      join public.imprest_funds f on f.id = d.fund_id and f.is_active
+      join public.imprest_disbursement_handouts h on h.disbursement_id = d.id
+     where d.status::text in ('handed_out', 'settled', 'sent_back', 'verified')
+       and (v_role = 'manager' or d.proposed_by = v_actor)), '[]'::jsonb);
 end;
 $$;
 
 comment on function api.staff_imprest_receipt_payment_options() is
   'The disbursements a stock receipt can be marked paid from (issue #73): the active fund''s that '
-  'were handed out, settled, sent back or verified, newest first, at most 50. The Manager sees all '
+  'were handed out, settled, sent back or verified, newest first. The Manager sees all '
   'and a Cashier their own.';
 
 -- The disbursement of each receipt, for the receipts the caller can read (who entered it, the

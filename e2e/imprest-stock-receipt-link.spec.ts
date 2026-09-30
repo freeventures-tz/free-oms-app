@@ -113,7 +113,7 @@ async function paidOut(recipient: string, amount = 25000): Promise<Row & { disbu
   const proposed = await command("cashier", "staff_propose_imprest_disbursement", {
     p_amount_tzs: amount,
     p_category: "materials_and_supplies",
-    p_purpose: `Sand for the yard ${SUFFIX}`,
+    p_purpose: `Link materials ${SUFFIX}`,
   });
   const approved = await command("manager", "staff_decide_imprest_disbursement", {
     p_id: proposed.disbursement!.id,
@@ -139,8 +139,8 @@ let product: { id: string; name: string };
 
 async function catalogue() {
   if (supplier && product) return;
-  const supplierName = `Simba Sand ${SUFFIX}`;
-  const productName = `River sand ${SUFFIX}`;
+  const supplierName = `Link Supplier ${SUFFIX}`;
+  const productName = `Link Stock ${SUFFIX}`;
   const s = await command("director", "admin_add_supplier", { p_name: supplierName });
   const p = await command("director", "admin_add_product", {
     p_name: productName,
@@ -441,7 +441,7 @@ function judge() {
     test.skip(testInfo.project.name !== "mobile", "the mobile profile only");
     await catalogue();
     await ensureFree(SAMPLES * PROFILES.length * 1000 + 1000);
-    const payment = await paidOut("Benchmark sands", SAMPLES * PROFILES.length * 1000);
+    const payment = await paidOut("Benchmark supplier", SAMPLES * PROFILES.length * 1000);
     await as(page, "cashier");
 
     for (const profile of PROFILES) {
