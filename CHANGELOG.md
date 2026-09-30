@@ -2,6 +2,15 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.12.1] — 2026-09-30
+
+A fix to the project's description. Nothing changes in the app itself.
+
+### FIXED
+
+- The README said only accounts and access were available. It now lists what the app does today
+  and what is still being built.
+
 ## [0.12.0] — 2026-09-30
 
 A delivery bought with imprest cash is now recorded once. The receipt names the payment that paid
