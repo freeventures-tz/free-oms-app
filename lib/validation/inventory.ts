@@ -175,8 +175,32 @@ export const enterReceiptSchema = z
     deliveryDate: isoDateField,
     deliveryNoteRef: deliveryNoteField,
     lines: z.array(receiptLineSchema).min(1, { message: "inventoryErrors.lines_required" }),
+    // Paid from imprest (issue #73): the disbursement picked, and nothing else about the payment.
+    // A pick left behind once the box is unticked is dropped rather than sent.
+    paidFromImprest: z
+      .enum(["true", "false"])
+      .nullish()
+      .transform((value) => value === "true"),
+    disbursementId: z
+      .string()
+      .nullish()
+      .transform((value) => value ?? ""),
     idempotencyKey: idempotencyKeyField,
   })
+  .superRefine((value, ctx) => {
+    if (!value.paidFromImprest) return;
+    if (!z.string().uuid().safeParse(value.disbursementId).success) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["disbursementId"],
+        message: "inventoryErrors.disbursement_required",
+      });
+    }
+  })
+  .transform(({ paidFromImprest, disbursementId, ...rest }) => ({
+    ...rest,
+    disbursementId: paidFromImprest ? disbursementId : null,
+  }))
   // Checked here as well as in the database so the message names the field the person can fix,
   // rather than arriving as a whole-form refusal after a round trip.
   .refine(

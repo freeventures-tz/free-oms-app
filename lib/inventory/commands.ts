@@ -142,6 +142,8 @@ export async function enterStockReceipt(
     deliveryDate: string;
     deliveryNoteRef: string;
     lines: ReceiptLineInput[];
+    /** The disbursement that paid for it, when it was paid from imprest (issue #73). */
+    disbursementId: string | null;
     idempotencyKey: string;
   },
   issuedBy?: InventoryApi,
@@ -163,6 +165,7 @@ export async function enterStockReceipt(
         damaged_quantity: line.damagedQuantity,
         damage_note: line.damageNote,
       })),
+      p_disbursement_id: input.disbursementId,
       p_idempotency_key: input.idempotencyKey,
     },
     "entered",

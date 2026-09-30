@@ -98,6 +98,7 @@ select is(
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      join pg_roles o on o.oid = p.proowner
     where n.nspname = 'api' and p.proname like '%imprest_disbursement%'
+      and p.proname not like '%stock\_receipt%'
       and p.prosecdef and o.rolname = 'fv_definer_owner'),
   7,
   'seven disbursement commands (four from #55, hand out and settle from #62, verify from #64), '

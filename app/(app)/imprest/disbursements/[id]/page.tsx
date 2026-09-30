@@ -5,12 +5,14 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { DisbursementActions } from "@/app/(app)/imprest/disbursement-forms";
 import { DecideReversal, RequestReversal } from "@/app/(app)/imprest/reversal-forms";
 import { CashierStep, ReceiptView } from "@/app/(app)/imprest/settlement-forms";
+import { DisbursementStockReceipts } from "@/app/(app)/imprest/stock-receipts";
 import { DisbursementFlags, DisbursementStatusChip } from "@/app/(app)/imprest/spending";
 import { Card, PageHeader, StatusChip } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
 import {
   earlierReceipts,
   loadDisbursement,
+  loadDisbursementStockReceipts,
   loadSpendingPosition,
   type DisbursementDetail,
   type SettlementCycle,
@@ -34,7 +36,12 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
   const { id } = await params;
   if (!UUID.test(id)) notFound();
 
-  const disbursement = await loadDisbursement(id);
+  // The deliveries it paid for (issue #73) are read beside it. For a disbursement the viewer may not
+  // read, the database sends none, and the page is not found either way.
+  const [disbursement, stockReceipts] = await Promise.all([
+    loadDisbursement(id),
+    loadDisbursementStockReceipts(id),
+  ]);
   if (!disbursement) notFound();
 
   const t = await getTranslations("imprest.spending");
@@ -143,6 +150,9 @@ export default async function DisbursementPage({ params }: PageProps<"/imprest/d
           freeToApprove={position?.freeToApprove ?? null}
         />
       ) : null}
+
+      {/* Only a payment that was handed out paid for a delivery, so only one can list any. */}
+      {disbursement.handedOutAt ? <DisbursementStockReceipts receipts={stockReceipts} /> : null}
 
       {/* Hidden when this viewer has nothing to do here and no answer to show (a Cashier's decided row). */}
       <Card className="flex flex-col gap-3 empty:hidden" data-testid="disbursement-actions">

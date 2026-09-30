@@ -395,7 +395,13 @@
       "noSettled": "Bado hakuna zilizoamuliwa.",
       "enteredBy": "Imeandikwa na {who} ({role})",
       "shortageRecorded": "Zimepungua {count}, imeandikwa kudumu",
-      "damagedRecorded": "Zimeharibika {count}, haziingii bohari"
+      "damagedRecorded": "Zimeharibika {count}, haziingii bohari",
+      "paidFromImprest": "Imelipwa kutoka imprest",
+      "whichPayment": "Malipo gani yaliilipia",
+      "choosePayment": "Chagua malipo",
+      "whichPaymentHelp": "Taarifa za malipo hayo zimeshaandikwa. Hakuna kinachoandikwa tena.",
+      "noPaymentToPick": "Hakuna malipo yaliyotolewa ya kuchagua. Malipo yanaweza kuchaguliwa pesa zake zikishatolewa.",
+      "paidFrom": "Imelipwa kutoka imprest"
     },
     "transfers": {
       "title": "Kuhamisha ndani",
@@ -528,7 +534,12 @@
     },
     "location": {
       "required": "Chagua sehemu."
-    }
+    },
+    "disbursement_required": "Chagua malipo yaliyolipia mzigo huu.",
+    "imprest_link_not_permitted": "Meneja au Keshia pekee anaweza kuweka alama kuwa mzigo umelipwa kutoka imprest.",
+    "no_disbursement": "Malipo hayo hayapatikani. Pakia ukurasa upya.",
+    "disbursement_fund_retired": "Malipo hayo ni ya mfuko wa imprest uliofungwa. Pakia ukurasa upya.",
+    "disbursement_not_paid": "Malipo hayo bado hayajatolewa, kwa hiyo hayajalipia chochote. Pakia ukurasa upya."
   },
   "sales": {
     "orders": {
@@ -1477,6 +1488,10 @@
           "refused": "Imekataliwa",
           "handed_out": "Imeongezwa na kutolewa"
         }
+      },
+      "stockReceipts": {
+        "heading": "Mizigo iliyolipwa na malipo haya",
+        "none": "Hakuna stakabadhi ya mzigo iliyowekwa alama kuwa imelipwa na malipo haya."
       }
     },
     "count": {

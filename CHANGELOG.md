@@ -2,6 +2,31 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.12.0] — 2026-09-30
+
+A delivery bought with imprest cash is now recorded once. The receipt names the payment that paid
+for it, and the payment lists what it bought.
+
+### NEW
+
+- When recording a delivery, the Manager or a Cashier can mark it Paid from imprest and pick the
+  payment that paid for it. The payment shows with its number, who was paid, its category and its
+  approved amount. Nothing about the payment is typed again.
+- Only a payment whose cash has been handed out can be picked, newest first. A Cashier sees only
+  their own payments.
+- A delivery shows the payment it was paid from, with a link to it. The payment's page lists every
+  delivery it paid for, with whether the Manager has approved each.
+- One payment can pay for several deliveries. Once a delivery is saved, its payment can't be changed
+  or removed, and a delivery saved without one can't gain one later.
+
+### IMPROVED
+
+- Marking a delivery as paid from imprest changes no imprest figure and no stock. Stock still rises
+  only when the Manager approves the delivery.
+- Tapping a delivery's payment marks the link at once, while the payment's page loads.
+- On slow 4G, all 20 tries at saving a delivery paid from imprest were confirmed within 931 ms, and
+  all 20 at opening its payment within 1.9 s.
+
 ## [0.11.0] — 2026-09-30
 
 The imprest fund can now be retired. Its balance carries into the next fund, and nothing that
