@@ -374,13 +374,19 @@ select throws_ok(
      values (tests.rcpt('rc-sand-1'), tests.did('bolts'), 'ea000000-0000-0000-0000-00000000f001',
              'ea000000-0000-0000-0000-000000000003', 'cashier', gen_random_uuid()) $$,
   '23505', null, 'a receipt links to at most one disbursement');
+-- pgTAP runs in one transaction, so a receipt entered "earlier" is one whose entry time is moved
+-- back, below the grants, as the superuser. A link claiming that earlier time is refused too.
+reset role;
+update public.stock_receipts set entered_at = now() - interval '1 day'
+ where id = tests.rcpt('rc-plain');
+set local role fv_definer_owner;
 select throws_ok(
   $$ insert into public.stock_receipt_imprest_links
        (receipt_id, disbursement_id, fund_id, linked_by, linked_role, correlation_id, linked_at)
      values (tests.rcpt('rc-plain'), tests.did('cement'), 'ea000000-0000-0000-0000-00000000f001',
              'ea000000-0000-0000-0000-000000000002', 'manager', gen_random_uuid(),
-             clock_timestamp() + interval '1 minute') $$,
-  '23001', null, 'a receipt entered without a link cannot gain one afterwards');
+             now() - interval '1 day') $$,
+  '23001', null, 'a receipt entered earlier without a link cannot gain one, even backdated');
 select throws_ok(
   $$ insert into public.stock_receipt_imprest_links
        (receipt_id, disbursement_id, fund_id, linked_by, linked_role, correlation_id)

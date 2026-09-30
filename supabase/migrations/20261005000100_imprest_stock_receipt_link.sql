@@ -80,9 +80,12 @@ begin
   select * into v_receipt from public.stock_receipts where id = new.receipt_id;
   select * into v_d from public.imprest_disbursements where id = new.disbursement_id;
 
-  -- `now()` is the transaction's start, so a link made after the entry's own transaction differs.
+  -- Stamped here, never taken from the writer, so a link cannot be backdated. `now()` is the
+  -- transaction's start: the receipt must have been entered in this same transaction, which a
+  -- receipt saved earlier without a link never was.
+  new.linked_at := now();
   if v_receipt.id is null or new.linked_by <> v_receipt.entered_by
-     or new.linked_at <> v_receipt.entered_at then
+     or v_receipt.entered_at <> now() then
     raise exception 'stock receipt % is linked when it is entered, by who entered it',
       new.receipt_id using errcode = 'restrict_violation';
   end if;
