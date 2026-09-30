@@ -6,7 +6,12 @@ import { ReceivingBoard } from "@/app/(app)/inventory/receiving/receiving-board"
 import { PageHeader } from "@/components/ui/surface";
 import { requireAccess } from "@/lib/auth/guard";
 import { loadCatalogue } from "@/lib/catalogue/catalogue";
-import { loadReceipts, loadStockOverview, loadSuppliers } from "@/lib/inventory/inventory";
+import {
+  loadImprestPaymentOptions,
+  loadReceipts,
+  loadStockOverview,
+  loadSuppliers,
+} from "@/lib/inventory/inventory";
 import { businessDate } from "@/lib/time/business-date";
 
 /**
@@ -28,11 +33,16 @@ export default async function ReceivingPage() {
   const viewer = await requireAccess("/inventory/receiving");
   const t = await getTranslations("inventory.receiving");
 
-  const [receipts, suppliers, catalogue, overview] = await Promise.all([
+  // Paid from imprest (issue #73) is offered to the two enterers who can read imprest payments: the
+  // Manager, and a Cashier for their own. A Sales Representative reads none, so is offered none.
+  const canLinkImprest = viewer.role === "manager" || viewer.role === "cashier";
+
+  const [receipts, suppliers, catalogue, overview, paymentOptions] = await Promise.all([
     loadReceipts(),
     loadSuppliers(),
     loadCatalogue(),
     loadStockOverview(),
+    canLinkImprest ? loadImprestPaymentOptions() : Promise.resolve(null),
   ]);
 
   return (
@@ -48,6 +58,9 @@ export default async function ReceivingPage() {
           viewer.role === "manager" || viewer.role === "cashier" || viewer.role === "sales_rep"
         }
         canApprove={viewer.role === "manager"}
+        paymentOptions={paymentOptions}
+        // Who can open a payment's page. A Cashier only ever sees a link to their own payment.
+        canOpenImprest={viewer.role !== "sales_rep"}
         idempotencyKey={randomUUID()}
         // Today in Dar es Salaam, decided here rather than in the browser. Most deliveries are
         // recorded on the day they arrive, so this is the answer that is usually right — and when

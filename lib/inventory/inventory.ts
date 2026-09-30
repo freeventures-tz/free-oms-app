@@ -1,6 +1,8 @@
 import { requireRows } from "@/lib/supabase/query";
+import { userApi } from "@/lib/supabase/api";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/auth/roles";
+import type { ImprestCategory } from "@/lib/imprest/spending";
 
 /**
  * Suppliers, stock and the movements behind it (product.md §8, §9, §10, §4.1).
@@ -85,6 +87,29 @@ export type ReceiptLine = {
   damageNote: string | null;
 };
 
+/**
+ * An imprest payment as a stock receipt shows it (issue #73): its number, where it stands, its
+ * category, the payee it was handed out to and the approved amount, raises included. All of it is
+ * read from the payment; none of it is typed on the receipt.
+ */
+export type PaidFromDisbursement = {
+  id: string;
+  disbursementNo: string;
+  status: string;
+  category: ImprestCategory;
+  recipient: string | null;
+  approved: number;
+  handedOutAt: string | null;
+};
+
+/** The payment a receipt was paid from, and who marked it, when the receipt was entered. */
+export type ReceiptImprestLink = {
+  disbursement: PaidFromDisbursement;
+  linkedBy: string;
+  linkedRole: AppRole;
+  linkedAt: string;
+};
+
 export type StockReceipt = {
   id: string;
   supplierId: string;
@@ -97,6 +122,8 @@ export type StockReceipt = {
   enteredAt: string;
   approval: ApprovalState;
   lines: ReceiptLine[];
+  /** Paid from imprest (issue #73), or `null` when it was not. Never changes once entered. */
+  paidFrom: ReceiptImprestLink | null;
 };
 
 export type TransferLine = { id: string; productId: string; quantity: number };
@@ -355,7 +382,10 @@ export async function loadReceipts(): Promise<StockReceipt[]> {
 
   const receipts = requireRows(receiptRows, "inventory.receipts");
   const lines = requireRows(lineRows, "inventory.receipt_lines");
-  const approvals = await approvalsFor(supabase, "stock_receipt");
+  const [approvals, paidFrom] = await Promise.all([
+    approvalsFor(supabase, "stock_receipt"),
+    imprestLinksFor(receipts.map((row) => row.id as string)),
+  ]);
 
   const linesByReceipt = new Map<string, ReceiptLine[]>();
   for (const row of lines) {
@@ -393,8 +423,86 @@ export async function loadReceipts(): Promise<StockReceipt[]> {
       // keeps one impossible row from blanking the whole board.
       approval: approvals.get(row.id as string) ?? PENDING,
       lines: linesByReceipt.get(row.id as string) ?? [],
+      paidFrom: paidFrom.get(row.id as string) ?? null,
     };
   });
+}
+
+type DisbursementSummaryRow = {
+  id: string;
+  disbursement_no: string;
+  status: string;
+  category: ImprestCategory;
+  recipient: string | null;
+  approved_tzs: number | string;
+  handed_out_at: string | null;
+};
+
+function summaryOf(row: DisbursementSummaryRow): PaidFromDisbursement {
+  return {
+    id: row.id,
+    disbursementNo: row.disbursement_no,
+    status: row.status,
+    category: row.category,
+    recipient: row.recipient,
+    approved: Number(row.approved_tzs),
+    handedOutAt: row.handed_out_at,
+  };
+}
+
+/**
+ * The payment of each receipt, keyed by receipt, from `api.staff_stock_receipt_imprest_links`. The
+ * database answers only for receipts the caller may read, so this adds nothing to what the board
+ * already shows them. A failed read throws, like every other read of the board: a receipt must not
+ * be shown as unpaid because the answer did not arrive.
+ */
+async function imprestLinksFor(receiptIds: string[]): Promise<Map<string, ReceiptImprestLink>> {
+  const links = new Map<string, ReceiptImprestLink>();
+  if (receiptIds.length === 0) return links;
+
+  const api = await userApi();
+  const rows = requireRows(
+    (await api.rpc("staff_stock_receipt_imprest_links", { p_receipt_ids: receiptIds })) as {
+      data:
+        | {
+            receipt_id: string;
+            linked_by: string;
+            linked_role: AppRole;
+            linked_at: string;
+            disbursement: DisbursementSummaryRow;
+          }[]
+        | null;
+      error: { message: string } | null;
+    },
+    "inventory.receipt_imprest_links",
+  );
+
+  for (const row of rows) {
+    links.set(row.receipt_id, {
+      disbursement: summaryOf(row.disbursement),
+      linkedBy: row.linked_by,
+      linkedRole: row.linked_role,
+      linkedAt: row.linked_at,
+    });
+  }
+  return links;
+}
+
+/**
+ * The payments a new receipt can be marked paid from (issue #73): the active fund's that were handed
+ * out, settled, sent back or verified, newest hand-out first. The Manager is sent every one and a
+ * Cashier their own; the database decides which.
+ */
+export async function loadImprestPaymentOptions(): Promise<PaidFromDisbursement[]> {
+  const api = await userApi();
+  const rows = requireRows(
+    (await api.rpc("staff_imprest_receipt_payment_options")) as {
+      data: DisbursementSummaryRow[] | null;
+      error: { message: string } | null;
+    },
+    "inventory.imprest_payment_options",
+  );
+  return rows.map(summaryOf);
 }
 
 export async function loadTransfers(): Promise<StockTransfer[]> {

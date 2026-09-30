@@ -1,7 +1,8 @@
 "use client";
 
+import Link, { useLinkStatus } from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   approveReceiptAction,
@@ -18,9 +19,11 @@ import { unitLabel } from "@/lib/catalogue/unit-label";
 import type {
   ApprovalState,
   InventoryLocation,
+  PaidFromDisbursement,
   StockReceipt,
   Supplier,
 } from "@/lib/inventory/inventory";
+import { formatTzs } from "@/lib/money";
 import { useGuardedAction } from "@/lib/ui/use-guarded-action";
 
 /**
@@ -99,6 +102,24 @@ function derive(line: DraftLine) {
   };
 }
 
+/**
+ * A payment as the picker and a receipt show it: payee, category and approved amount, all read from
+ * the payment (issue #73). The payee is who the cash was handed to.
+ */
+function paymentDetail(
+  payment: PaidFromDisbursement,
+  t: ReturnType<typeof useTranslations>,
+  locale: string,
+): string {
+  return [
+    payment.recipient,
+    t(`imprest.spending.category.${payment.category}`),
+    formatTzs(payment.approved, locale),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function ReceivingBoard({
   receipts,
   suppliers,
@@ -109,6 +130,8 @@ export function ReceivingBoard({
   canApprove,
   idempotencyKey,
   today,
+  paymentOptions = null,
+  canOpenImprest = false,
 }: {
   receipts: StockReceipt[];
   suppliers: Supplier[];
@@ -120,6 +143,13 @@ export function ReceivingBoard({
   idempotencyKey: string;
   /** Today in `Africa/Dar_es_Salaam`, as `YYYY-MM-DD`, decided on the server. */
   today: string;
+  /**
+   * The payments a new receipt can be marked paid from (issue #73), or `null` for someone who
+   * reads no imprest payment and is not offered Paid from imprest at all.
+   */
+  paymentOptions?: PaidFromDisbursement[] | null;
+  /** Whether a receipt's payment links to its page: everyone but a Sales Representative. */
+  canOpenImprest?: boolean;
 }) {
   const t = useTranslations("inventory.receiving");
 
@@ -136,6 +166,7 @@ export function ReceivingBoard({
           locations={locations}
           initialKey={idempotencyKey}
           today={today}
+          paymentOptions={paymentOptions}
         />
       ) : null}
 
@@ -153,6 +184,7 @@ export function ReceivingBoard({
               products={products}
               units={units}
               canApprove={canApprove}
+              canOpenImprest={canOpenImprest}
             />
           ))
         )}
@@ -172,6 +204,7 @@ export function ReceivingBoard({
               products={products}
               units={units}
               canApprove={false}
+              canOpenImprest={canOpenImprest}
             />
           ))
         )}
@@ -240,16 +273,42 @@ function DecisionRecord({
   );
 }
 
+/**
+ * The payment's number as a link that answers the tap before the server does (design.md §12.7
+ * rule 2), the way `NavLink` does: while the payment's page is on its way the number takes a pending
+ * treatment at once. `useLinkStatus` has to be read from inside the `Link`, hence the wrapper.
+ */
+function PaymentLinkLabel({ children }: { children: ReactNode }) {
+  const { pending } = useLinkStatus();
+  const t = useTranslations("common");
+
+  return (
+    <span
+      data-pending-link={pending || undefined}
+      className={
+        pending
+          ? "fv-identifier rounded-sm bg-accent px-1 font-medium text-accent-foreground"
+          : "fv-identifier rounded-sm px-1 font-medium text-foreground underline underline-offset-2"
+      }
+    >
+      {children}
+      {pending ? <span className="sr-only"> {t("loading")}</span> : null}
+    </span>
+  );
+}
+
 function ReceiptCard({
   receipt,
   products,
   units,
   canApprove,
+  canOpenImprest,
 }: {
   receipt: StockReceipt;
   products: CatalogueProduct[];
   units: Unit[];
   canApprove: boolean;
+  canOpenImprest: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -285,6 +344,26 @@ function ReceiptCard({
               ·{" "}
               <time dateTime={receipt.enteredAt}>{formatStamp(receipt.enteredAt, locale)}</time>
             </p>
+            {/* Paid from imprest (issue #73): the payment, read from the payment itself, so the
+                purchase is recorded once and the two records point at each other. */}
+            {receipt.paidFrom ? (
+              <p className="text-xs text-muted-foreground" data-testid={`paid-from-${receipt.id}`}>
+                {t("inventory.receiving.paidFrom")}:{" "}
+                {canOpenImprest ? (
+                  <Link
+                    href={`/imprest/disbursements/${receipt.paidFrom.disbursement.id}`}
+                    className="rounded-sm"
+                  >
+                    <PaymentLinkLabel>{receipt.paidFrom.disbursement.disbursementNo}</PaymentLinkLabel>
+                  </Link>
+                ) : (
+                  <span className="fv-identifier">
+                    {receipt.paidFrom.disbursement.disbursementNo}
+                  </span>
+                )}{" "}
+                · {paymentDetail(receipt.paidFrom.disbursement, t, locale)}
+              </p>
+            ) : null}
           </div>
 
           <div className="shrink-0">
@@ -398,6 +477,7 @@ function NewReceiptForm({
   locations,
   initialKey,
   today,
+  paymentOptions,
 }: {
   suppliers: Supplier[];
   products: CatalogueProduct[];
@@ -405,6 +485,7 @@ function NewReceiptForm({
   locations: InventoryLocation[];
   initialKey: string;
   today: string;
+  paymentOptions: PaidFromDisbursement[] | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -417,6 +498,8 @@ function NewReceiptForm({
   const [deliveryDate, setDeliveryDate] = useState(today);
   const [deliveryNoteRef, setDeliveryNoteRef] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  const [paidFromImprest, setPaidFromImprest] = useState(false);
+  const [disbursementId, setDisbursementId] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(initialKey);
 
   const unitsByCode = new Map(units.map((unit) => [unit.code, unit]));
@@ -436,6 +519,8 @@ function NewReceiptForm({
         setDeliveryDate(outcome.businessDate ?? today);
         setDeliveryNoteRef("");
         setLines([emptyLine()]);
+        setPaidFromImprest(false);
+        setDisbursementId("");
         setIdempotencyKey(crypto.randomUUID());
       }
     },
@@ -742,6 +827,59 @@ function NewReceiptForm({
           </div>
         </div>
 
+        {paymentOptions ? (
+          <div className="flex flex-col gap-3">
+            <label
+              htmlFor="receipt-paid-from-imprest"
+              className="flex min-h-12 items-center gap-3 text-sm font-medium md:min-h-11"
+            >
+              <input
+                id="receipt-paid-from-imprest"
+                type="checkbox"
+                className="size-5 accent-primary"
+                checked={paidFromImprest}
+                disabled={pending}
+                onChange={(event) => setPaidFromImprest(event.target.checked)}
+              />
+              {t("inventory.receiving.paidFromImprest")}
+            </label>
+
+            {paidFromImprest ? (
+              paymentOptions.length === 0 ? (
+                <div className="flex flex-col gap-1">
+                  <Help>{t("inventory.receiving.noPaymentToPick")}</Help>
+                  <FieldError>
+                    {result.fieldErrors?.disbursementId ? t(result.fieldErrors.disbursementId) : null}
+                  </FieldError>
+                </div>
+              ) : (
+                <Field>
+                  <Label htmlFor="receipt-disbursement">
+                    {t("inventory.receiving.whichPayment")}
+                  </Label>
+                  <Select
+                    id="receipt-disbursement"
+                    value={disbursementId}
+                    disabled={pending}
+                    onChange={(event) => setDisbursementId(event.target.value)}
+                  >
+                    <option value="">{t("inventory.receiving.choosePayment")}</option>
+                    {paymentOptions.map((payment) => (
+                      <option key={payment.id} value={payment.id}>
+                        {[payment.disbursementNo, paymentDetail(payment, t, locale)].join(" · ")}
+                      </option>
+                    ))}
+                  </Select>
+                  <Help>{t("inventory.receiving.whichPaymentHelp")}</Help>
+                  <FieldError>
+                    {result.fieldErrors?.disbursementId ? t(result.fieldErrors.disbursementId) : null}
+                  </FieldError>
+                </Field>
+              )
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-2 md:flex-row">
           <Button
             type="button"
@@ -766,6 +904,8 @@ function NewReceiptForm({
                   })),
                 ),
               );
+              data.set("paidFromImprest", paidFromImprest ? "true" : "false");
+              data.set("disbursementId", paidFromImprest ? disbursementId : "");
               data.set("idempotencyKey", idempotencyKey);
               action.run("save", enterReceiptAction, data);
             }}

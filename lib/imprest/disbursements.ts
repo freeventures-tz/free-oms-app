@@ -1014,3 +1014,56 @@ export async function loadDisbursement(id: string): Promise<DisbursementDetail |
 
   return { ...disbursement, postings, reversals, events, cycles, fundRetired: !fund.is_active };
 }
+
+/** A delivery a payment paid for (issue #73), as the payment's page lists it. */
+export type DisbursementStockReceipt = {
+  receiptId: string;
+  supplier: string;
+  deliveryNoteRef: string;
+  deliveryDate: string;
+  locationCode: string;
+  enteredBy: string;
+  enteredRole: "manager" | "cashier" | "sales_rep";
+  linkedAt: string;
+  /** The Manager's decision on the receipt: stock rose only if it is approved. */
+  approvalStatus: "pending" | "approved" | "rejected" | string;
+};
+
+/**
+ * The stock receipts marked as paid from one disbursement, newest first (issue #73). The database
+ * answers for whoever can read the disbursement, including receipts a Cashier did not enter, and
+ * nothing for anyone else. A failed read throws rather than showing a payment that paid for nothing.
+ */
+export async function loadDisbursementStockReceipts(id: string): Promise<DisbursementStockReceipt[]> {
+  const api = await userApi();
+  const rows = requireRows(
+    (await api.rpc("staff_imprest_disbursement_stock_receipts", { p_disbursement_id: id })) as {
+      data:
+        | {
+            receipt_id: string;
+            supplier: string;
+            delivery_note_ref: string;
+            delivery_date: string;
+            location_code: string;
+            entered_by: string;
+            entered_role: DisbursementStockReceipt["enteredRole"];
+            linked_at: string;
+            approval_status: string;
+          }[]
+        | null;
+      error: { message: string } | null;
+    },
+    "imprest.disbursement_stock_receipts",
+  );
+  return rows.map((row) => ({
+    receiptId: row.receipt_id,
+    supplier: row.supplier,
+    deliveryNoteRef: row.delivery_note_ref,
+    deliveryDate: row.delivery_date,
+    locationCode: row.location_code,
+    enteredBy: row.entered_by,
+    enteredRole: row.entered_role,
+    linkedAt: row.linked_at,
+    approvalStatus: row.approval_status,
+  }));
+}

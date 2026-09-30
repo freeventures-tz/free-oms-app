@@ -69,6 +69,11 @@ const KNOWN_ERROR_KEYS = new Set([
   "duplicate_product_line",
   "damaged_exceeds_received",
   "no_receipt",
+  // Paid from imprest (issue #73)
+  "imprest_link_not_permitted",
+  "no_disbursement",
+  "disbursement_fund_retired",
+  "disbursement_not_paid",
   // Transfers and adjustments
   "no_transfer",
   "no_adjustment",
@@ -257,6 +262,8 @@ export async function enterReceiptAction(
     deliveryDate: formData.get("deliveryDate"),
     deliveryNoteRef: formData.get("deliveryNoteRef"),
     lines: parseLines(formData.get("lines")),
+    paidFromImprest: formData.get("paidFromImprest"),
+    disbursementId: formData.get("disbursementId"),
     idempotencyKey: formData.get("idempotencyKey"),
   });
 
@@ -268,12 +275,15 @@ export async function enterReceiptAction(
     deliveryDate: parsed.data.deliveryDate,
     deliveryNoteRef: parsed.data.deliveryNoteRef,
     lines: parsed.data.lines,
+    disbursementId: parsed.data.disbursementId,
     idempotencyKey: parsed.data.idempotencyKey,
   });
 
   if (!result.ok) return { error: errorKey(result.reason) };
 
   revalidateStock();
+  // The payment's page lists the deliveries it paid for (issue #73).
+  if (parsed.data.disbursementId) revalidatePath(`/imprest/disbursements/${parsed.data.disbursementId}`);
   // Computed here, after the work, rather than reused from the request: this is the date the NEXT
   // delivery should start with, and the two differ exactly when the form has been open across
   // midnight — which is the case worth being right about.

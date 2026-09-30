@@ -395,7 +395,13 @@
       "noSettled": "No deliveries have been decided yet.",
       "enteredBy": "Entered by {who} ({role})",
       "shortageRecorded": "{count} short, recorded permanently",
-      "damagedRecorded": "{count} damaged, not added to stock"
+      "damagedRecorded": "{count} damaged, not added to stock",
+      "paidFromImprest": "Paid from imprest",
+      "whichPayment": "Which payment paid for it",
+      "choosePayment": "Choose the payment",
+      "whichPaymentHelp": "The payment's details are already recorded. Nothing about it is typed again.",
+      "noPaymentToPick": "There is no handed-out payment to pick. A payment can be picked once its cash has been handed out.",
+      "paidFrom": "Paid from imprest"
     },
     "transfers": {
       "title": "Internal transfers",
@@ -528,7 +534,12 @@
     },
     "location": {
       "required": "Choose a location."
-    }
+    },
+    "disbursement_required": "Choose the payment that paid for this delivery.",
+    "imprest_link_not_permitted": "Only the Manager or a Cashier can mark a delivery as paid from imprest.",
+    "no_disbursement": "That payment is not available. Reload the page.",
+    "disbursement_fund_retired": "That payment belongs to a retired imprest fund. Reload the page.",
+    "disbursement_not_paid": "That payment has not been handed out, so it paid for nothing yet. Reload the page."
   },
   "sales": {
     "orders": {
@@ -1477,6 +1488,10 @@
           "refused": "Refused",
           "handed_out": "Raised and handed out"
         }
+      },
+      "stockReceipts": {
+        "heading": "Deliveries paid from this payment",
+        "none": "No stock receipt is marked as paid from this payment."
       }
     },
     "count": {
