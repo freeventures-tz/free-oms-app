@@ -5,6 +5,7 @@ import { ProposeDisbursementForm } from "@/app/(app)/imprest/disbursement-forms"
 import { RequestFundingForm } from "@/app/(app)/imprest/funding-forms";
 import { CountAlertHistory, CountFlags, DailyCountSection, OpenCountDays } from "@/app/(app)/imprest/daily-count";
 import { FundingStatusChip } from "@/app/(app)/imprest/funding-status";
+import { CarriedBalance, RetiredFundsList, RetirementSection } from "@/app/(app)/imprest/retirement";
 import { DisbursementList, SpendingFigures } from "@/app/(app)/imprest/spending";
 import { Pager } from "@/components/ui/pager";
 import { Card, PageHeader } from "@/components/ui/surface";
@@ -25,6 +26,7 @@ import {
 import type { DailyCount } from "@/lib/imprest/counting";
 import { loadAlertHistory, loadCountFlags, loadCounts, loadDayCounts, loadOpenDays } from "@/lib/imprest/counts";
 import { loadFundings } from "@/lib/imprest/funding";
+import { loadFundState, loadRetiredFunds } from "@/lib/imprest/retirement";
 import { formatTzs } from "@/lib/money";
 import { pageNumber } from "@/lib/settlement/settlement";
 import { businessDate, formatBusinessStamp } from "@/lib/time/business-date";
@@ -72,7 +74,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
 
   const countPage = pageNumber(params.counts);
   const today = businessDate();
-  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, raising, settled, back, reversing, verified, fundings] = await Promise.all([
+  const [position, counts, todays, dayCounts, openDays, alertHistory, flags, waiting, open, out, raising, settled, back, reversing, verified, fundings, fundState, retired] = await Promise.all([
     loadSpendingPosition(),
     loadCounts(countPage),
     countPage === 1 ? null : loadCounts(1),
@@ -89,6 +91,8 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     loadWaitingForReversal(pageNumber(params.reversal)),
     loadVerified(pageNumber(params.verified)),
     loadFundings(page),
+    loadFundState(),
+    loadRetiredFunds(pageNumber(params.retired)),
   ]);
   // Each list pages on its own parameter and keeps the others where they were.
   const pages = {
@@ -104,6 +108,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
     counts: counts.page,
     missed: openDays.page,
     alerts: alertHistory.page,
+    retired: retired.page,
   };
   const others = (own: keyof typeof pages) =>
     Object.fromEntries(Object.entries(pages).filter(([name]) => name !== own));
@@ -114,6 +119,9 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
 
       <SpendingFigures position={position} />
 
+      {/* The balance carried from the fund retired before this one (issue #72). */}
+      {fundState?.opening ? <CarriedBalance opening={fundState.opening} /> : null}
+
       {/* The flags a confirmed shortage or excess raised to the Directors (issue #68). */}
       {flags ? <CountFlags flags={flags} /> : null}
 
@@ -123,6 +131,7 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
           today={today}
           todays={withToday(dayCounts, (todays ?? counts).rows)}
           history={counts}
+          countingStartsOn={fundState?.countingStartsOn ?? null}
           otherParams={others("counts")}
         >
           {/* The days not closed, oldest first: the open alerts, and what resolved them (issue #69). */}
@@ -130,6 +139,9 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
           <CountAlertHistory history={alertHistory} otherParams={others("alerts")} />
         </DailyCountSection>
       ) : null}
+
+      {/* The Manager submits the fund's retirement; a Director decides (issue #72). */}
+      {fundState ? <RetirementSection role={viewer.role} state={fundState} /> : null}
 
       <DisbursementList
         id="disbursements-waiting"
@@ -274,6 +286,8 @@ export default async function ImprestPage({ searchParams }: PageProps<"/imprest"
           otherParams={others("page")}
         />
       </section>
+
+      <RetiredFundsList page={retired} otherParams={others("retired")} />
     </>
   );
 }
@@ -291,7 +305,7 @@ async function CashierImprest({
 }) {
   const t = await getTranslations("imprest");
   const today = businessDate();
-  const [position, own, purposes, counts, todays, dayCounts, openDays] = await Promise.all([
+  const [position, own, purposes, counts, todays, dayCounts, openDays, fundState] = await Promise.all([
     loadSpendingPosition(),
     loadOwnDisbursements(viewerId, mine),
     loadRecentPurposes(viewerId),
@@ -299,6 +313,7 @@ async function CashierImprest({
     countPage === 1 ? null : loadCounts(1),
     loadDayCounts(today),
     loadOpenDays(missed),
+    loadFundState(),
   ]);
   // The fund holds one waiting count, and it is always the latest entered, so the first page of
   // counts shows whether one waits. While it does, no missed day can be counted.
@@ -317,6 +332,7 @@ async function CashierImprest({
           today={today}
           todays={withToday(dayCounts, (todays ?? counts).rows)}
           history={counts}
+          countingStartsOn={fundState?.countingStartsOn ?? null}
           otherParams={{ mine: own.page, missed: openDays.page }}
         >
           {/* A day nobody counted can be counted late, with a reason (issue #69). */}

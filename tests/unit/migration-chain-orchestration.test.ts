@@ -171,9 +171,10 @@ describe("the migration-chain command's verdict", () => {
     // adds twelve: those eleven again and a send-back's reason rewritten. Issue #69's v0.7.0 phase
     // adds thirteen: those twelve again and a count confirmation's reason rewritten. Issue #70's
     // v0.8.0 phase adds fourteen: those thirteen again and a late count's reason rewritten. Issue
-    // #71's v0.9.0 phase adds fifteen: those fourteen again and a raise's reason rewritten. An exact
-    // count, so a phase that silently stopped running its counterexamples is a failure rather than a
-    // quieter pass.
+    // #71's v0.9.0 phase adds fifteen: those fourteen again and a raise's reason rewritten. Issue
+    // #72's v0.10.0 phase adds sixteen: those fifteen again and a reversal request's reason
+    // rewritten. An exact count, so a phase that silently stopped running its counterexamples is a
+    // failure rather than a quieter pass.
     expect(out).toContain("a disputed imprest handover's amount rewritten in place");
     expect(out).toContain("a delivered report's content rewritten in place");
     expect(out).toContain("a label added to a released enum");
@@ -185,16 +186,27 @@ describe("the migration-chain command's verdict", () => {
     expect(out).toContain("a count confirmation's reason rewritten in place");
     expect(out).toContain("a late count's reason rewritten in place");
     expect(out).toContain("a raise's reason rewritten in place");
+    expect(out).toContain("a reversal request's reason rewritten in place");
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(105);
+    ).toHaveLength(121);
+
+    // Issue #72: the v0.10.0 phase reset to the last released migration, approved one reversal and
+    // rejected another, and asserted the retirement upgrade, refusing to retire the released fund.
+    expect(out).toContain("AND reversals");
+    expect(calls.filter((call) => call.args[0]?.includes("56_mark_v0100_boundary"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args[0]?.includes("57_build_v0100_reversals"))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.args[0]?.includes("58_assert_retirement_upgrade")),
+    ).toHaveLength(1);
 
     // Issue #71: the v0.9.0 phase reset to the last released migration, raised one approval and
     // refused another, and asserted the reversal upgrade, reversing postings verified before it.
     expect(out).toContain("AND raised approvals");
     expect(calls.filter((call) => call.args[0]?.includes("52_mark_v090_boundary"))).toHaveLength(1);
-    expect(calls.filter((call) => call.args[0]?.includes("53_build_v090_raises"))).toHaveLength(1);
+    // Twice: the v0.10.0 phase issue #72 adds raises the same approvals on its own database.
+    expect(calls.filter((call) => call.args[0]?.includes("53_build_v090_raises"))).toHaveLength(2);
     expect(
       calls.filter((call) => call.args[0]?.includes("54_assert_reversal_upgrade")),
     ).toHaveLength(1);
@@ -203,8 +215,9 @@ describe("the migration-chain command's verdict", () => {
     // and asserted the raised approval upgrade, running the new commands on the old payments.
     expect(out).toContain("AND a missed day counted late");
     expect(calls.filter((call) => call.args[0]?.includes("48_mark_v080_boundary"))).toHaveLength(1);
-    // Twice: the v0.9.0 phase issue #71 adds counts the same missed day late on its own database.
-    expect(calls.filter((call) => call.args[0]?.includes("49_build_v080_late_count"))).toHaveLength(2);
+    // Three times: the v0.9.0 and v0.10.0 phases of issues #71 and #72 count the same missed day
+    // late on their own databases.
+    expect(calls.filter((call) => call.args[0]?.includes("49_build_v080_late_count"))).toHaveLength(3);
     expect(
       calls.filter((call) => call.args[0]?.includes("50_assert_raised_approval_upgrade")),
     ).toHaveLength(1);
@@ -215,7 +228,7 @@ describe("the migration-chain command's verdict", () => {
     expect(calls.filter((call) => call.args[0]?.includes("44_mark_v070_boundary"))).toHaveLength(1);
     // Three times: the v0.8.0 and v0.9.0 phases of issues #70 and #71 count the same day on their
     // own databases.
-    expect(calls.filter((call) => call.args[0]?.includes("45_build_v070_counts"))).toHaveLength(3);
+    expect(calls.filter((call) => call.args[0]?.includes("45_build_v070_counts"))).toHaveLength(4);
     expect(
       calls.filter((call) => call.args[0]?.includes("46_assert_not_counted_upgrade")),
     ).toHaveLength(1);
@@ -226,7 +239,7 @@ describe("the migration-chain command's verdict", () => {
     expect(calls.filter((call) => call.args[0]?.includes("40_mark_v060_boundary"))).toHaveLength(1);
     // Four times: the v0.7.0, v0.8.0 and v0.9.0 phases of issues #69, #70 and #71 send the same
     // settlement back on their own databases.
-    expect(calls.filter((call) => call.args[0]?.includes("41_build_v060_send_back"))).toHaveLength(4);
+    expect(calls.filter((call) => call.args[0]?.includes("41_build_v060_send_back"))).toHaveLength(5);
     expect(
       calls.filter((call) => call.args[0]?.includes("42_assert_daily_count_upgrade")),
     ).toHaveLength(1);
@@ -237,7 +250,7 @@ describe("the migration-chain command's verdict", () => {
     expect(calls.filter((call) => call.args[0]?.includes("36_mark_v050_boundary"))).toHaveLength(1);
     // Five times: the v0.6.0, v0.7.0, v0.8.0 and v0.9.0 phases of issues #68, #69, #70 and #71 build
     // the same verification.
-    expect(calls.filter((call) => call.args[0]?.includes("37_build_v050_verifications"))).toHaveLength(5);
+    expect(calls.filter((call) => call.args[0]?.includes("37_build_v050_verifications"))).toHaveLength(6);
     expect(
       calls.filter((call) => call.args[0]?.includes("38_assert_send_back_upgrade")),
     ).toHaveLength(1);
@@ -248,7 +261,7 @@ describe("the migration-chain command's verdict", () => {
     expect(calls.filter((call) => call.args[0]?.includes("32_mark_v040_boundary"))).toHaveLength(1);
     // Six times: the v0.5.0, v0.6.0, v0.7.0, v0.8.0 and v0.9.0 phases of issues #65, #68, #69, #70
     // and #71 build the same settlements.
-    expect(calls.filter((call) => call.args[0]?.includes("33_build_v040_settlements"))).toHaveLength(6);
+    expect(calls.filter((call) => call.args[0]?.includes("33_build_v040_settlements"))).toHaveLength(7);
     expect(
       calls.filter((call) => call.args[0]?.includes("34_assert_verification_upgrade")),
     ).toHaveLength(1);
@@ -259,7 +272,7 @@ describe("the migration-chain command's verdict", () => {
     expect(calls.filter((call) => call.args[0]?.includes("28_mark_v030_boundary"))).toHaveLength(1);
     // Seven times: the v0.4.0, v0.5.0, v0.6.0, v0.7.0, v0.8.0 and v0.9.0 phases of issues #64, #65,
     // #68, #69, #70 and #71 build the same disbursements.
-    expect(calls.filter((call) => call.args[0]?.includes("29_build_v030_disbursements"))).toHaveLength(7);
+    expect(calls.filter((call) => call.args[0]?.includes("29_build_v030_disbursements"))).toHaveLength(8);
     expect(
       calls.filter((call) => call.args[0]?.includes("30_assert_settlement_upgrade")),
     ).toHaveLength(1);
@@ -270,7 +283,7 @@ describe("the migration-chain command's verdict", () => {
     expect(calls.filter((call) => call.args[0]?.includes("22_mark_v020_boundary"))).toHaveLength(1);
     // Eight times: the v0.3.3, v0.4.0, v0.5.0, v0.6.0, v0.7.0, v0.8.0 and v0.9.0 phases of issues
     // #62, #64, #65, #68, #69, #70 and #71 each build the same real report on their own database.
-    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(8);
+    expect(calls.filter((call) => call.args[0]?.includes("23_build_v020_report"))).toHaveLength(9);
     expect(
       calls.filter((call) => call.args[0]?.includes("24_assert_disbursement_upgrade")),
     ).toHaveLength(1);

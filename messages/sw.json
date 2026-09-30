@@ -1633,7 +1633,8 @@
           "confirmed": "Ilitolewa {raised}. Ilishughulikiwa {resolved}, Meneja alipoithibitisha.",
           "sent_back": "Ilitolewa {raised}. Ilishughulikiwa {resolved}, Meneja alipoirudisha."
         }
-      }
+      },
+      "notYet": "Leo ilihesabiwa kabla mfuko uliopita haujafungwa. Kuhesabu kunaanza tena tarehe {date}."
     },
     "reversal": {
       "title": "Masahihisho",
@@ -1673,6 +1674,137 @@
         "requested": "Ombi limetumwa. Mkurugenzi ataidhinisha au kukataa, na kilichoandikwa kinabaki kama kilivyo hadi hapo.",
         "approved": "Imeidhinishwa. Ugeuzaji na mbadala vimeandikwa.",
         "rejected": "Ombi limekataliwa. Kilichoandikwa kinabaki kama kilivyokuwa."
+      },
+      "fundRetired": "Mfuko wa malipo haya umefungwa, kwa hivyo vilivyoandikwa haviwezi kusahihishwa tena. Vinabaki kwenye kumbukumbu ya mfuko uliofungwa."
+    },
+    "retirement": {
+      "title": "Funga mfuko",
+      "help": {
+        "manager": "Kila kitu cha mfuko kikishakamilika na hesabu ya leo ikishathibitishwa, wasilisha kufungwa kwa mfuko. Mkurugenzi ataidhinisha. Hakuna fedha inayorudishwa: fedha inabaki kashani, na salio la kufunga linafungua mfuko unaofuata.",
+        "director": "Meneja anawasilisha kufungwa kwa mfuko, nawe unaidhinisha au unakataa. Hakuna fedha inayorudishwa: salio la kufunga linafungua mfuko unaofuata."
+      },
+      "rejected": "Uwasilishaji uliopita ulikataliwa na {name} tarehe {when}: {reason}",
+      "blockers": {
+        "title": "Bado viko wazi ({count}). Kila kimoja kikamilike kabla mfuko haujafungwa:",
+        "disbursement": "malipo hayajakamilika",
+        "funding": "ufadhili haujapokelewa wala kukataliwa",
+        "raise": "inaomba idhini iongezwe",
+        "reversal": "ugeuzaji unamsubiri Mkurugenzi",
+        "count": "hesabu inamsubiri Meneja"
+      },
+      "count": {
+        "required": "Hesabu ya leo lazima ithibitishwe kwanza.",
+        "ready": "Hesabu ya leo imethibitishwa na hakuna kilichoandikwa tangu hapo. Salio la kufunga ni fedha iliyohesabiwa: {amount}.",
+        "beforeLastPosting": "Fedha iliandikwa baada ya hesabu ya leo, kwa hivyo hesabu haionyeshi tena kilichomo kashani. Hesabu siku ya kazi inayofuata, kisha uwasilishe."
+      },
+      "reason": "Kwa nini mfuko unafungwa",
+      "reasonHelp": "Herufi 3 hadi 500.",
+      "submit": "Wasilisha kufungwa",
+      "submittedBy": "Imewasilishwa na {name} tarehe {when}",
+      "waiting": "Inamsubiri Mkurugenzi",
+      "waitingManager": "Mkurugenzi ataidhinisha au atakataa. Hadi hapo mfuko unabaki wazi.",
+      "reasonLine": "Sababu: {reason}",
+      "figures": {
+        "funding": "Ufadhili uliopokelewa",
+        "counted": "Imehesabiwa tarehe {date}",
+        "closing": "Salio la kufunga"
+      },
+      "carryHelp": "Ikiidhinishwa, mfuko unafungwa na {amount} inafungua mfuko unaofuata. Fedha inabaki kashani.",
+      "approve": "Idhinisha kufungwa",
+      "confirmHelp": "Hii inafunga mfuko kabisa na kuhamisha salio lake la kufunga kwenye mfuko mpya. Haiwezi kutenduliwa. Kisichotatuliwa kinabaki bila kutatuliwa.",
+      "confirm": "Ndiyo, funga mfuko",
+      "reject": "Kataa",
+      "rejectReason": "Kwa nini unakataa",
+      "rejectConfirm": "Kataa kufungwa",
+      "success": {
+        "submitted": "Kufungwa kumewasilishwa. Mkurugenzi ataidhinisha au atakataa.",
+        "approved": "Mfuko umefungwa. Salio lake la kufunga limefungua mfuko unaofuata.",
+        "rejected": "Kufungwa kumekataliwa. Mfuko unabaki wazi."
+      },
+      "carried": {
+        "label": "Kilichohamishwa kutoka mfuko uliofungwa",
+        "help": "Salio la kufunga la mfuko uliofungwa tarehe {date}. Ni sehemu ya salio lililothibitishwa hapo juu.",
+        "open": "Angalia mfuko uliofungwa"
+      },
+      "unresolved": {
+        "title": "Visivyotatuliwa",
+        "none": "Hakuna kisichotatuliwa: hakuna hasara wala upungufu unaomsubiri Mkurugenzi, na hakuna siku Haijahesabiwa.",
+        "notResolved": "Kufunga mfuko hakutatui haya. Yanabaki kwenye kumbukumbu ya mfuko.",
+        "deficit": "Nakisi: {amount}",
+        "losses": "Hasara zisizoelezwa zinazomsubiri Mkurugenzi ({count})",
+        "shortages": "Upungufu wa hesabu unaomsubiri Mkurugenzi ({count})",
+        "excess": "Ziada za hesabu: {amount}. Zinaonyeshwa peke yake, hazipunguzwi kwenye nakisi.",
+        "notCounted": "Siku ambazo Hazijahesabiwa ({count})"
+      },
+      "retired": {
+        "title": "Mifuko iliyofungwa ({count})",
+        "empty": "Bado hakuna mfuko uliofungwa.",
+        "dates": "Ulifunguliwa {opened}, ukafungwa {retired}",
+        "people": "Uliwasilishwa na {submitted}, ukaidhinishwa na {approved}",
+        "deficit": "Nakisi {amount}",
+        "losses": "Hasara zinazosubiri ({count})",
+        "shortages": "Upungufu unaosubiri ({count})",
+        "notCounted": "Siku ambazo Hazijahesabiwa ({count})",
+        "clear": "Hakuna kisichotatuliwa",
+        "closing": "Salio la kufunga {amount}"
+      }
+    },
+    "fundRecord": {
+      "titleRetired": "Mfuko uliofungwa {date}",
+      "titleActive": "Mfuko wa sasa",
+      "description": "Ulifunguliwa {opened}. Kumbukumbu hii ni ya kusoma tu.",
+      "active": "Wazi",
+      "retired": "Umefungwa",
+      "back": "Rudi kwenye imprest",
+      "figures": {
+        "title": "Takwimu",
+        "opening": "Salio la kufungua",
+        "funding": "Ufadhili uliopokelewa",
+        "expenses": "Matumizi",
+        "losses": "Hasara zisizoelezwa",
+        "shortages": "Upungufu wa hesabu",
+        "excesses": "Ziada za hesabu",
+        "closing": "Salio la kufunga",
+        "balance": "Salio lililothibitishwa"
+      },
+      "carriedFrom": "Ulifunguliwa na {amount} iliyohamishwa kutoka mfuko uliotangulia.",
+      "openFund": "Angalia mfuko huo",
+      "carriedInto": "Salio lake la kufunga la {amount} lilifungua mfuko unaofuata tarehe {when}.",
+      "retirements": "Kufungwa",
+      "noRetirement": "Haujawasilishwa kufungwa.",
+      "status": {
+        "submitted": "Inamsubiri Mkurugenzi",
+        "approved": "Imeidhinishwa",
+        "rejected": "Imekataliwa"
+      },
+      "closingAt": "Salio la kufunga {amount}, lilihesabiwa tarehe {date}",
+      "listedNotCounted": "Siku ambazo Hazijahesabiwa zilizoorodheshwa: {days}",
+      "approvedBy": "Imeidhinishwa na {name} tarehe {when}",
+      "rejectedBy": "Imekataliwa na {name} tarehe {when}: {reason}",
+      "days": "Siku",
+      "noDays": "Hakuna siku za kazi.",
+      "counts": "Hesabu",
+      "noCounts": "Hakuna hesabu.",
+      "countLine": "{date}, hesabu ya {attempt}, na {name}",
+      "late": "Imehesabiwa kwa kuchelewa: {reason}",
+      "countFigures": "Imehesabiwa {counted}, ilitarajiwa {expected}",
+      "fundings": "Ufadhili",
+      "noFundings": "Hakuna ufadhili.",
+      "fundingRequested": "Iliombwa {amount}, haijapokelewa",
+      "fundingReceived": "Imepokelewa {amount}",
+      "postings": "Vilivyoandikwa",
+      "noPostings": "Hakuna kilichoandikwa.",
+      "posting": {
+        "expense": {
+          "original": "Matumizi",
+          "reversal": "Matumizi yamegeuzwa",
+          "replacement": "Matumizi, yamesahihishwa"
+        },
+        "unexplained_loss": {
+          "original": "Hasara isiyoelezwa",
+          "reversal": "Hasara isiyoelezwa imegeuzwa",
+          "replacement": "Hasara isiyoelezwa, imesahihishwa"
+        }
       }
     }
   },
@@ -1960,5 +2092,21 @@
       "imprest_reversal": "Kurudisha fedha za mfuko",
       "imprest_retirement": "Kufunga mfuko"
     }
+  },
+  "retirementErrors": {
+    "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",
+    "generic": "Hitilafu imetokea na hakuna kilichobadilishwa. Jaribu tena.",
+    "unconfirmed": "Jibu halikurudi, kwa hivyo huenda hili limehifadhiwa au halijahifadhiwa. Bonyeza Jaribu tena ili ujue: ombi lilelile linatumwa tena, na haliwezi kurekodiwa mara mbili.",
+    "idempotency_key_conflict": "Ombi hili tayari limetumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
+    "reason_required": "Toa sababu yenye herufi 3 hadi 500.",
+    "stale": "Mfuko umebadilika tangu ulipofungua hii. Pakia upya uone ulipofikia.",
+    "not_awaiting_decision": "Kufungwa huku tayari kumeamuliwa.",
+    "decision_required": "Chagua kuidhinisha au kukataa.",
+    "no_fund": "Hakuna mfuko wa kufunga.",
+    "no_retirement": "Kufungwa huku hakupatikani.",
+    "retirement_open": "Kufungwa kwa mfuko huu tayari kunamsubiri Mkurugenzi.",
+    "blocked": "Mfuko hauwezi kufungwa wakati hivi viko wazi: {blockers}. Kamilisha kila kimoja kwanza. Hakuna kilichobadilishwa.",
+    "count_required": "Hesabu fedha ya leo na uthibitishe hesabu kwanza.",
+    "count_before_last_posting": "Fedha iliandikwa baada ya hesabu ya tarehe {business_date}, kwa hivyo haionyeshi tena kilichomo kashani. Hakuna kilichobadilishwa."
   }
 }

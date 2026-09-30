@@ -370,9 +370,11 @@ select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.
           'the daily report reads no disbursement');
 
 -- A failed read is a failure: with no active fund the position is empty, never zero.
-set local role fv_definer_owner;
-update public.imprest_funds set is_active = false;
-reset role;
+-- No command closes a fund but a retirement (issue #72), which opens the next one, so the state
+-- is set up directly, below the triggers.
+set local session_replication_role = replica;
+update public.imprest_funds set is_active = false, retired_at = now();
+set local session_replication_role = origin;
 select is((select count(*)::int from api.staff_imprest_spending_position()), 0,
           'with no active fund there is no position row rather than a zero');
 
