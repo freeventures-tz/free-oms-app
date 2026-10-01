@@ -1944,6 +1944,158 @@
     "late_reason_not_needed": "Hesabu ya leo haihitaji sababu ya kuchelewa. Pakia ukurasa upya uhesabu ya leo.",
     "day_not_countable": "{business_date} ni kabla hesabu hazijaanza, kwa hivyo haiwezi kuhesabiwa."
   },
+  "till": {
+    "nav": "Hesabu ya droo",
+    "title": "Hesabu ya droo ya kila siku",
+    "description": "Keshia anahesabu fedha zilizopokelewa kila siku, kiasi kimoja kwa kila njia ya malipo. Meneja anathibitisha hesabu au anairudisha.",
+    "state": {
+      "due": "Hesabu ya leo inasubiriwa",
+      "not_counted": "Haijahesabiwa",
+      "awaiting_confirmation": "Inasubiri uthibitisho wa Meneja",
+      "sent_back": "Imerudishwa ihesabiwe upya",
+      "balanced": "Imelingana",
+      "shortage": "Upungufu",
+      "excess": "Ziada"
+    },
+    "help": {
+      "due": {
+        "cashier": "Hesabu fedha zilizopokelewa leo kwa kila njia ya malipo kisha andika kila jumla. Programu inakokotoa kinachopaswa kuwepo.",
+        "other": "Keshia bado hajahesabu droo leo. Siku ikiisha bila hesabu iliyothibitishwa, itaonyeshwa Haijahesabiwa."
+      },
+      "not_counted": "Siku iliisha bila hesabu iliyothibitishwa. Hii si tofauti ya sifuri.",
+      "awaiting_confirmation": {
+        "manager": "Kagua hesabu. Ithibitishe kama ilivyo, au irudishe ihesabiwe upya.",
+        "other": "Keshia amehesabu. Meneja bado hajaithibitisha, kwa hivyo siku haijafungwa."
+      },
+      "sent_back": {
+        "cashier": "Meneja amerudisha hesabu yako. Hesabu tena kisha andika jumla mpya.",
+        "other": "Meneja amerudisha hesabu. Keshia anahesabu tena."
+      },
+      "balanced": "Kila njia ya malipo imelingana kabisa. Siku imefungwa.",
+      "shortage": "Fedha fulani hazikuwepo. Siku imefungwa na upungufu umeandikwa kwenye kumbukumbu.",
+      "excess": "Fedha zilikuwa zaidi ya zilizotarajiwa. Siku imefungwa na ziada imeandikwa kwenye kumbukumbu."
+    },
+    "figures": {
+      "method": "Njia ya malipo",
+      "expected": "Zinazotarajiwa",
+      "counted": "Zilizohesabiwa",
+      "variance": "Tofauti",
+      "total": "Jumla",
+      "short": "Pungufu kwa {amount}",
+      "over": "Zaidi kwa {amount}",
+      "none": "Hakuna",
+      "notCounted": "Haijahesabiwa",
+      "shortAndOver": "Pungufu kwa {short} na zaidi kwa {over} katika njia za malipo."
+    },
+    "record": {
+      "counted": "Imehesabiwa na {name} tarehe {when}",
+      "note": "Maelezo ya Keshia: {note}",
+      "late": "Imehesabiwa kwa kuchelewa: {reason}",
+      "sentBack": "Imerudishwa na {name} tarehe {when}: {reason}",
+      "confirmed": "Imethibitishwa na {name} tarehe {when}.",
+      "because": "Sababu: {reason}.",
+      "reasonNote": "Maelezo: {note}"
+    },
+    "enter": {
+      "heading": "Andika hesabu",
+      "help": "Fedha taslimu ni noti na sarafu zilizo kwenye droo. Kwa njia nyingine, jumlisha ujumbe, taarifa za benki au hundi za leo. Andika 0 kwa njia ambayo hakuna aliyelipia.",
+      "note": "Maelezo (si lazima)",
+      "submit": "Wasilisha hesabu",
+      "submitAgain": "Wasilisha hesabu mpya",
+      "recountReason": "Meneja ameomba ihesabiwe upya: {reason}"
+    },
+    "expected": {
+      "title": "Zinazotarajiwa hadi sasa leo",
+      "help": "Zimekokotolewa kutoka malipo yaliyoandikwa leo. Keshia haoni hizi kabla ya kuhesabu.",
+      "payments": "{count, plural, =0 {Hakuna malipo} one {Malipo #} other {Malipo #}}"
+    },
+    "confirm": {
+      "heading": "Thibitisha au rudisha",
+      "title": "Thibitisha hesabu",
+      "help": "Chagua kwa nini hesabu inatofautiana na kilichotarajiwa. Huwezi kubadilisha hesabu ya Keshia.",
+      "helpBalanced": "Kila njia inalingana. Kuthibitisha kunafunga siku.",
+      "reason": "Sababu ya tofauti",
+      "note": "Maelezo (si lazima)",
+      "noteRequired": "Maelezo (ni lazima kwa sababu hii)",
+      "balanced": "Thibitisha imelingana",
+      "shortage": "Thibitisha upungufu wa {amount}",
+      "excess": "Thibitisha ziada ya {amount}",
+      "ownCount": "Wewe uliandika hesabu hii, kwa hivyo Meneja mwingine aithibitishe au airudishe."
+    },
+    "sendBack": {
+      "open": "Rudisha",
+      "title": "Rudisha hesabu",
+      "help": "Keshia ataona sababu yako na kuhesabu tena. Hesabu hii inabaki kwenye kumbukumbu.",
+      "reason": "Keshia akague nini",
+      "confirm": "Rudisha ihesabiwe upya"
+    },
+    "reason": {
+      "counting_error": "Kosa la kuhesabu",
+      "recording_error": "Kosa la kuandika",
+      "change_not_returned": "Chenji haikurudishwa",
+      "amount_correction": "Marekebisho ya kiasi",
+      "suspected_loss_or_theft": "Inashukiwa kupotea au kuibiwa",
+      "under_investigation": "Inachunguzwa",
+      "other": "Nyingine"
+    },
+    "history": {
+      "title": "Hesabu",
+      "titleCashier": "Hesabu zako",
+      "empty": "Bado hakuna hesabu.",
+      "day": "{date}, hesabu ya {attempt}"
+    },
+    "open": {
+      "title": "{count, plural, =0 {Siku ambazo hazijafungwa} one {Siku # haijafungwa} other {Siku # hazijafungwa}}",
+      "help": "Siku zisizo na hesabu iliyothibitishwa, ya zamani kwanza. Kila moja inabaki hapa mpaka siku iwe na hesabu iliyothibitishwa.",
+      "helpCashier": "Siku zisizo na hesabu iliyothibitishwa, ya zamani kwanza. Unaweza kuhesabu siku iliyopitwa kwa kuchelewa, ukitoa sababu.",
+      "empty": "Kila siku imefungwa.",
+      "notCountedSince": "Haijahesabiwa tangu {when}",
+      "awaitingSince": "Inamsubiri Meneja tangu {when}",
+      "decideTitle": "Hesabu ya {date} inakusubiri",
+      "waitingTitle": "Hesabu ya {date} inamsubiri Meneja"
+    },
+    "late": {
+      "open": "Hesabu siku hii",
+      "openFor": "Hesabu {date} kwa kuchelewa",
+      "help": "Hesabu sasa. Kila kiasi kinalinganishwa na malipo ya siku hiyo kama yalivyo sasa, na Meneja anaithibitisha kama hesabu nyingine yoyote.",
+      "reason": "Kwa nini siku hii haikuhesabiwa",
+      "reasonHelp": "Herufi 3 hadi 500. Kumbukumbu inaihifadhi, na inaonyesha kuwa hesabu ilichelewa.",
+      "submit": "Wasilisha hesabu iliyochelewa"
+    },
+    "success": {
+      "counted": "Hesabu imewasilishwa. Sasa inamsubiri Meneja.",
+      "countedLate": "Hesabu iliyochelewa imewasilishwa. Sasa inamsubiri Meneja.",
+      "confirmed": "Hesabu imethibitishwa. Siku imefungwa.",
+      "sentBack": "Hesabu imerudishwa. Keshia atahesabu tena."
+    },
+    "errors": {
+      "not_permitted": "Akaunti yako hairuhusiwi kufanya hivi.",
+      "generic": "Kuna tatizo na hakuna kilichobadilishwa. Jaribu tena.",
+      "unconfirmed": "Hakuna jibu lililorudi, kwa hivyo huenda hii imehifadhiwa au haijahifadhiwa. Bonyeza Jaribu tena ili kujua: inatuma ombi lilelile, ambalo haliwezi kuandikwa mara mbili.",
+      "idempotency_key_conflict": "Ombi hili limeshatumika kwa jambo jingine. Pakia ukurasa upya kisha ujaribu tena.",
+      "day_changed": "Siku imebadilika ukurasa huu ukiwa wazi. Upakie upya ili kuhesabu leo.",
+      "already_confirmed": "Hesabu ya siku hii imeshathibitishwa. Siku imefungwa.",
+      "count_awaiting_confirmation": "Hesabu ya siku hii imeshawasilishwa na inamsubiri Meneja.",
+      "stale": "Hesabu ya siku hii imebadilika tangu ulipofungua ukurasa huu. Upakie upya uone ilipo.",
+      "amount_required": "Andika kiasi kwa njia hii, au 0 kama hakuna aliyelipia kwa njia hii.",
+      "amount_invalid": "Andika shilingi kamili, 0 au zaidi.",
+      "amount_too_large": "Kiasi hicho ni kikubwa kuliko mfumo unavyokubali.",
+      "note_invalid": "Andika maelezo ya herufi 3 hadi 500, au uache wazi.",
+      "no_count": "Hesabu hii haipatikani.",
+      "not_awaiting_confirmation": "Hesabu hii haikusubiri tena. Pakia ukurasa upya uone ilipo.",
+      "reason_required": "Toa sababu ya herufi 3 hadi 500.",
+      "explanation_required": "Chagua sababu ya tofauti.",
+      "explanation_invalid": "Chagua mojawapo ya sababu zilizoorodheshwa.",
+      "explanation_note_required": "Sababu hii inahitaji maelezo ya herufi 3 hadi 500.",
+      "explanation_not_needed": "Hesabu iliyolingana haihitaji sababu wala maelezo.",
+      "same_person": "Wewe uliandika hesabu hii, kwa hivyo mtu mwingine aithibitishe au airudishe.",
+      "figures_moved": "Malipo yaliingia ulipokuwa ukihesabu. Hakuna kilichohifadhiwa. Wasilisha hesabu tena.",
+      "late_reason_required": "Eleza kwa nini siku hii haikuhesabiwa, kwa herufi 3 hadi 500.",
+      "late_reason_invalid": "Eleza kwa nini siku hii haikuhesabiwa, kwa herufi 3 hadi 500.",
+      "late_reason_not_needed": "Hesabu ya leo haihitaji sababu ya kuchelewa. Pakia ukurasa upya ili kuhesabu leo.",
+      "day_not_countable": "{business_date} ni kabla ya kuanza kuhesabu droo, kwa hivyo haiwezi kuhesabiwa."
+    }
+  },
   "reports": {
     "title": "Ripoti za kila siku",
     "description": "Kila usiku mfumo unaandika siku iliyokwisha. Ripoti haiwezi kubadilishwa baada ya kuandikwa.",

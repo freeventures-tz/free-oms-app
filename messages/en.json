@@ -1944,6 +1944,158 @@
     "late_reason_not_needed": "Today's count takes no late reason. Reload the page to count today.",
     "day_not_countable": "{business_date} is before counting started, so it can't be counted."
   },
+  "till": {
+    "nav": "Till count",
+    "title": "Daily till count",
+    "description": "The Cashier counts the money taken each day, one figure for each payment method. The Manager confirms the count or sends it back.",
+    "state": {
+      "due": "Count due today",
+      "not_counted": "Not counted",
+      "awaiting_confirmation": "Awaiting Manager confirmation",
+      "sent_back": "Sent back for a recount",
+      "balanced": "Balanced",
+      "shortage": "Shortage",
+      "excess": "Excess"
+    },
+    "help": {
+      "due": {
+        "cashier": "Count the money taken today for each payment method and enter each total. The app works out what should be there.",
+        "other": "The Cashier hasn't counted the till yet today. If the day ends without a confirmed count, it shows as Not counted."
+      },
+      "not_counted": "The day ended without a confirmed count. This is not a zero difference.",
+      "awaiting_confirmation": {
+        "manager": "Check the count. Confirm it as it stands, or send it back for a recount.",
+        "other": "The Cashier has counted. The Manager hasn't confirmed it yet, so the day isn't closed."
+      },
+      "sent_back": {
+        "cashier": "The Manager sent your count back. Count again and enter the new totals.",
+        "other": "The Manager sent the count back. The Cashier is counting again."
+      },
+      "balanced": "Every payment method matched exactly. The day is closed.",
+      "shortage": "Some money was missing. The day is closed and the shortage is on the record.",
+      "excess": "There was more money than expected. The day is closed and the extra is on the record."
+    },
+    "figures": {
+      "method": "Payment method",
+      "expected": "Expected",
+      "counted": "Counted",
+      "variance": "Difference",
+      "total": "Total",
+      "short": "Short by {amount}",
+      "over": "Over by {amount}",
+      "none": "None",
+      "notCounted": "Not counted",
+      "shortAndOver": "Short by {short} and over by {over} across the methods."
+    },
+    "record": {
+      "counted": "Counted by {name} on {when}",
+      "note": "Cashier's note: {note}",
+      "late": "Counted late: {reason}",
+      "sentBack": "Sent back by {name} on {when}: {reason}",
+      "confirmed": "Confirmed by {name} on {when}.",
+      "because": "Reason: {reason}.",
+      "reasonNote": "Note: {note}"
+    },
+    "enter": {
+      "heading": "Enter the count",
+      "help": "Cash is the notes and coins in the till. For the other methods, add up today's messages, statements or cheques. Enter 0 for a method nobody paid with.",
+      "note": "Note (optional)",
+      "submit": "Submit count",
+      "submitAgain": "Submit the new count",
+      "recountReason": "The Manager asked for a recount: {reason}"
+    },
+    "expected": {
+      "title": "Expected so far today",
+      "help": "Worked out from the payments recorded today. The Cashier doesn't see this before counting.",
+      "payments": "{count, plural, =0 {No payments} one {# payment} other {# payments}}"
+    },
+    "confirm": {
+      "heading": "Confirm or send back",
+      "title": "Confirm the count",
+      "help": "Choose why the count is different from what was expected. You can't change the Cashier's figures.",
+      "helpBalanced": "Every method matches. Confirming closes the day.",
+      "reason": "Reason for the difference",
+      "note": "Note (optional)",
+      "noteRequired": "Note (needed for this reason)",
+      "balanced": "Confirm balanced",
+      "shortage": "Confirm shortage of {amount}",
+      "excess": "Confirm excess of {amount}",
+      "ownCount": "You entered this count, so another Manager must confirm it or send it back."
+    },
+    "sendBack": {
+      "open": "Send back",
+      "title": "Send the count back",
+      "help": "The Cashier sees your reason and counts again. This count stays on the record.",
+      "reason": "What the Cashier should check",
+      "confirm": "Send back for a recount"
+    },
+    "reason": {
+      "counting_error": "Counting error",
+      "recording_error": "Recording error",
+      "change_not_returned": "Change not returned",
+      "amount_correction": "Amount correction",
+      "suspected_loss_or_theft": "Suspected loss or theft",
+      "under_investigation": "Under investigation",
+      "other": "Other"
+    },
+    "history": {
+      "title": "Counts",
+      "titleCashier": "Your counts",
+      "empty": "No counts yet.",
+      "day": "{date}, count {attempt}"
+    },
+    "open": {
+      "title": "{count, plural, =0 {Days not closed} one {# day not closed} other {# days not closed}}",
+      "help": "Days with no confirmed count, oldest first. Each stays here until the day has a confirmed count.",
+      "helpCashier": "Days with no confirmed count, oldest first. You can count a missed day late, with a reason.",
+      "empty": "Every day is closed.",
+      "notCountedSince": "Not counted since {when}",
+      "awaitingSince": "Waiting for the Manager since {when}",
+      "decideTitle": "The count for {date} waits for you",
+      "waitingTitle": "The count for {date} waits for the Manager"
+    },
+    "late": {
+      "open": "Count this day",
+      "openFor": "Count {date} late",
+      "help": "Count now. Each figure is compared with that day's payments as they stand now, and the Manager confirms it like any count.",
+      "reason": "Why this day wasn't counted",
+      "reasonHelp": "3 to 500 characters. The record keeps it and shows the count was late.",
+      "submit": "Submit late count"
+    },
+    "success": {
+      "counted": "Count submitted. It now waits for the Manager.",
+      "countedLate": "Late count submitted. It now waits for the Manager.",
+      "confirmed": "Count confirmed. The day is closed.",
+      "sentBack": "Count sent back. The Cashier will count again."
+    },
+    "errors": {
+      "not_permitted": "Your account may not do this.",
+      "generic": "Something went wrong and nothing was changed. Try again.",
+      "unconfirmed": "No answer came back, so this may or may not have been saved. Press Try again to find out: it resends the same request, which can't be recorded twice.",
+      "idempotency_key_conflict": "This request was already used for something different. Reload the page and try again.",
+      "day_changed": "The day changed while this page was open. Reload it to count today.",
+      "already_confirmed": "This day's count is already confirmed. The day is closed.",
+      "count_awaiting_confirmation": "This day's count is already submitted and waits for the Manager.",
+      "stale": "This day's count changed since you opened this page. Reload it to see where it stands.",
+      "amount_required": "Enter a figure for this method, or 0 if nobody paid with it.",
+      "amount_invalid": "Enter whole shillings, 0 or more.",
+      "amount_too_large": "That amount is larger than the system accepts.",
+      "note_invalid": "Write a note of 3 to 500 characters, or leave it empty.",
+      "no_count": "This count can't be found.",
+      "not_awaiting_confirmation": "This count is no longer waiting for you. Reload the page to see where it stands.",
+      "reason_required": "Give a reason of 3 to 500 characters.",
+      "explanation_required": "Choose a reason for the difference.",
+      "explanation_invalid": "Choose one of the listed reasons.",
+      "explanation_note_required": "This reason needs a note of 3 to 500 characters.",
+      "explanation_not_needed": "A balanced count takes no reason or note.",
+      "same_person": "You entered this count, so someone else must confirm it or send it back.",
+      "figures_moved": "A payment came in while you were counting. Nothing was saved. Submit the count again.",
+      "late_reason_required": "Say why this day wasn't counted, in 3 to 500 characters.",
+      "late_reason_invalid": "Say why this day wasn't counted, in 3 to 500 characters.",
+      "late_reason_not_needed": "Today's count takes no late reason. Reload the page to count today.",
+      "day_not_countable": "{business_date} is before till counting started, so it can't be counted."
+    }
+  },
   "reports": {
     "title": "Daily reports",
     "description": "Each night the system writes up the day that has just closed. A report cannot be edited afterwards.",
