@@ -18,8 +18,10 @@ import { SECRET_KEY, callApiRpc, createLiveStaff, ensureDirector, type Fixture }
  * one day. So this file is one day, in order. No other file enters a till count.
  */
 
-const METHODS = ["cash", "mixx_by_yas", "halopesa", "mwanga_hakika_transfer", "crdb_transfer", "cheque"] as const;
-type Figures = Record<(typeof METHODS)[number], number>;
+type Figures = Record<
+  "cash" | "mixx_by_yas" | "halopesa" | "mwanga_hakika_transfer" | "crdb_transfer" | "cheque",
+  number
+>;
 type Count = {
   id: string;
   attempt: number;
@@ -45,7 +47,7 @@ async function rpc(who: Fixture, fn: string, args: Record<string, unknown>): Pro
   return data as Result;
 }
 
-const enter = (who: Fixture, counted: unknown, previous: string | null = null, key = randomUUID()) =>
+const enter = (who: Fixture, counted: unknown, previous: string | null = null, key: string = randomUUID()) =>
   rpc(who, "staff_enter_till_count", {
     p_business_date: today,
     p_previous_count_id: previous,
