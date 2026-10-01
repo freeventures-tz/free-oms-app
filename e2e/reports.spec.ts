@@ -143,17 +143,20 @@ test("a count nobody took is shown as words, never as a zero", async ({ page }) 
 });
 
 /**
- * Issue #51 · Imprest spending does not exist on main, so its figures are WITHHELD — a different
- * fact from "not recorded", worded differently and explained, and never a zero or a balance.
+ * Issue #82 · The report global setup writes covers a day before any fund existed, so its imprest
+ * figures are WITHHELD because there was no fund — a different fact from "not recorded", worded
+ * differently and explained, and never a zero or a balance. The figures of a day with a fund are
+ * proved in `report-imprest.spec.ts`.
  */
-test("imprest figures the system cannot give yet say so, and are never a zero", async ({ page }) => {
+test("a day with no imprest fund says so, and its figures are never a zero", async ({ page }) => {
   await openReports(page, fixtures().director);
   await openNewestReport(page);
 
   const balance = page.getByRole("region", { name: /imprest balance/i });
   await openSection(page, "imprestPosition");
   await expect(balance.getByText(/^not available$/i)).toHaveCount(4);
-  await expect(balance.getByText(/imprest spending is not in the system yet/i)).toBeVisible();
+  await expect(balance.getByText(/there was no imprest fund on this day/i)).toBeVisible();
+  await expect(balance.getByText(/not in the system yet/i)).toHaveCount(0);
   await expect(balance.getByText(/TZS/)).toHaveCount(0);
 
   const expenses = page.getByRole("region", { name: /approved imprest expenses/i });

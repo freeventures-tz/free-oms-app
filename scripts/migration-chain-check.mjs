@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 /**
+ * Issue #82 adds THE v0.12.1 PHASE. It resets to the 54th and last released migration (the stock
+ * receipt link), builds the v0.11.0 phase's ground, and applies the report imprest section
+ * migration. Its preservation query adds every stock receipt link to the business rows and brings
+ * the link objects into the released surface. The one released function the migration replaces,
+ * `private.report_content`, is pinned exactly on both sides instead, and a report built after the
+ * upgrade must state the active fund's balance as the imprest screen does and each closed day's
+ * confirmed count as its outcome.
+ *
  * Issue #73 adds THE v0.11.0 PHASE. It resets to the 53rd and last released migration
  * (retirement), builds the v0.10.0 phase's ground plus a delivery pending, one rejected and a
  * retirement refused, and applies the link migration. Its preservation query adds every retirement
@@ -228,8 +236,13 @@ const REVERSAL_VERSION = "20261003000100";
  * migration.
  */
 const RETIREMENT_VERSION = "20261004000100";
-/** Issue #73: the stock receipt imprest link migration, the last of this release. */
+/**
+ * Issue #73: the stock receipt imprest link migration. Since v0.12.0 it is also the 54th and last
+ * RELEASED migration.
+ */
 const RECEIPT_LINK_VERSION = "20261005000100";
+/** Issue #82: the report imprest section migration, the last of this release. */
+const REPORT_IMPREST_VERSION = "20261006000100";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -276,6 +289,8 @@ const ASSERT_RETIREMENT = join(SQL_DIR, "58_assert_retirement_upgrade.sql");
 const MARK_V0110 = join(SQL_DIR, "60_mark_v0110_boundary.sql");
 const BUILD_V0110_RECEIPTS = join(SQL_DIR, "61_build_v0110_receipts.sql");
 const ASSERT_RECEIPT_LINK = join(SQL_DIR, "62_assert_link_upgrade.sql");
+const MARK_V0121 = join(SQL_DIR, "64_mark_v0121_boundary.sql");
+const ASSERT_REPORT_IMPREST = join(SQL_DIR, "65_assert_report_imprest_upgrade.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -343,12 +358,13 @@ const V080_PRESERVATION = join("supabase", "release-checks", "v080_preservation.
 const V090_PRESERVATION = join("supabase", "release-checks", "v090_preservation.sql");
 const V0100_PRESERVATION = join("supabase", "release-checks", "v0100_preservation.sql");
 const V0110_PRESERVATION = join("supabase", "release-checks", "v0110_preservation.sql");
+const V0121_PRESERVATION = join("supabase", "release-checks", "v0121_preservation.sql");
 
 /**
- * All 53 released migrations (issue #73). Its first 52 lines are the v0.10.0 manifest unchanged, so
- * this checks everything that one did and the retirement migration v0.11.0 released since.
+ * All 54 released migrations (issue #82). Its first 53 lines are the v0.11.0 manifest unchanged, so
+ * this checks everything that one did and the stock receipt link migration v0.12.0 released since.
  */
-const MIGRATION_MANIFEST = join("supabase", "release-checks", "v0110_migration_manifest.txt");
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v0121_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -892,6 +908,60 @@ const PHASES = [
           BUILD_V0110_RECEIPTS,
         ],
         assertions: [ASSERT_RECEIPT_LINK],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          {
+            name: "what a batch consumed and yielded, rewritten in place",
+            file: COUNTEREXAMPLE_PRODUCTION,
+          },
+          {
+            name: "a disputed imprest handover's amount rewritten in place",
+            file: COUNTEREXAMPLE_FUNDING,
+          },
+          { name: "a delivered report's content rewritten in place", file: COUNTEREXAMPLE_REPORT },
+          { name: "a label added to a released enum", file: COUNTEREXAMPLE_ENUM },
+          { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
+          { name: "a rejected disbursement's reason rewritten in place", file: COUNTEREXAMPLE_DISBURSEMENT },
+          { name: "a settlement line's purpose rewritten in place", file: COUNTEREXAMPLE_SETTLEMENT_LINE },
+          { name: "a verification reattributed to another person", file: COUNTEREXAMPLE_VERIFICATION },
+          { name: "a send-back's reason rewritten in place", file: COUNTEREXAMPLE_SEND_BACK },
+          { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
+          { name: "a late count's reason rewritten in place", file: COUNTEREXAMPLE_LATE_COUNT },
+          { name: "a raise's reason rewritten in place", file: COUNTEREXAMPLE_RAISE },
+          { name: "a reversal request's reason rewritten in place", file: COUNTEREXAMPLE_REVERSAL_REASON },
+          { name: "a stock receipt's delivery note rewritten in place", file: COUNTEREXAMPLE_RECEIPT_NOTE },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the report imprest section migration",
+    what: "the v0.12.1 database",
+    version: RECEIPT_LINK_VERSION,
+    upTo: REPORT_IMPREST_VERSION,
+    describes: "v0.12.1, before the report imprest section",
+    query: V0121_PRESERVATION,
+    fixtures: [
+      {
+        name: "sales, money, dispatch, production, imprest funding, a delivered report, disbursements in every status, a verification, a settlement sent back, a day counted, a missed day counted late, raised approvals, reversals, deliveries with a retirement refused AND the report read again",
+        setup: [
+          MARK_V0121,
+          BUILD_V005,
+          BUILD_V010_FUNDING,
+          BUILD_V020_REPORT,
+          BUILD_V030_DISBURSEMENTS,
+          BUILD_V040_SETTLEMENTS,
+          BUILD_V050_VERIFICATIONS,
+          BUILD_V060_SEND_BACK,
+          BUILD_V070_COUNTS,
+          BUILD_V080_LATE_COUNT,
+          BUILD_V090_RAISES,
+          BUILD_V0100_REVERSALS,
+          BUILD_V0110_RECEIPTS,
+        ],
+        assertions: [ASSERT_REPORT_IMPREST],
         counterexamples: [
           { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
           { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },

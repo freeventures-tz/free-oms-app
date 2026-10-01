@@ -88,6 +88,7 @@ function Variance({ value }: { value: number }) {
 
 function Figure({ figure }: { figure: ReportFigure }) {
   const t = useTranslations("reports");
+  const root = useTranslations();
   const locale = useLocale();
 
   if (figure.kind === "unknown") {
@@ -102,6 +103,7 @@ function Figure({ figure }: { figure: ReportFigure }) {
   }
 
   if (figure.kind === "text") return <span>{figure.value}</span>;
+  if (figure.kind === "label") return <span>{root(figure.labelKey)}</span>;
   if (figure.kind === "variance") return <Variance value={figure.value} />;
 
   // `fv-numeric` is tabular numerals (design.md §11.3). Money, quantities and counts are read down
@@ -228,6 +230,7 @@ function Section({ section }: { section: ReportSection }) {
             {section.rows.map((row) => (
               <div
                 key={row.key}
+                data-testid={`report-row-${section.key}-${row.key}`}
                 className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/60 pb-2 last:border-b-0 last:pb-0"
               >
                 <dt className="text-sm text-muted-foreground">{t(`rows.${row.key}`)}</dt>

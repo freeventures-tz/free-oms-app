@@ -101,7 +101,7 @@ function snapshot(overrides: Record<string, unknown> = {}) {
         approved_expenses: { count: 2, amount_tzs: 120_000 },
         position: {
           posted_tzs: 380_000,
-          encumbered_tzs: 120_000,
+          set_aside_tzs: 120_000,
           available_tzs: 260_000,
           awaiting_verification_tzs: 0,
         },
@@ -452,7 +452,15 @@ describe("the words on the screen", () => {
       expect(lookup(dictionary, `reports.approvalType.${type}`), type).toBeTypeOf("string");
     }
 
-    for (const state of ["not_counted", "awaiting_manager_confirmation", "confirmed", "no_fund"]) {
+    for (const state of [
+      "not_counted",
+      "awaiting_manager_confirmation",
+      "confirmed",
+      "balanced",
+      "shortage",
+      "excess",
+      "no_fund",
+    ]) {
       expect(lookup(dictionary, `reports.states.${state}`), state).toBeTypeOf("string");
     }
 
@@ -542,7 +550,7 @@ describe("the integrated imprest section", () => {
   it("withholds every expense and position figure because spending is not built", () => {
     for (const [key, rows] of [
       ["imprestExpenses", ["approvedExpenseCount", "approvedExpenseTzs"]],
-      ["imprestPosition", ["postedTzs", "encumberedTzs", "availableTzs", "awaitingVerificationTzs"]],
+      ["imprestPosition", ["postedTzs", "setAsideTzs", "availableTzs", "awaitingVerificationTzs"]],
     ] as const) {
       for (const row of rows) {
         expect(figureFor(integrated(), key, row), row).toEqual({
@@ -639,5 +647,204 @@ describe("the integrated imprest section", () => {
     for (const key of ["funding_aggregation_deferred", "imprest_spending_not_built", "unrecognised"]) {
       expect(reasons[key], key).toBeTypeOf("string");
     }
+  });
+});
+
+/**
+ * Issue #82 · The imprest section as `private.report_imprest_section` writes it.
+ *
+ * The expenses, the balance and the count are stated now. The reader shows the day's postings with
+ * their reversals and replacements, the balance with expected cash as at the end of the day, and
+ * the count's real outcome. A report written before this change still reads as it did.
+ */
+describe("the imprest section that states the position", () => {
+  const STATED = {
+    fund_no: null,
+    fund_id: "0b6f2c1e-7a53-4d8f-9a31-5c0e2d9f4b10",
+    state: "active",
+    funding: {
+      requested_count: 1,
+      requested_tzs: 100_000,
+      approved_tzs: null,
+      provided_tzs: null,
+      received_tzs: 100_000,
+      unavailable: {
+        approved_tzs: "funding_aggregation_deferred",
+        provided_tzs: "funding_aggregation_deferred",
+      },
+    },
+    approved_expenses: {
+      count: 1,
+      amount_tzs: 8_000,
+      reversed_tzs: 8_000,
+      replacement_tzs: 6_000,
+      net_tzs: 6_000,
+      unexplained_loss_tzs: 500,
+    },
+    position: {
+      as_at: "cutoff",
+      posted_tzs: 93_200,
+      set_aside_tzs: 5_000,
+      available_tzs: 88_200,
+      awaiting_verification_tzs: 5_000,
+      expected_cash_tzs: 88_200,
+    },
+    reconciliation: {
+      state: "shortage",
+      counted_tzs: 88_200,
+      expected_tzs: 88_500,
+      variance_tzs: -300,
+      variance_reason: "counting_error",
+      missing_reason: null,
+    },
+  };
+  const stated = (imprest: Record<string, unknown> = STATED) => snapshot({ imprest });
+
+  it("shows the day's expenses with their reversals, replacements and losses", () => {
+    expect(section(stated(), "imprestExpenses").rows).toEqual([
+      { key: "approvedExpenseCount", figure: { kind: "count", value: 1 } },
+      { key: "approvedExpenseTzs", figure: { kind: "money", value: 8_000 } },
+      { key: "reversedExpenseTzs", figure: { kind: "money", value: 8_000 } },
+      { key: "replacementExpenseTzs", figure: { kind: "money", value: 6_000 } },
+      { key: "netExpenseTzs", figure: { kind: "money", value: 6_000 } },
+      { key: "unexplainedLossTzs", figure: { kind: "money", value: 500 } },
+    ]);
+    expect(section(stated(), "imprestExpenses").unavailableReasonKeys).toEqual([]);
+  });
+
+  it("shows the balance and expected cash as at the end of the business day", () => {
+    const balance = section(stated(), "imprestPosition");
+    expect(balance.noteKey).toBe("asAtBusinessDate");
+    expect(balance.rows).toEqual([
+      { key: "postedTzs", figure: { kind: "money", value: 93_200 } },
+      { key: "setAsideTzs", figure: { kind: "money", value: 5_000 } },
+      { key: "availableTzs", figure: { kind: "money", value: 88_200 } },
+      { key: "awaitingVerificationTzs", figure: { kind: "money", value: 5_000 } },
+      { key: "expectedCashTzs", figure: { kind: "money", value: 88_200 } },
+    ]);
+  });
+
+  it.each(["balanced", "shortage", "excess"])("carries a confirmed %s count as settled", (state) => {
+    const content = stated({ ...STATED, reconciliation: { ...STATED.reconciliation, state } });
+    expect(section(content, "imprestReconciliation").state).toEqual({
+      state,
+      missingReasonKey: null,
+    });
+    expect(readReport(content).overview.unresolvedSectionKeys).not.toContain(
+      "imprestReconciliation",
+    );
+  });
+
+  it("names the count's reason in words, from the same list the imprest screen uses", () => {
+    expect(figureFor(stated(), "imprestReconciliation", "varianceReason")).toEqual({
+      kind: "label",
+      labelKey: "imprest.count.explanation.counting_error",
+    });
+    expect(figureFor(stated(), "imprestReconciliation", "varianceTzs")).toEqual({
+      kind: "variance",
+      value: -300,
+    });
+  });
+
+  it("keeps a count sent back and never recounted Not counted, with no figure", () => {
+    const content = stated({
+      ...STATED,
+      reconciliation: {
+        state: "not_counted",
+        counted_tzs: null,
+        expected_tzs: null,
+        variance_tzs: null,
+        variance_reason: null,
+        missing_reason: "count_sent_back",
+      },
+    });
+    expect(section(content, "imprestReconciliation").state).toEqual({
+      state: "not_counted",
+      missingReasonKey: "count_sent_back",
+    });
+    expect(figureFor(content, "imprestReconciliation", "varianceTzs")).toEqual({ kind: "unknown" });
+    expect(readReport(content).overview.unresolvedSectionKeys).toContain("imprestReconciliation");
+  });
+
+  it("withholds the expenses and the balance for a day with no fund, and says why", () => {
+    const content = stated({
+      fund_no: null,
+      fund_id: null,
+      state: "no_fund",
+      funding: null,
+      approved_expenses: null,
+      position: null,
+      unavailable: { approved_expenses: "no_imprest_fund", position: "no_imprest_fund" },
+      reconciliation: {
+        ...STATED.reconciliation,
+        state: "not_counted",
+        missing_reason: "no_imprest_fund",
+      },
+    });
+    expect(figureFor(content, "imprestPosition", "postedTzs")).toEqual({
+      kind: "unavailable",
+      reasonKey: "no_imprest_fund",
+    });
+    expect(section(content, "imprestExpenses").unavailableReasonKeys).toEqual(["no_imprest_fund"]);
+  });
+
+  it("reads a report written before the change exactly as it was", () => {
+    const old = snapshot({
+      imprest: {
+        ...STATED,
+        approved_expenses: null,
+        position: null,
+        unavailable: {
+          approved_expenses: "imprest_spending_not_built",
+          position: "imprest_spending_not_built",
+        },
+        reconciliation: {
+          state: "not_counted",
+          counted_tzs: null,
+          expected_tzs: null,
+          variance_tzs: null,
+          variance_reason: null,
+          missing_reason: "no_reconciliation_record",
+        },
+      },
+    });
+    expect(section(old, "imprestExpenses").rows.map((row) => row.key)).toEqual([
+      "approvedExpenseCount",
+      "approvedExpenseTzs",
+    ]);
+    expect(section(old, "imprestPosition").rows.map((row) => row.key)).toEqual([
+      "postedTzs",
+      "setAsideTzs",
+      "availableTzs",
+      "awaitingVerificationTzs",
+    ]);
+    expect(section(old, "imprestPosition").noteKey).toBe("asAtGeneration");
+    expect(section(old, "imprestPosition").unavailableReasonKeys).toEqual([
+      "imprest_spending_not_built",
+    ]);
+  });
+
+  it.each([
+    ["en", en],
+    ["sw", sw],
+  ])("names every new row, state and reason in %s", (_locale, dictionary) => {
+    const reports = (dictionary as unknown as { reports: Record<string, Record<string, unknown>> })
+      .reports;
+    for (const key of [
+      "reversedExpenseTzs",
+      "replacementExpenseTzs",
+      "netExpenseTzs",
+      "unexplainedLossTzs",
+      "setAsideTzs",
+      "expectedCashTzs",
+    ]) {
+      expect(reports.rows[key], key).toBeTypeOf("string");
+    }
+    for (const key of ["balanced", "shortage", "excess"]) {
+      expect(reports.states[key], key).toBeTypeOf("string");
+    }
+    expect(reports.missingReasons.count_sent_back).toBeTypeOf("string");
+    expect(reports.unavailableReasons.no_imprest_fund).toBeTypeOf("string");
+    expect(reports.rows.encumberedTzs).toBeUndefined();
   });
 });

@@ -141,6 +141,43 @@ export function seedTerminalReportFailure(businessDate: string): {
 }
 
 /**
+ * A report for a business date the scheduler is not on, written by the generator's own attempt.
+ *
+ * The scheduled entry point only ever reports yesterday, and a test that drives imprest commands
+ * today needs a report of today to read them back. So the run row is claimed from the operator's
+ * psql prompt, exactly as `seedTerminalReportFailure` does, and `private.run_report_attempt` is
+ * then called with that claim: the content, the digest, the deliveries and the audit event are all
+ * the generator's own. Clear the date with `resetScheduledReportDay` afterwards.
+ */
+export function generateReportFor(businessDate: string): ScheduledReportResult {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+    throw new Error(`a business date is YYYY-MM-DD, not ${businessDate}`);
+  }
+
+  const [runId, claimToken, correlationId] = firstLine(runSql(`
+    insert into public.report_runs (
+        schedule_id, business_date, attempt_ordinal, status,
+        claim_token, claimed_at, lease_expires_at, correlation_id)
+    select s.id, date '${businessDate}', 1, 'claimed',
+           gen_random_uuid(), now(), now() + interval '3 minutes', gen_random_uuid()
+      from public.report_schedules s
+     where s.code = 'daily_pilot_report'
+    returning id, claim_token, correlation_id;`)).split("|");
+
+  if (!runId || !claimToken || !correlationId) {
+    throw new Error("the claimed run returned no id, token and correlation identifier");
+  }
+
+  // The run's own correlation identifier, as `private.run_scheduled_report` passes the claim's.
+  return JSON.parse(
+    firstLine(
+      runSql(`select private.run_report_attempt('${runId}'::uuid, '${claimToken}'::uuid,
+                date '${businessDate}', '${correlationId}'::uuid, 1);`),
+    ),
+  ) as ScheduledReportResult;
+}
+
+/**
  * Puts a business date back to never-attempted, so a test that needs the night for itself has it.
  *
  * THE IMMUTABILITY TRIGGER IS TURNED OFF FOR THE DELETE AND NOTHING ELSE. `report_snapshots`

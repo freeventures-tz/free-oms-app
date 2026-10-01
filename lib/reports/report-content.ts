@@ -39,6 +39,8 @@ export type ReportFigure =
    */
   | { kind: "variance"; value: number }
   | { kind: "text"; value: string }
+  /** Words the app already has, named by their key, such as a count's variance reason. */
+  | { kind: "label"; labelKey: string }
   /** Absent from the snapshot. Rendered as words, never as a number. */
   | { kind: "unknown" }
   /**
@@ -62,6 +64,10 @@ export type ReportState =
   | "not_counted"
   | "awaiting_manager_confirmation"
   | "confirmed"
+  /** A confirmed imprest count's outcome (issue #82), the same three the imprest screen shows. */
+  | "balanced"
+  | "shortage"
+  | "excess"
   | "no_fund"
   | "active";
 
@@ -137,7 +143,9 @@ function text(value: unknown): string | null {
  */
 const UNAVAILABLE_REASON_KEYS = new Set([
   "funding_aggregation_deferred",
+  // Written by reports generated before issue #82, which still open and read as they did.
   "imprest_spending_not_built",
+  "no_imprest_fund",
 ]);
 
 function unavailableReason(value: unknown): string | null {
@@ -205,6 +213,9 @@ function stateOf(source: Record<string, unknown> | null): {
     "not_counted",
     "awaiting_manager_confirmation",
     "confirmed",
+    "balanced",
+    "shortage",
+    "excess",
     "no_fund",
     "active",
   ];
@@ -271,6 +282,42 @@ function approvalBreakdown(
   });
 }
 
+/**
+ * The imprest count's variance reasons (design.md §14.7). Since issue #82 a confirmed imprest count
+ * carries one of these keys, and it is shown in the words the imprest screen already uses. Anything
+ * else is shown as written.
+ */
+const IMPREST_EXPLANATION_KEYS = new Set([
+  "counting_error",
+  "recording_error",
+  "change_not_returned",
+  "amount_correction",
+  "suspected_loss_or_theft",
+  "under_investigation",
+  "other",
+]);
+
+function reasonFigure(reason: string): ReportFigure {
+  return IMPREST_EXPLANATION_KEYS.has(reason)
+    ? { kind: "label", labelKey: `imprest.count.explanation.${reason}` }
+    : { kind: "text", value: reason };
+}
+
+/**
+ * A row for a field the snapshot carries, and none for a field it does not.
+ *
+ * For figures a later writer added: a report written before them has no such key, and giving it a
+ * row of "Not recorded" would change how a stored report reads.
+ */
+function rowIfPresent(
+  key: string,
+  source: Record<string, unknown> | null,
+  field: string,
+  kind: ReportFigureKind,
+): ReportRow[] {
+  return source && field in source ? [row(key, source, field, kind)] : [];
+}
+
 function varianceRows(source: Record<string, unknown> | null): ReportRow[] {
   const reason = text(source?.["variance_reason"]);
   return [
@@ -280,7 +327,7 @@ function varianceRows(source: Record<string, unknown> | null): ReportRow[] {
     // and the only figure on this card a Director acts on — so it is the one the screen is told to
     // set apart (design.md §9.7).
     row("varianceTzs", source, "variance_tzs", "variance"),
-    ...(reason ? [{ key: "varianceReason", figure: { kind: "text" as const, value: reason } }] : []),
+    ...(reason ? [{ key: "varianceReason", figure: reasonFigure(reason) }] : []),
   ];
 }
 
@@ -345,8 +392,9 @@ export function readReport(content: unknown): ReportDocument {
   const imprestPosition = record(imprest?.["position"]);
   const imprestRecon = record(imprest?.["reconciliation"]);
 
-  // Spending, verification and the fund's balance are not in the system yet (issue #51), so the
-  // snapshot withholds both objects whole and says why in the imprest section's `unavailable` map.
+  // Either object can be withheld whole, with its reason in the imprest section's `unavailable` map:
+  // every report written before issue #82 withheld both as spending not built, and a day with no
+  // fund withholds both as no fund.
   const imprestUnavailable = record(imprest?.["unavailable"]);
   const expensesReason = unavailableReason(imprestUnavailable?.["approved_expenses"]);
   const positionReason = unavailableReason(imprestUnavailable?.["position"]);
@@ -496,14 +544,21 @@ export function readReport(content: unknown): ReportDocument {
         rows: [
           row("approvedExpenseCount", imprestExpenses, "count", "count", expensesReason),
           row("approvedExpenseTzs", imprestExpenses, "amount_tzs", "money", expensesReason),
+          // Issue #82: the day's reversals and replacements, and its losses, beside the expenses.
+          ...rowIfPresent("reversedExpenseTzs", imprestExpenses, "reversed_tzs", "money"),
+          ...rowIfPresent("replacementExpenseTzs", imprestExpenses, "replacement_tzs", "money"),
+          ...rowIfPresent("netExpenseTzs", imprestExpenses, "net_tzs", "money"),
+          ...rowIfPresent("unexplainedLossTzs", imprestExpenses, "unexplained_loss_tzs", "money"),
         ],
       },
       {
         key: "imprestPosition",
-        noteKey: "asAtGeneration",
+        // Since issue #82 the balance is as at the end of the business day, and says so.
+        noteKey:
+          text(imprestPosition?.["as_at"]) === "cutoff" ? "asAtBusinessDate" : "asAtGeneration",
         rows: [
           row("postedTzs", imprestPosition, "posted_tzs", "money", positionReason),
-          row("encumberedTzs", imprestPosition, "encumbered_tzs", "money", positionReason),
+          row("setAsideTzs", imprestPosition, "set_aside_tzs", "money", positionReason),
           row("availableTzs", imprestPosition, "available_tzs", "money", positionReason),
           row(
             "awaitingVerificationTzs",
@@ -512,6 +567,7 @@ export function readReport(content: unknown): ReportDocument {
             "money",
             positionReason,
           ),
+          ...rowIfPresent("expectedCashTzs", imprestPosition, "expected_cash_tzs", "money"),
         ],
       },
       {

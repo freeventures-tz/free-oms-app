@@ -1950,6 +1950,7 @@
     "empty": "Bado hakuna ripoti iliyoandikwa. Ya kwanza inatengenezwa dakika moja baada ya saa sita usiku, kwa siku iliyotangulia.",
     "count": "Ripoti {count}",
     "open": "Fungua",
+    "opening": "Inafunguliwa…",
     "deliveredTo": "Imefikishwa kwa {count}",
     "generatedAt": "Imeandikwa",
     "detailTitle": "Ripoti ya {date}",
@@ -1991,6 +1992,9 @@
       "not_counted": "Hakuna aliyehesabu",
       "awaiting_manager_confirmation": "Inasubiri uthibitisho wa Meneja",
       "confirmed": "Imehesabiwa na kuthibitishwa",
+      "balanced": "Imelingana",
+      "shortage": "Upungufu",
+      "excess": "Ziada",
       "no_fund": "Hakuna mfuko uliofunguliwa",
       "active": "Wazi"
     },
@@ -2002,11 +2006,13 @@
     "missingReasons": {
       "no_cash_reconciliation_record": "Hakuna aliyehesabu fedha za kaunta siku hii.",
       "no_reconciliation_record": "Hakuna aliyehesabu fedha za mfuko siku hii.",
-      "no_imprest_fund": "Hakuna mfuko wa fedha wa kuhesabu."
+      "no_imprest_fund": "Hakuna mfuko wa fedha wa kuhesabu.",
+      "count_sent_back": "Meneja alirudisha hesabu ihesabiwe upya, na hakuna hesabu mpya iliyoingizwa kabla siku haijaisha."
     },
     "unavailableReasons": {
       "funding_aggregation_deferred": "Kiasi kilichoidhinishwa na kilichokabidhiwa bado hakijumlishwi katika ripoti hii; historia yake kamili iko kwenye skrini ya imprest. Ni stakabadhi zilizothibitishwa na Meneja pekee zinazohesabiwa kama fedha zilizopokelewa.",
       "imprest_spending_not_built": "Matumizi ya imprest bado hayapo kwenye mfumo, kwa hiyo hakuna matumizi yaliyoidhinishwa wala salio la kuripoti. Hii si sifuri.",
+      "no_imprest_fund": "Hakukuwa na mfuko wa imprest siku hii, kwa hiyo hakuna matumizi wala salio la kuripoti. Hii si sifuri.",
       "unrecognised": "Takwimu hii haipatikani katika ripoti hii."
     },
     "notes": {
@@ -2084,12 +2090,17 @@
       "fundingApprovedTzs": "Zilizoidhinishwa",
       "fundingProvidedTzs": "Zilizokabidhiwa",
       "fundingReceivedTzs": "Zilizothibitishwa kupokelewa",
-      "approvedExpenseCount": "Matumizi yaliyoidhinishwa",
-      "approvedExpenseTzs": "Kiasi kilichoidhinishwa",
-      "postedTzs": "Zilizopo kwenye mfuko",
-      "encumberedTzs": "Zilizotengwa",
-      "availableTzs": "Zinazoweza kutumika",
-      "awaitingVerificationTzs": "Zinasubiri uhakiki",
+      "approvedExpenseCount": "Matumizi yaliyohakikiwa",
+      "approvedExpenseTzs": "Kiasi kilichohakikiwa",
+      "reversedExpenseTzs": "Kilichogeuzwa",
+      "replacementExpenseTzs": "Kilichoandikwa upya kwa kiasi sahihi",
+      "netExpenseTzs": "Matumizi halisi",
+      "unexplainedLossTzs": "Hasara zisizoelezwa, halisi",
+      "postedTzs": "Salio lililothibitishwa",
+      "setAsideTzs": "Kilichotengwa",
+      "availableTzs": "Kinachoweza kuidhinishwa",
+      "awaitingVerificationTzs": "Kinasubiri uhakiki",
+      "expectedCashTzs": "Fedha zinazotarajiwa",
       "summaryInvoicedTzs": "Zilizoandikiwa ankara",
       "summaryCollectedTzs": "Fedha zilizopokelewa",
       "summaryOutstandingTzs": "Bado inadaiwa",

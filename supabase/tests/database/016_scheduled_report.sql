@@ -232,8 +232,8 @@ select is(
 -- 3a. IMPREST, AS THE RELEASED FUNDING SCHEMA CAN HONESTLY STATE IT (issue #51)
 --
 -- The Owner-approved presentation: requests and CONFIRMED RECEIPTS are reported; approval and
--- provision are withheld as unavailable, never zeroed; expenses, the position and the count do not
--- exist on main and say so. Everything below is driven through the released funding commands, so
+-- provision are withheld as unavailable, never zeroed. Expenses, the position and the count were
+-- withheld too until issue #82, which states them; 028 owns those rules. Everything below is driven through the released funding commands, so
 -- the fund, the version history, the append-only approvals, handovers and mismatch are the real
 -- ones — the report is asked about data the application can actually produce.
 --
@@ -333,13 +333,14 @@ select is(
   '{"approved_tzs": "funding_aggregation_deferred", "provided_tzs": "funding_aggregation_deferred"}'::jsonb,
   'and the snapshot says why they are withheld, so the screen can say it too');
 
+-- Issue #82: expenses and the position are no longer withheld. With funding received and nothing
+-- spent, the day has no expense and the posted balance is the 95,000 received.
 select ok(
-  (tests.imprest(private.business_date()) -> 'approved_expenses') = 'null'::jsonb
-  and (tests.imprest(private.business_date()) -> 'position') = 'null'::jsonb
-  and tests.imprest(private.business_date()) -> 'unavailable'
-      = '{"approved_expenses": "imprest_spending_not_built", "position": "imprest_spending_not_built"}'::jsonb,
-  'expenses and the position are withheld because their workflow does not exist -- cumulative '
-  'funding is not offered as a balance in their place');
+  (tests.imprest(private.business_date()) -> 'approved_expenses' ->> 'count')::int = 0
+  and (tests.imprest(private.business_date()) -> 'position' ->> 'posted_tzs')::bigint = 95000
+  and (tests.imprest(private.business_date()) -> 'position' ->> 'expected_cash_tzs')::bigint = 95000
+  and not (tests.imprest(private.business_date()) ? 'unavailable'),
+  'expenses and the position are stated: no expense yet, and 95,000 posted from the two receipts');
 
 select ok(
   tests.imprest(private.business_date()) -> 'reconciliation' ->> 'state' = 'not_counted'
@@ -354,6 +355,10 @@ select ok(
 -- transaction's own clock. A receipt row is written as the commands leave one: provided, then its
 -- handover, then received one version later, so every shape constraint and guard still applies.
 select tests.acting_as(null);
+
+-- Since issue #82 a day reads the fund that covered it, so the fund is opened before the boundary
+-- days the rows below are written on. The fund guard allows moving `opened_at`.
+update public.imprest_funds set opened_at = timestamptz '2026-01-01 00:00:00+03' where is_active;
 
 insert into public.imprest_fundings (funding_no, fund_id, status, requested_amount_tzs, reason,
                                      requested_by, requested_at)

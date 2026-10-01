@@ -472,15 +472,17 @@ select is((select posted_balance_tzs from api.staff_imprest_spending_position())
           'and so is a Director');
 
 -- ---------------------------------------------------------------------------
--- The daily report's imprest figures stay withheld
+-- The daily report states the same figures (issue #82; until then it withheld them)
 -- ---------------------------------------------------------------------------
 select results_eq(
-  $$ select i -> 'position', i -> 'approved_expenses', i -> 'unavailable' ->> 'position',
-            i -> 'unavailable' ->> 'approved_expenses'
-       from jsonb_path_query_first(private.report_content(current_date), '$.**.imprest') i $$,
-  $$ values ('null'::jsonb, 'null'::jsonb, 'imprest_spending_not_built'::text,
-             'imprest_spending_not_built'::text) $$,
-  'the daily report still withholds the imprest position and approved expenses');
+  $$ select (i -> 'position' ->> 'posted_tzs')::bigint, (i -> 'position' ->> 'set_aside_tzs')::bigint,
+            (i -> 'position' ->> 'available_tzs')::bigint,
+            (i -> 'position' ->> 'awaiting_verification_tzs')::bigint,
+            (i -> 'approved_expenses' ->> 'count')::int, i -> 'unavailable'
+       from (select private.report_content(private.business_date()) -> 'sections' -> 'imprest' as i) x $$,
+  $$ values (130000::bigint, 130000::bigint, 0::bigint, 11000::bigint, 3, null::jsonb) $$,
+  'the daily report states the posted balance, set aside, Free to approve, Awaiting verification '
+  'and the verified expenses the Manager is sent');
 
 -- ---------------------------------------------------------------------------
 -- The deferred check: a verification carries its expense posting at commit

@@ -202,43 +202,45 @@ describe("what the report says", () => {
     expect(till.missing_reason).toBe("no_cash_reconciliation_record");
   });
 
-  // Issue #51: which state this is depends on whether an earlier integration file opened the fund
-  // (files run in order, and `imprest-funding.test.ts` does). Both are legitimate, so the test asks
-  // the database which one is true and requires the report to say exactly that — and in NEITHER may
-  // an imprest count, an expense or a balance appear as a number.
-  it("says the imprest count was not taken, and names the fund only by its real identity", async () => {
+  // Issue #82: the section reads the fund that covered yesterday, if any. Whether one did depends on
+  // what earlier integration files did to the shared database, so the test accepts either and
+  // requires each to be stated honestly: no fund withholds with its reason, a fund states figures
+  // that add up, and neither writes the old "not built" reason or a count as a zero.
+  it("states the imprest section for the fund that covered the day, or says there was none", async () => {
     const imprest = (await content()).sections.imprest as unknown as Record<string, unknown>;
     const count = imprest.reconciliation as Record<string, unknown>;
 
-    const { data: funds, error } = await director.read
-      .from("imprest_funds")
-      .select("id")
-      .eq("is_active", true);
-    expect(error).toBeNull();
-
-    expect(count.state).toBe("not_counted");
-    expect(count.counted_tzs).toBeNull();
-    expect(count.variance_tzs).toBeNull();
     expect(imprest.fund_no).toBeNull();
-    expect(imprest.approved_expenses).toBeNull();
-    expect(imprest.position).toBeNull();
-    expect(imprest.unavailable).toEqual({
-      approved_expenses: "imprest_spending_not_built",
-      position: "imprest_spending_not_built",
-    });
+    expect(JSON.stringify(imprest)).not.toContain("imprest_spending_not_built");
+    expect(["not_counted", "awaiting_manager_confirmation", "balanced", "shortage", "excess"]).toContain(
+      count.state,
+    );
+    if (count.state === "not_counted") {
+      expect(count.counted_tzs).toBeNull();
+      expect(count.variance_tzs).toBeNull();
+    }
 
-    if ((funds ?? []).length === 0) {
-      expect(imprest.state).toBe("no_fund");
+    if (imprest.state === "no_fund") {
       expect(imprest.fund_id).toBeNull();
+      expect(imprest.approved_expenses).toBeNull();
+      expect(imprest.position).toBeNull();
+      expect(imprest.unavailable).toEqual({
+        approved_expenses: "no_imprest_fund",
+        position: "no_imprest_fund",
+      });
       expect(count.missing_reason).toBe("no_imprest_fund");
     } else {
       const funding = imprest.funding as Record<string, unknown>;
+      const position = imprest.position as Record<string, number>;
       expect(imprest.state).toBe("active");
-      expect(imprest.fund_id).toBe(funds![0].id);
-      expect(count.missing_reason).toBe("no_reconciliation_record");
+      expect(imprest.fund_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(imprest.unavailable).toBeUndefined();
       expect(funding.approved_tzs).toBeNull();
       expect(funding.provided_tzs).toBeNull();
-      expect(typeof funding.received_tzs).toBe("number");
+      expect(position.available_tzs).toBe(position.posted_tzs - position.set_aside_tzs);
+      expect(position.expected_cash_tzs).toBe(
+        position.posted_tzs - position.awaiting_verification_tzs,
+      );
     }
   });
 
