@@ -26,6 +26,9 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 - Upload images with `IMAGE_ADAPTER=gist`. Post videos through the PR comment box in the signed-in browser.
 ## Checks
 `npm run lint`, `npm run typecheck`, `npm run test`, `npm run test:e2e`, `npm run build`. Run all of them before opening a PR and again after rebasing.
+
+When changing CI, keep `.github/workflows/ci.yml` and `.depot/workflows/ci.yml` aligned apart from
+runner labels. For Depot validation and activation, read `.depot/README.md`.
 ## Multi-agent rules
 - Work on your own task branch; `main` changes only by merged PR.
 - Leave other agents' worktrees, branches and uncommitted work untouched.
