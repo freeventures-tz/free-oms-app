@@ -230,6 +230,8 @@ const REVERSAL_VERSION = "20261003000100";
 const RETIREMENT_VERSION = "20261004000100";
 /** Issue #73: the stock receipt imprest link migration, the last of this release. */
 const RECEIPT_LINK_VERSION = "20261005000100";
+/** Issue #83: the till count migration. */
+const TILL_COUNT_VERSION = "20261007000100";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -276,6 +278,11 @@ const ASSERT_RETIREMENT = join(SQL_DIR, "58_assert_retirement_upgrade.sql");
 const MARK_V0110 = join(SQL_DIR, "60_mark_v0110_boundary.sql");
 const BUILD_V0110_RECEIPTS = join(SQL_DIR, "61_build_v0110_receipts.sql");
 const ASSERT_RECEIPT_LINK = join(SQL_DIR, "62_assert_link_upgrade.sql");
+// Issue #83's files carry its number rather than the next free step, so a parallel phase cannot
+// claim the same names.
+const MARK_TILL = join(SQL_DIR, "83a_mark_till_boundary.sql");
+const BUILD_TILL_GROUND = join(SQL_DIR, "83b_build_till_ground.sql");
+const ASSERT_TILL = join(SQL_DIR, "83c_assert_till_upgrade.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -316,6 +323,7 @@ const COUNTEREXAMPLE_LATE_COUNT = join(SQL_DIR, "51_counterexample_late_count.sq
 const COUNTEREXAMPLE_RAISE = join(SQL_DIR, "55_counterexample_raise.sql");
 const COUNTEREXAMPLE_REVERSAL_REASON = join(SQL_DIR, "59_counterexample_reversal_reason.sql");
 const COUNTEREXAMPLE_RECEIPT_NOTE = join(SQL_DIR, "63_counterexample_receipt_note.sql");
+const COUNTEREXAMPLE_RECEIPT_LINK = join(SQL_DIR, "83d_counterexample_receipt_link.sql");
 /**
  * The permitted writes counterexample 4 hides behind, and the rewrite they must not cover for.
  *
@@ -343,6 +351,7 @@ const V080_PRESERVATION = join("supabase", "release-checks", "v080_preservation.
 const V090_PRESERVATION = join("supabase", "release-checks", "v090_preservation.sql");
 const V0100_PRESERVATION = join("supabase", "release-checks", "v0100_preservation.sql");
 const V0110_PRESERVATION = join("supabase", "release-checks", "v0110_preservation.sql");
+const V0121_TILL_PRESERVATION = join("supabase", "release-checks", "v0121_till_preservation.sql");
 
 /**
  * All 53 released migrations (issue #73). Its first 52 lines are the v0.10.0 manifest unchanged, so
@@ -916,6 +925,47 @@ const PHASES = [
           { name: "a raise's reason rewritten in place", file: COUNTEREXAMPLE_RAISE },
           { name: "a reversal request's reason rewritten in place", file: COUNTEREXAMPLE_REVERSAL_REASON },
           { name: "a stock receipt's delivery note rewritten in place", file: COUNTEREXAMPLE_RECEIPT_NOTE },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the till count migration",
+    what: "the v0.12.1 database",
+    version: RECEIPT_LINK_VERSION,
+    upTo: TILL_COUNT_VERSION,
+    describes: "v0.12.1, before the till count",
+    query: V0121_TILL_PRESERVATION,
+    fixtures: [
+      {
+        name: "everything the v0.11.0 phase builds, AND a delivery paid from imprest",
+        setup: [
+          MARK_TILL,
+          BUILD_V005,
+          BUILD_V010_FUNDING,
+          BUILD_V020_REPORT,
+          BUILD_V030_DISBURSEMENTS,
+          BUILD_V040_SETTLEMENTS,
+          BUILD_V050_VERIFICATIONS,
+          BUILD_V060_SEND_BACK,
+          BUILD_V070_COUNTS,
+          BUILD_V080_LATE_COUNT,
+          BUILD_V090_RAISES,
+          BUILD_V0100_REVERSALS,
+          BUILD_V0110_RECEIPTS,
+          BUILD_TILL_GROUND,
+        ],
+        assertions: [ASSERT_TILL],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          { name: "a delivered report's content rewritten in place", file: COUNTEREXAMPLE_REPORT },
+          { name: "a label added to a released enum", file: COUNTEREXAMPLE_ENUM },
+          { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
+          { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
+          { name: "a stock receipt's delivery note rewritten in place", file: COUNTEREXAMPLE_RECEIPT_NOTE },
+          { name: "a delivery's imprest payment repointed in place", file: COUNTEREXAMPLE_RECEIPT_LINK },
         ],
       },
     ],

@@ -25,6 +25,8 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/inventory/receiving", labelKey: "nav.receiving" },
     // §13.3: the Cashier proposes imprest disbursements and sees what is free to approve.
     { href: "/imprest", labelKey: "nav.imprest" },
+    // Issue #83: the Cashier counts the till; the Manager confirms it; Directors read.
+    { href: "/till", labelKey: "till.nav" },
   ],
   manager: [
     { href: "/dashboard", labelKey: "nav.dashboard" },
@@ -40,6 +42,7 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/production", labelKey: "nav.production" },
     // §13.2: the Manager requests imprest funding and confirms what was handed over.
     { href: "/imprest", labelKey: "nav.imprest" },
+    { href: "/till", labelKey: "till.nav" },
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
     // §18.1 names the recipients of the daily report: both Directors and the Manager, and nobody
@@ -67,6 +70,7 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/production", labelKey: "nav.production" },
     // §13.2: a Director approves, provides and corrects imprest funding.
     { href: "/imprest", labelKey: "nav.imprest" },
+    { href: "/till", labelKey: "till.nav" },
     { href: "/settings/products", labelKey: "nav.products" },
     { href: "/settings/suppliers", labelKey: "nav.suppliers" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
