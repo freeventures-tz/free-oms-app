@@ -7,6 +7,7 @@ import { pageNumber } from "@/lib/settlement/settlement";
 import { businessDate } from "@/lib/time/business-date";
 import type { TillCount } from "@/lib/till/counting";
 import {
+  loadOldestWaitingDay,
   loadOpenTillDays,
   loadTillCounts,
   loadTillDayCounts,
@@ -29,26 +30,34 @@ export default async function TillPage({ searchParams }: PageProps<"/till">) {
   const viewer = await requireAccess("/till");
   const params = await searchParams;
   const t = await getTranslations("till");
-  const today = businessDate();
+  const serverToday = businessDate();
   const seesExpected = viewer.role === "manager" || viewer.role === "director";
 
-  const [day, todays, open, history, expected] = await Promise.all([
-    loadTillToday(today),
-    loadTillDayCounts(today),
+  const [day, serverTodays, open, history, serverExpected, oldestWaiting] = await Promise.all([
+    loadTillToday(),
+    loadTillDayCounts(serverToday),
     loadOpenTillDays(pageNumber(params.open)),
     loadTillCounts(pageNumber(params.counts)),
-    seesExpected ? loadTillExpected(today) : null,
+    seesExpected ? loadTillExpected(serverToday) : null,
+    seesExpected ? loadOldestWaitingDay() : null,
   ]);
 
-  // The oldest past day whose count waits for the Manager, decided one at a time above the list.
-  // Today's count is decided on today's card, so it is not offered twice. The open list is oldest
-  // first, so its first page holds the oldest; a Cashier is not offered it at all.
-  const pastDay = seesExpected
-    ? open.rows.find((d) => d.state === "awaiting_confirmation" && d.businessDate !== today)
-    : undefined;
-  const pastWaiting: TillCount | null = pastDay
-    ? ((await loadTillDayCounts(pastDay.businessDate)).find((c) => c.status === "awaiting_confirmation") ?? null)
-    : null;
+  // Today is the database's day, which is the one it accepts a count for. On the rare request that
+  // straddles midnight in Dar es Salaam the two clocks differ, and today's reads are repeated for it.
+  const today = day?.businessDate ?? serverToday;
+  const [todays, expected] =
+    today === serverToday
+      ? [serverTodays, serverExpected]
+      : await Promise.all([loadTillDayCounts(today), seesExpected ? loadTillExpected(today) : null]);
+
+  // The oldest past day whose count waits for the Manager, decided one at a time above the list,
+  // found whatever page of open days it is on. Today's count is decided on today's card, so it is
+  // not offered twice. A Cashier is not offered it at all.
+  const pastWaiting: TillCount | null =
+    oldestWaiting && oldestWaiting.businessDate < today
+      ? ((await loadTillDayCounts(oldestWaiting.businessDate)).find((c) => c.status === "awaiting_confirmation") ??
+        null)
+      : null;
 
   return (
     <>

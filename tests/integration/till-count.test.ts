@@ -252,6 +252,14 @@ describe("one business day of the till, over HTTP", () => {
     }
     const result = await sendBack(manager, first);
     expect(result.reason).toBe("sent_back");
+
+    // The reason goes to the Cashier who counted. The other reads which count to replace, not why.
+    const reasonFor = async (who: Fixture) => {
+      const { data } = await who.api.rpc("staff_till_days", { p_limit: 1, p_offset: 0 });
+      return (data as { latest_id: string; latest_return_reason: string | null }[])[0];
+    };
+    expect((await reasonFor(winner)).latest_return_reason).toBe("Count the Halopesa messages again");
+    expect(await reasonFor(loser)).toMatchObject({ latest_id: first.id, latest_return_reason: null });
     const [row] = await audit(first.id, "till_count_sent_back");
     expect(row).toMatchObject({ actor_id: manager.userId, actor_role: "manager", source_operation: "api.staff_send_back_till_count" });
   });

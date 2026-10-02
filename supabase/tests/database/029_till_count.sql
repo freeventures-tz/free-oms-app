@@ -19,7 +19,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(88);
+select plan(92);
 
 create schema if not exists tests;
 grant usage on schema tests to public;
@@ -338,6 +338,19 @@ select is(tests.send_back(tests.rid('t1'), 'Count the CRDB slips again', 'k-sb1'
           'the Manager sends it back');
 select is(tests.state(tests.t()), 'due', 'a sent-back count leaves today due, not counted');
 
+-- The Manager's reason is for the Cashier who counted. Another Cashier reads that the count was
+-- sent back, and which count a recount replaces, but not why.
+select tests.cashier();
+select is((select latest_return_reason from api.staff_till_days(1, 0, false)),
+          'Count the CRDB slips again', 'the Cashier who counted reads why it was sent back');
+select tests.cashier_b();
+select ok((select latest_return_reason is null and latest_status = 'sent_back' and latest_id is not null
+             from api.staff_till_days(1, 0, false)),
+          'another Cashier reads the day and the count to replace, never the reason');
+select tests.director();
+select is((select latest_return_reason from api.staff_till_days(1, 0, false)),
+          'Count the CRDB slips again', 'Directors and the Manager read every reason');
+
 select tests.cashier();
 select is(tests.keep('stale', tests.enter(tests.t(), null, tests.zeros(), null,
                                           gen_random_uuid()::text)),
@@ -435,6 +448,11 @@ select is((tests.rec(tests.rid('late1'))).late_reason, 'Cashier was off sick',
           'the record keeps why it was late');
 select is(tests.state(tests.t() - 1), 'awaiting_confirmation',
           'and the late count goes through the same confirm path');
+select tests.manager();
+select is((select string_agg(business_date::text, ',')
+             from api.staff_till_days(1, 0, true, 'awaiting_confirmation')),
+          (tests.t() - 1)::text,
+          'the oldest day waiting for the Manager is found whatever page of open days it is on');
 
 -- Entering and confirming are separate people, even after a change of role.
 update public.user_roles set role = 'manager'

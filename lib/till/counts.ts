@@ -162,22 +162,35 @@ function dayFromRow(row: DayRow, what: string): TillDayRow {
   };
 }
 
-/**
- * Today as the database resolves it: the most recent business day of the till. `null` only before
- * the first day counting started, which cannot happen after release day.
- */
-export async function loadTillToday(today: string): Promise<TillDayRow | null> {
+async function readDays(args: Record<string, unknown>, what: string): Promise<TillDayRow[]> {
   const api = await userApi();
-  const what = "till.today";
-  const rows = requireRows(
-    (await api.rpc("staff_till_days", { p_limit: 1, p_offset: 0, p_open_only: false })) as {
-      data: DayRow[] | null;
-      error: { message: string } | null;
-    },
+  return requireRows(
+    (await api.rpc("staff_till_days", args)) as { data: DayRow[] | null; error: { message: string } | null },
     what,
+  ).map((row) => dayFromRow(row, what));
+}
+
+/**
+ * Today as the database resolves it: the most recent business day of the till. The page takes its
+ * date from this row rather than from the server's own clock, so a request that straddles midnight
+ * in Dar es Salaam shows the day the database will accept a count for. `null` only before the
+ * first day counting started, which cannot happen after release day.
+ */
+export async function loadTillToday(): Promise<TillDayRow | null> {
+  const [day] = await readDays({ p_limit: 1, p_offset: 0, p_open_only: false }, "till.today");
+  return day ?? null;
+}
+
+/**
+ * The oldest day whose count waits for the Manager, whatever page of open days it falls on, so
+ * many older Not counted days can never push it out of sight.
+ */
+export async function loadOldestWaitingDay(): Promise<TillDayRow | null> {
+  const [day] = await readDays(
+    { p_limit: 1, p_offset: 0, p_open_only: true, p_state: "awaiting_confirmation" },
+    "till.oldest_waiting",
   );
-  const day = rows[0] ? dayFromRow(rows[0], what) : null;
-  return day && day.businessDate === today ? day : null;
+  return day ?? null;
 }
 
 /**

@@ -69,23 +69,27 @@ async function expectedToday(): Promise<Record<Method, number>> {
   >;
 }
 
-/** SQL as the local stack's superuser. Never pointed at a hosted database. */
-function superSql(sql: string) {
+/** SQL as the local stack's superuser, returning what it printed. Never pointed at a hosted database. */
+function superSql(sql: string): string {
   const url =
     process.env.SUPABASE_SUPERUSER_DB_URL ?? "postgresql://supabase_admin:postgres@127.0.0.1:54322/postgres";
   if (!/@(127\.0\.0\.1|localhost)[:/]/.test(url)) throw new Error("superSql runs against the local stack only");
   try {
-    execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-c", sql], { stdio: "pipe" });
+    return execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-t", "-A", "-c", sql], {
+      stdio: "pipe",
+      encoding: "utf8",
+    }).trim();
   } catch (error) {
     if ((error as { code?: string }).code !== "ENOENT") throw error;
-    execFileSync(
+    return execFileSync(
       "docker",
       [
         "exec", "-i", "-e", "PGPASSWORD=postgres", process.env.SUPABASE_DB_CONTAINER ?? "supabase_db_free-oms-app",
-        "psql", "-h", "127.0.0.1", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-c", sql,
+        "psql", "-h", "127.0.0.1", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q",
+        "-t", "-A", "-c", sql,
       ],
-      { stdio: "pipe" },
-    );
+      { stdio: "pipe", encoding: "utf8" },
+    ).trim();
   }
 }
 
@@ -98,13 +102,29 @@ function endDay() {
   `);
 }
 
-/** Lets the till be counted from `days` ago, so the days between read Not counted. */
-function countingStartsDaysAgo(days: number) {
+/** Sets the first day the till can be counted, as the migration fixes it: a literal date. */
+function setCountingStartsOn(day: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`not a date: ${day}`);
   superSql(`
     create or replace function private.till_counting_starts_on() returns date
     language sql immutable set search_path = ''
-    as $b$ select ((now() at time zone 'Africa/Dar_es_Salaam')::date - ${days}) $b$;
+    as $b$ select '${day}'::date $b$;
   `);
+}
+
+/**
+ * Lets the till be counted from `days` ago, so the days between read Not counted, for the length of
+ * `run` only. The released start is put back afterwards, pass or fail, so no later test or device
+ * tier inherits it.
+ */
+async function withCountingStartedDaysAgo(days: number, run: () => Promise<void>) {
+  const released = superSql("select private.till_counting_starts_on()::text");
+  setCountingStartsOn(businessDate(new Date(Date.now() - days * 24 * 60 * 60 * 1000)));
+  try {
+    await run();
+  } finally {
+    setCountingStartsOn(released);
+  }
 }
 
 /** Today's takings: one invoice paid by three methods, recorded by the E2E Cashier. */
@@ -246,48 +266,49 @@ test.describe("till count", () => {
   test("a missed day reads Not counted, never zero, and is counted late with a reason", async ({ page }, testInfo) => {
     const shot = (name: string) =>
       page.screenshot({ path: testInfo.outputPath(`${name}-${testInfo.project.name}.png`), fullPage: true });
-    countingStartsDaysAgo(1);
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const day = businessDate(yesterday);
 
-    // The Manager sees yesterday open, as Not counted, with no figure that could pass for a zero.
-    await as(page, "manager");
-    await page.goto("/till");
-    const open = page.getByTestId(`till-open-${day}`);
-    await expect(open.getByTestId("till-state-not_counted")).toBeVisible();
-    await expect(open).toContainText("Not counted since");
-    await expect(open).not.toContainText("TZS 0");
-    await shot("till-6-manager-not-counted");
+    await withCountingStartedDaysAgo(1, async () => {
+      // The Manager sees yesterday open, as Not counted, with no figure that could pass for a zero.
+      await as(page, "manager");
+      await page.goto("/till");
+      const open = page.getByTestId(`till-open-${day}`);
+      await expect(open.getByTestId("till-state-not_counted")).toBeVisible();
+      await expect(open).toContainText("Not counted since");
+      await expect(open).not.toContainText("TZS 0");
+      await shot("till-6-manager-not-counted");
 
-    // The Cashier counts it late, and needs a reason.
-    await as(page, "cashier");
-    await page.goto("/till");
-    await page.getByTestId(`till-open-late-${day}`).click();
-    const late = page.getByTestId(`till-open-${day}`).getByTestId("till-late-form");
-    await fillCount(late, { cash: 0, mixx_by_yas: 0, halopesa: 0, mwanga_hakika_transfer: 0, crdb_transfer: 0, cheque: 0 });
-    await late.getByRole("button", { name: "Submit late count" }).click();
-    await expect(late.getByText("Say why this day wasn't counted, in 3 to 500 characters.")).toBeVisible();
-    await late.getByLabel("Why this day wasn't counted").fill("The Cashier was off sick");
-    await late.getByRole("button", { name: "Submit late count" }).click();
-    // The answer stays on screen after the day moves on to Awaiting Manager confirmation.
-    await expect(page.getByRole("status").filter({ hasText: "Late count submitted." })).toBeVisible();
-    await expect(open.getByTestId("till-state-awaiting_confirmation")).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Late count submitted." })).toBeVisible();
-    await shot("till-7-cashier-late");
+      // The Cashier counts it late, and needs a reason.
+      await as(page, "cashier");
+      await page.goto("/till");
+      await page.getByTestId(`till-open-late-${day}`).click();
+      const late = page.getByTestId(`till-open-${day}`).getByTestId("till-late-form");
+      await fillCount(late, { cash: 0, mixx_by_yas: 0, halopesa: 0, mwanga_hakika_transfer: 0, crdb_transfer: 0, cheque: 0 });
+      await late.getByRole("button", { name: "Submit late count" }).click();
+      await expect(late.getByText("Say why this day wasn't counted, in 3 to 500 characters.")).toBeVisible();
+      await late.getByLabel("Why this day wasn't counted").fill("The Cashier was off sick");
+      await late.getByRole("button", { name: "Submit late count" }).click();
+      // The answer stays on screen after the day moves on to Awaiting Manager confirmation.
+      await expect(page.getByRole("status").filter({ hasText: "Late count submitted." })).toBeVisible();
+      await expect(open.getByTestId("till-state-awaiting_confirmation")).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "Late count submitted." })).toBeVisible();
+      await shot("till-7-cashier-late");
 
-    // The Manager confirms it from the card above the open days, and the day leaves the list.
-    await as(page, "manager");
-    await page.goto("/till");
-    await expect(open.getByTestId("till-state-awaiting_confirmation")).toBeVisible();
-    const decide = page.getByTestId(`till-past-${day}`);
-    await expect(decide.getByTestId("till-late")).toContainText("The Cashier was off sick");
-    await page.getByTestId("till-past-decision").getByRole("button", { name: "Confirm balanced" }).click();
-    await expect(page.getByRole("status").filter({ hasText: "Count confirmed." })).toBeVisible();
-    await expect(page.getByTestId(`till-open-${day}`)).toHaveCount(0);
-    await expect(page.getByRole("status").filter({ hasText: "Count confirmed." })).toBeVisible();
-    await expect(
-      page.getByTestId("till-history").getByTestId(`till-count-${day}-1`).getByTestId("till-state-balanced"),
-    ).toBeVisible();
+      // The Manager confirms it from the card above the open days, and the day leaves the list.
+      await as(page, "manager");
+      await page.goto("/till");
+      await expect(open.getByTestId("till-state-awaiting_confirmation")).toBeVisible();
+      const decide = page.getByTestId(`till-past-${day}`);
+      await expect(decide.getByTestId("till-late")).toContainText("The Cashier was off sick");
+      await page.getByTestId("till-past-decision").getByRole("button", { name: "Confirm balanced" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Count confirmed." })).toBeVisible();
+      await expect(page.getByTestId(`till-open-${day}`)).toHaveCount(0);
+      await expect(page.getByRole("status").filter({ hasText: "Count confirmed." })).toBeVisible();
+      await expect(
+        page.getByTestId("till-history").getByTestId(`till-count-${day}-1`).getByTestId("till-state-balanced"),
+      ).toBeVisible();
+    });
   });
 
   test("a Sales Representative is refused the till", async ({ page }) => {
