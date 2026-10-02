@@ -2,6 +2,32 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.13.0] — 2026-11-13
+
+The Cashier can now count the till at the end of the day, and the Manager confirms the count or
+sends it back. It's on a new Till count screen.
+
+### NEW
+
+- The Cashier enters what they counted for each payment method: cash, Mixx by YAS, Halopesa, the two
+  bank transfers and cheques. The app works out what each one should be from the day's payments,
+  so nothing else is typed.
+- The Cashier doesn't see the expected amounts before counting. Afterwards they see what they
+  counted, what was expected and the difference, for their own counts only.
+- The Manager sees what's expected so far today, confirms a count as it stands, or sends it back
+  with a reason. The Cashier then counts again, and the first count stays on the record. Nobody can
+  confirm or send back a count they entered themselves.
+- Each day shows as Balanced, Shortage or Excess once confirmed. Before that it shows as Awaiting
+  Manager confirmation, or Not counted if the day ended without a count. A missing count never
+  shows as zero.
+- If any payment method is short, the day is a Shortage, even when another method is over by the
+  same amount. A Shortage or Excess needs one of the seven reasons, and Suspected loss or theft,
+  Under investigation and Other need a written note.
+- The Cashier can count a missed day late, with a reason. Days that aren't closed stay listed,
+  oldest first, until each has a confirmed count.
+- Directors can read every count. The screen works on a phone, a tablet and a desktop, in English
+  and Swahili.
+
 ## [0.12.4] — 2026-11-10
 
 A change to how the app is tested, so a small change can ship in minutes, and three changes that
