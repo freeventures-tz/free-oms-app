@@ -2,6 +2,26 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.12.2] — 2026-10-02
+
+The daily report now tells the truth about imprest. It used to say imprest spending was not in the
+system yet and that the count was Not counted every night.
+
+### FIXED
+
+- A new daily report shows the day's verified imprest expenses, including any reversals and the
+  amounts posted to replace them. It also shows the imprest balance and the cash that should be in
+  the box, as they stood at midnight.
+- The report shows the imprest count as it really stood: Balanced, Shortage, Excess, Awaiting
+  Manager confirmation, or Not counted. A day with no count shows no amounts, not zero.
+- When one imprest fund was retired and the next one started on the same day, the report includes
+  money from both funds.
+- Reports made before this release still open and read exactly as they did.
+
+### IMPROVED
+
+- Tapping Open on a report in the archive shows "Opening…" straight away while the report loads.
+
 ## [0.12.1] — 2026-09-30
 
 A fix to the project's description. Nothing changes in the app itself.
