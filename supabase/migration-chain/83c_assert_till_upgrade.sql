@@ -28,7 +28,7 @@ begin
      or to_regprocedure('api.staff_send_back_till_count(uuid,integer,text,text)') is null
      or to_regprocedure('api.staff_till_counts(integer,integer,date)') is null
      or to_regprocedure('api.staff_till_expected(date)') is null
-     or to_regprocedure('api.staff_till_days(integer,integer,boolean)') is null then
+     or to_regprocedure('api.staff_till_days(integer,integer,boolean,text)') is null then
     raise exception 'a till command or read is missing';
   end if;
 

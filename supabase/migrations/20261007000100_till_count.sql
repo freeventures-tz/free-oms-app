@@ -1021,10 +1021,15 @@ comment on function api.staff_till_expected(date) is
   'Directors and the Manager; the Cashier counts without seeing it.';
 
 -- Every day from the start of till counting, most recent first, or with `p_open_only` the days not
--- closed (Not counted, or waiting for the Manager), oldest first. States only, with no figures, so
--- every till role may read it.
+-- closed (Not counted, or waiting for the Manager), oldest first. `p_state` narrows the read to one
+-- state, so the Manager's oldest waiting day is found whatever page of open days it falls on.
+-- States only, with no figures, so every till role may read it.
+--
+-- A Cashier is sent the day's latest count id, which a recount must name and which opens nothing
+-- they cannot already read, but the Manager's send-back reason only for a count they entered.
 create or replace function api.staff_till_days(p_limit integer, p_offset integer,
-                                               p_open_only boolean default false)
+                                               p_open_only boolean default false,
+                                               p_state text default null)
 returns table (business_date date, state text, not_counted_since timestamptz,
                awaiting_since timestamptz, latest_id uuid, latest_status text,
                latest_return_reason text, total bigint)
@@ -1033,13 +1038,20 @@ stable
 security definer
 set search_path = ''
 as $$
+declare
+  v_actor uuid := private.acting_staff(array['director', 'manager', 'cashier']::public.app_role[]);
+  v_role  public.app_role := private.live_role_of(v_actor);
 begin
-  perform private.acting_staff(array['director', 'manager', 'cashier']::public.app_role[]);
   return query
     select d.business_date, d.state, d.not_counted_since, d.awaiting_since, d.latest_id,
-           d.latest_status, d.latest_return_reason, count(*) over ()
+           d.latest_status,
+           case when v_role = 'cashier' and r.counted_by is distinct from v_actor then null
+                else d.latest_return_reason end,
+           count(*) over ()
       from private.till_days() d
-     where not coalesce(p_open_only, false) or d.state in ('not_counted', 'awaiting_confirmation')
+      left join public.reconciliations r on r.id = d.latest_id
+     where (not coalesce(p_open_only, false) or d.state in ('not_counted', 'awaiting_confirmation'))
+       and (p_state is null or d.state = p_state)
      order by case when coalesce(p_open_only, false) then d.business_date end asc,
               d.business_date desc
      limit greatest(least(coalesce(p_limit, 30), 100), 1)
@@ -1047,10 +1059,11 @@ begin
 end;
 $$;
 
-comment on function api.staff_till_days(integer, integer, boolean) is
+comment on function api.staff_till_days(integer, integer, boolean, text) is
   'Each business day of the till, resolved to Not counted, Awaiting Manager confirmation, Balanced, '
   'Shortage or Excess, or due today (issue #83, §15.2a); with p_open_only, the days not closed, '
-  'oldest first. No figures; Directors, the Manager and the Cashier read.';
+  'oldest first; with p_state, one state only. No figures; Directors, the Manager and the Cashier '
+  'read, and a Cashier reads a send-back reason only for a count they entered.';
 
 -- ---------------------------------------------------------------------------
 -- Ownership and grants
