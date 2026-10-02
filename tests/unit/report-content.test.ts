@@ -299,8 +299,8 @@ describe("a figure the snapshot does not carry", () => {
       },
     });
 
-    expect(figureFor(noFund, "imprestPosition", "postedTzs")).toEqual({ kind: "unknown" });
-    expect(figureFor(noFund, "imprestExpenses", "approvedExpenseTzs")).toEqual({ kind: "unknown" });
+    expect(figureFor(noFund, "imprestPosition", "postedBalanceTzs")).toEqual({ kind: "unknown" });
+    expect(figureFor(noFund, "imprestExpenses", "verifiedExpenseTzs")).toEqual({ kind: "unknown" });
     // The fund section carries the STATE and no reason: "No fund open" needs no explaining. The
     // reason belongs to the count that could not happen, and that is where it is.
     expect(section(noFund, "imprestFunding").state).toEqual({
@@ -550,7 +550,7 @@ describe("the integrated imprest section", () => {
   it("withholds every expense and position figure because spending is not built", () => {
     for (const [key, rows] of [
       ["imprestExpenses", ["approvedExpenseCount", "approvedExpenseTzs"]],
-      ["imprestPosition", ["postedTzs", "setAsideTzs", "availableTzs", "awaitingVerificationTzs"]],
+      ["imprestPosition", ["postedTzs", "encumberedTzs", "availableTzs", "awaitingVerificationTzs"]],
     ] as const) {
       for (const row of rows) {
         expect(figureFor(integrated(), key, row), row).toEqual({
@@ -702,8 +702,8 @@ describe("the imprest section that states the position", () => {
 
   it("shows the day's expenses with their reversals, replacements and losses", () => {
     expect(section(stated(), "imprestExpenses").rows).toEqual([
-      { key: "approvedExpenseCount", figure: { kind: "count", value: 1 } },
-      { key: "approvedExpenseTzs", figure: { kind: "money", value: 8_000 } },
+      { key: "verifiedExpenseCount", figure: { kind: "count", value: 1 } },
+      { key: "verifiedExpenseTzs", figure: { kind: "money", value: 8_000 } },
       { key: "reversedExpenseTzs", figure: { kind: "money", value: 8_000 } },
       { key: "replacementExpenseTzs", figure: { kind: "money", value: 6_000 } },
       { key: "netExpenseTzs", figure: { kind: "money", value: 6_000 } },
@@ -716,9 +716,9 @@ describe("the imprest section that states the position", () => {
     const balance = section(stated(), "imprestPosition");
     expect(balance.noteKey).toBe("asAtBusinessDate");
     expect(balance.rows).toEqual([
-      { key: "postedTzs", figure: { kind: "money", value: 93_200 } },
+      { key: "postedBalanceTzs", figure: { kind: "money", value: 93_200 } },
       { key: "setAsideTzs", figure: { kind: "money", value: 5_000 } },
-      { key: "availableTzs", figure: { kind: "money", value: 88_200 } },
+      { key: "freeToApproveTzs", figure: { kind: "money", value: 88_200 } },
       { key: "awaitingVerificationTzs", figure: { kind: "money", value: 5_000 } },
       { key: "expectedCashTzs", figure: { kind: "money", value: 88_200 } },
     ]);
@@ -781,7 +781,7 @@ describe("the imprest section that states the position", () => {
         missing_reason: "no_imprest_fund",
       },
     });
-    expect(figureFor(content, "imprestPosition", "postedTzs")).toEqual({
+    expect(figureFor(content, "imprestPosition", "postedBalanceTzs")).toEqual({
       kind: "unavailable",
       reasonKey: "no_imprest_fund",
     });
@@ -814,7 +814,7 @@ describe("the imprest section that states the position", () => {
     ]);
     expect(section(old, "imprestPosition").rows.map((row) => row.key)).toEqual([
       "postedTzs",
-      "setAsideTzs",
+      "encumberedTzs",
       "availableTzs",
       "awaitingVerificationTzs",
     ]);
@@ -835,7 +835,11 @@ describe("the imprest section that states the position", () => {
       "replacementExpenseTzs",
       "netExpenseTzs",
       "unexplainedLossTzs",
+      "verifiedExpenseCount",
+      "verifiedExpenseTzs",
+      "postedBalanceTzs",
       "setAsideTzs",
+      "freeToApproveTzs",
       "expectedCashTzs",
     ]) {
       expect(reports.rows[key], key).toBeTypeOf("string");
@@ -845,6 +849,7 @@ describe("the imprest section that states the position", () => {
     }
     expect(reports.missingReasons.count_sent_back).toBeTypeOf("string");
     expect(reports.unavailableReasons.no_imprest_fund).toBeTypeOf("string");
-    expect(reports.rows.encumberedTzs).toBeUndefined();
+    // A report written before #82 keeps the words it was read with.
+    expect(reports.rows.encumberedTzs).toBe(_locale === "en" ? "Committed" : "Zilizotengwa");
   });
 });

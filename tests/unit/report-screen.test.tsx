@@ -728,7 +728,7 @@ describe("an imprest section that states the position", () => {
 
     const balance = screen.getByRole("region", { name: /imprest balance/i });
     expect(balance).toHaveTextContent(/how it stood at the end of this business day/i);
-    expect(screen.getByTestId("report-row-imprestPosition-postedTzs")).toHaveTextContent(/93,200/);
+    expect(screen.getByTestId("report-row-imprestPosition-postedBalanceTzs")).toHaveTextContent(/93,200/);
     expect(screen.getByTestId("report-row-imprestPosition-expectedCashTzs")).toHaveTextContent(
       /88,200/,
     );

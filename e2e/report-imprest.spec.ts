@@ -103,6 +103,14 @@ async function freshFund(): Promise<void> {
     update public.imprest_funds set retired_at = retired_at - interval '1 day'
      where private.imprest_business_date_of(retired_at) >= private.imprest_business_date();
     update public.imprest_funds set is_active = false, retired_at = now() - interval '1 day' where is_active;
+    -- The day's funding and expense lines read every fund, so what earlier tests did today moves
+    -- to yesterday with the funds that did it.
+    update public.imprest_postings set posted_at = posted_at - interval '1 day'
+     where private.imprest_business_date_of(posted_at) >= private.imprest_business_date();
+    update public.imprest_fundings set requested_at = requested_at - interval '1 day'
+     where private.imprest_business_date_of(requested_at) >= private.imprest_business_date();
+    update public.imprest_fundings set received_at = received_at - interval '1 day'
+     where private.imprest_business_date_of(received_at) >= private.imprest_business_date();
     insert into public.imprest_funds (opened_by) values ('${manager.userId}');
   `);
 }
@@ -284,16 +292,16 @@ test.describe("the imprest section of a report", () => {
 
     await openSection(page, "imprestPosition");
     // 93,500 less the confirmed shortage of 300.
-    await expect(row(page, "imprestPosition", "postedTzs")).toContainText(tzs(93200));
+    await expect(row(page, "imprestPosition", "postedBalanceTzs")).toContainText(tzs(93200));
     await expect(row(page, "imprestPosition", "setAsideTzs")).toContainText(tzs(5000));
-    await expect(row(page, "imprestPosition", "availableTzs")).toContainText(tzs(88200));
+    await expect(row(page, "imprestPosition", "freeToApproveTzs")).toContainText(tzs(88200));
     await expect(row(page, "imprestPosition", "awaitingVerificationTzs")).toContainText(tzs(5000));
     await expect(row(page, "imprestPosition", "expectedCashTzs")).toContainText(tzs(88200));
     await expect(page.getByRole("region", { name: /imprest balance/i })).toContainText(/end of this business day/i);
 
     await openSection(page, "imprestExpenses");
-    await expect(row(page, "imprestExpenses", "approvedExpenseCount")).toContainText("1");
-    await expect(row(page, "imprestExpenses", "approvedExpenseTzs")).toContainText(tzs(8000));
+    await expect(row(page, "imprestExpenses", "verifiedExpenseCount")).toContainText("1");
+    await expect(row(page, "imprestExpenses", "verifiedExpenseTzs")).toContainText(tzs(8000));
     await expect(row(page, "imprestExpenses", "reversedExpenseTzs")).toContainText(tzs(8000));
     await expect(row(page, "imprestExpenses", "replacementExpenseTzs")).toContainText(tzs(6000));
     await expect(row(page, "imprestExpenses", "netExpenseTzs")).toContainText(tzs(6000));

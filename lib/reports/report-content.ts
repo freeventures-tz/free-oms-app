@@ -398,6 +398,10 @@ export function readReport(content: unknown): ReportDocument {
   const imprestUnavailable = record(imprest?.["unavailable"]);
   const expensesReason = unavailableReason(imprestUnavailable?.["approved_expenses"]);
   const positionReason = unavailableReason(imprestUnavailable?.["position"]);
+  // A report written before issue #82 keeps the row names it was read with, "Committed" and all, so
+  // a stored report reads as it did. Only that writer gave this reason.
+  const legacyExpenses = expensesReason === "imprest_spending_not_built";
+  const legacyPosition = positionReason === "imprest_spending_not_built";
 
   const document = {
     businessDate: text(root?.["business_date"]),
@@ -541,15 +545,20 @@ export function readReport(content: unknown): ReportDocument {
       },
       {
         key: "imprestExpenses",
-        rows: [
-          row("approvedExpenseCount", imprestExpenses, "count", "count", expensesReason),
-          row("approvedExpenseTzs", imprestExpenses, "amount_tzs", "money", expensesReason),
-          // Issue #82: the day's reversals and replacements, and its losses, beside the expenses.
-          ...rowIfPresent("reversedExpenseTzs", imprestExpenses, "reversed_tzs", "money"),
-          ...rowIfPresent("replacementExpenseTzs", imprestExpenses, "replacement_tzs", "money"),
-          ...rowIfPresent("netExpenseTzs", imprestExpenses, "net_tzs", "money"),
-          ...rowIfPresent("unexplainedLossTzs", imprestExpenses, "unexplained_loss_tzs", "money"),
-        ],
+        rows: legacyExpenses
+          ? [
+              row("approvedExpenseCount", imprestExpenses, "count", "count", expensesReason),
+              row("approvedExpenseTzs", imprestExpenses, "amount_tzs", "money", expensesReason),
+            ]
+          : [
+              row("verifiedExpenseCount", imprestExpenses, "count", "count", expensesReason),
+              row("verifiedExpenseTzs", imprestExpenses, "amount_tzs", "money", expensesReason),
+              // Issue #82: the day's reversals and replacements, and its losses, beside them.
+              ...rowIfPresent("reversedExpenseTzs", imprestExpenses, "reversed_tzs", "money"),
+              ...rowIfPresent("replacementExpenseTzs", imprestExpenses, "replacement_tzs", "money"),
+              ...rowIfPresent("netExpenseTzs", imprestExpenses, "net_tzs", "money"),
+              ...rowIfPresent("unexplainedLossTzs", imprestExpenses, "unexplained_loss_tzs", "money"),
+            ],
       },
       {
         key: "imprestPosition",
@@ -557,9 +566,17 @@ export function readReport(content: unknown): ReportDocument {
         noteKey:
           text(imprestPosition?.["as_at"]) === "cutoff" ? "asAtBusinessDate" : "asAtGeneration",
         rows: [
-          row("postedTzs", imprestPosition, "posted_tzs", "money", positionReason),
-          row("setAsideTzs", imprestPosition, "set_aside_tzs", "money", positionReason),
-          row("availableTzs", imprestPosition, "available_tzs", "money", positionReason),
+          ...(legacyPosition
+            ? [
+                row("postedTzs", imprestPosition, "posted_tzs", "money", positionReason),
+                row("encumberedTzs", imprestPosition, "encumbered_tzs", "money", positionReason),
+                row("availableTzs", imprestPosition, "available_tzs", "money", positionReason),
+              ]
+            : [
+                row("postedBalanceTzs", imprestPosition, "posted_tzs", "money", positionReason),
+                row("setAsideTzs", imprestPosition, "set_aside_tzs", "money", positionReason),
+                row("freeToApproveTzs", imprestPosition, "available_tzs", "money", positionReason),
+              ]),
           row(
             "awaitingVerificationTzs",
             imprestPosition,

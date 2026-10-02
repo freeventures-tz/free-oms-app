@@ -66,6 +66,14 @@ function freshFund(): void {
     update public.imprest_funds set retired_at = retired_at - interval '1 day'
      where private.imprest_business_date_of(retired_at) >= private.imprest_business_date();
     update public.imprest_funds set is_active = false, retired_at = now() - interval '1 day' where is_active;
+    -- The day's funding and expense lines read every fund, so what earlier tests did today moves
+    -- to yesterday with the funds that did it.
+    update public.imprest_postings set posted_at = posted_at - interval '1 day'
+     where private.imprest_business_date_of(posted_at) >= private.imprest_business_date();
+    update public.imprest_fundings set requested_at = requested_at - interval '1 day'
+     where private.imprest_business_date_of(requested_at) >= private.imprest_business_date();
+    update public.imprest_fundings set received_at = received_at - interval '1 day'
+     where private.imprest_business_date_of(received_at) >= private.imprest_business_date();
     insert into public.imprest_funds (opened_by) values ('${manager.userId}');
     set session_replication_role = origin;`);
 }

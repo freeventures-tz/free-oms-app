@@ -23,11 +23,15 @@
 --   imprest screen counted that day, and it stays the same after a later retirement opens a new one.
 --   No such fund is `no_fund`, with the expenses and the balance withheld as `no_imprest_fund`.
 --
---   FUNDING is unchanged: requests made on the day and receipts the Manager confirmed on it.
+--   FUNDING is requests made on the day and receipts the Manager confirmed on it, as before.
 --
 --   APPROVED EXPENSES are the postings of the day: verified expenses (`count`, `amount_tzs`), the
 --   reversals and replacements of expenses posted that day, the net of the three, and the net
 --   unexplained losses. A posting belongs to the day its row was posted.
+--
+--   Funding and expenses are the day's FLOWS and are read from every fund: on the day a fund
+--   retires, its successor opens and may be funded or spend the same day, and those rows belong to
+--   that day's report and no other. The position and the count belong to the covering fund.
 --
 --   THE POSITION is the posted balance (opening balance, confirmed funding, postings and confirmed
 --   count variances), set aside, Free to approve, Awaiting verification and expected cash, each
@@ -89,7 +93,10 @@ begin
                              'not_counted', null, null, null, null, 'no_imprest_fund'));
   end if;
 
-  -- FUNDING, as issue #51 reported it.
+  -- FUNDING, as issue #51 reported it, from EVERY fund. The day's flows are what happened in the
+  -- tin that day, and on the day a fund retires its successor opens and can already be funded or
+  -- spend. Reading only the covering fund would drop those rows from every report: the next day's
+  -- lines exclude them by date. Only the funds that were open that day can have rows dated in it.
   select jsonb_build_object(
            'requested_count',
              count(*) filter (where fu.requested_at >= v_from and fu.requested_at < v_to),
@@ -107,11 +114,11 @@ begin
              'provided_tzs', 'funding_aggregation_deferred'))
     into v_funding
     from public.imprest_fundings fu
-   where fu.fund_id = v_fund_id
-     and ((fu.requested_at >= v_from and fu.requested_at < v_to)
-       or (fu.received_at  >= v_from and fu.received_at  < v_to));
+   where (fu.requested_at >= v_from and fu.requested_at < v_to)
+      or (fu.received_at  >= v_from and fu.received_at  < v_to);
 
-  -- APPROVED EXPENSES: the day's postings. A reversal cancels in full, so it counts against.
+  -- APPROVED EXPENSES: the day's postings, from every fund for the same reason. A reversal cancels
+  -- in full, so it counts against.
   select jsonb_build_object(
            'count',
              count(*) filter (where p.kind = 'expense' and p.entry = 'original'),
@@ -129,8 +136,7 @@ begin
                         filter (where p.kind = 'unexplained_loss'), 0))
     into v_expenses
     from public.imprest_postings p
-   where p.fund_id = v_fund_id
-     and p.posted_at >= v_from and p.posted_at < v_to;
+   where p.posted_at >= v_from and p.posted_at < v_to;
 
   -- THE POSTED BALANCE AT THE CUTOFF.
   select (select coalesce(sum(o.amount_tzs), 0) from public.imprest_fund_openings o

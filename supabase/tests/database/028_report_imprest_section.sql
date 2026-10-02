@@ -332,5 +332,56 @@ select is((tests.imprest(tests.d() + 2) ->> 'fund_id')::uuid, 'e8200000-0000-000
 select is((tests.imprest(tests.d() + 2) -> 'position' ->> 'posted_tzs')::bigint, 0::bigint,
           'which starts from nothing posted');
 
+-- The retirement happens ON the day instead: approved an hour before midnight, with today's count
+-- as its closing count, and the new fund receives 7,000 half an hour later. The day still reads the
+-- retiring fund's balance and count, and its funding line carries the new fund's receipt too, which
+-- no other day's report could show.
+set local session_replication_role = replica;
+update public.imprest_funds
+   set retired_at = private.imprest_business_day_close(tests.d()) - interval '1 hour'
+ where id = 'e8200000-0000-0000-0000-00000000f001';
+update public.imprest_funds
+   set opened_at = private.imprest_business_day_close(tests.d()) - interval '1 hour'
+ where id = 'e8200000-0000-0000-0000-00000000f002';
+insert into public.imprest_retirements (fund_id, status, reason, count_id, business_date,
+                                        posted_funding_tzs, closing_balance_tzs, submitted_by,
+                                        submitted_at, decided_by, decided_at, next_fund_id)
+values ('e8200000-0000-0000-0000-00000000f001', 'approved', 'Month end', tests.cid('c1'), tests.d(),
+        100000, 88200, 'e8200000-0000-0000-0000-000000000003',
+        private.imprest_business_day_close(tests.d()) - interval '2 hours',
+        'e8200000-0000-0000-0000-000000000001',
+        private.imprest_business_day_close(tests.d()) - interval '1 hour',
+        'e8200000-0000-0000-0000-00000000f002');
+insert into public.imprest_fundings (id, funding_no, fund_id, requested_amount_tzs, reason,
+                                     requested_by, requested_at)
+values ('e8200000-0000-0000-0000-00000000f102', 'FV-IMP-TEST-8202',
+        'e8200000-0000-0000-0000-00000000f002', 7000, 'First float',
+        'e8200000-0000-0000-0000-000000000003',
+        private.imprest_business_day_close(tests.d()) - interval '45 minutes');
+insert into public.imprest_funding_handovers (id, funding_id, cycle, amount_tzs, provided_by, provided_at)
+values ('e8200000-0000-0000-0000-00000000f202', 'e8200000-0000-0000-0000-00000000f102', 1, 7000,
+        'e8200000-0000-0000-0000-000000000001',
+        private.imprest_business_day_close(tests.d()) - interval '40 minutes');
+update public.imprest_fundings
+   set status = 'received', version = version + 1,
+       received_handover_id = 'e8200000-0000-0000-0000-00000000f202',
+       received_amount_tzs = 7000, received_by = 'e8200000-0000-0000-0000-000000000003',
+       received_at = private.imprest_business_day_close(tests.d()) - interval '30 minutes'
+ where id = 'e8200000-0000-0000-0000-00000000f102';
+set local session_replication_role = origin;
+
+select is((tests.imprest(tests.d()) ->> 'fund_id')::uuid, 'e8200000-0000-0000-0000-00000000f001'::uuid,
+          'on the retirement day the report reads the retiring fund, whose closing count it was');
+select is(tests.imprest(tests.d()) -> 'reconciliation' ->> 'state', 'shortage',
+          'with that count');
+select is((tests.imprest(tests.d()) -> 'funding' ->> 'received_tzs')::bigint, 107000::bigint,
+          'and the day''s receipts include the new fund''s 7,000 received the same evening');
+select is((tests.imprest(tests.d()) -> 'funding' ->> 'requested_count')::int, 2,
+          'as do its requests');
+select is((tests.imprest(tests.d() + 1) ->> 'fund_id')::uuid, 'e8200000-0000-0000-0000-00000000f002'::uuid,
+          'and the next day belongs to the new fund');
+select is((tests.imprest(tests.d() + 1) -> 'funding' ->> 'received_tzs')::bigint, 0::bigint,
+          'which does not count the 7,000 a second time');
+
 select * from finish();
 rollback;
