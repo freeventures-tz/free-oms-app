@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: GitHub and Depot workflows stay aligned
+        run: node scripts/check-ci-parity.mjs
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
@@ -35,7 +37,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
         with:
           # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
@@ -91,7 +93,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
         with:
           # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
@@ -117,7 +119,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
         with:
           # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.

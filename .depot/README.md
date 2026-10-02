@@ -2,7 +2,9 @@
 
 The workflow in `workflows/ci.yml` runs the same four jobs as `.github/workflows/ci.yml`:
 static checks and build, database checks, integration tests, and responsive E2E.
-Its runner labels use `depot-ubuntu-latest`. Keep both workflows aligned when changing CI.
+Its runner labels use `depot-ubuntu-latest`. The static job runs `scripts/check-ci-parity.mjs`
+before installing dependencies and refuses drift between the two workflows. Keep both aligned
+when changing CI; the checker ignores the migration header and the runner-label difference.
 
 The Depot Code Access GitHub app connects this repository to the Free Ventures organization,
 `zcg6llrm1r`. No repository secrets or variables are needed by this workflow. The Supabase

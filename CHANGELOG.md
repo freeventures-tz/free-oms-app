@@ -8,6 +8,7 @@ What each release of Free Ventures OMS adds, in plain language.
 
 - The checks that protect each release can also run on Depot. GitHub Actions continues to run
   while the same checks are verified there.
+- The checks catch differences between the two CI configurations before installing dependencies.
 
 ## [0.12.2] — 2026-10-02
 
