@@ -364,11 +364,13 @@ select is(api.staff_decide_imprest_disbursement(tests.did('big'), 1, true, null,
             ->> 'reason', 'approved', 'an approval equal to Free to approve is allowed');
 select is(tests.figures(), '200000/200000/0', 'and nothing is left free');
 
--- The report stays withheld: no report function mentions a disbursement.
-select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+-- The report reads disbursements in one place only: its private imprest section (issue #82).
+select is((select string_agg(n.nspname || '.' || p.proname, ',')
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where n.nspname in ('api', 'private') and p.proname like '%report%'
-              and pg_get_functiondef(p.oid) like '%imprest_disbursement%'), 0,
-          'the daily report reads no disbursement');
+              and pg_get_functiondef(p.oid) like '%imprest_disbursement%'),
+          'private.report_imprest_section',
+          'the daily report reads disbursements only through its private imprest section');
 
 -- A failed read is a failure: with no active fund the position is empty, never zero.
 -- No command closes a fund but a retirement (issue #72), which opens the next one, so the state

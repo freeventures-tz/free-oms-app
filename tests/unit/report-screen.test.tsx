@@ -667,3 +667,75 @@ describe("an imprest figure the system cannot give yet", () => {
     expect(screen.getAllByTestId("report-unavailable-imprestFunding")).toHaveLength(1);
   });
 });
+
+/**
+ * Issue #82 · The imprest section states the expenses, the balance and the count's real outcome.
+ */
+describe("an imprest section that states the position", () => {
+  const stated = detail({
+    content: {
+      ...SNAPSHOT,
+      sections: {
+        ...SNAPSHOT.sections,
+        imprest: {
+          fund_no: null,
+          fund_id: "0b6f2c1e-7a53-4d8f-9a31-5c0e2d9f4b10",
+          state: "active",
+          funding: null,
+          approved_expenses: {
+            count: 1,
+            amount_tzs: 8_000,
+            reversed_tzs: 8_000,
+            replacement_tzs: 6_000,
+            net_tzs: 6_000,
+            unexplained_loss_tzs: 500,
+          },
+          position: {
+            as_at: "cutoff",
+            posted_tzs: 93_200,
+            set_aside_tzs: 5_000,
+            available_tzs: 88_200,
+            awaiting_verification_tzs: 5_000,
+            expected_cash_tzs: 88_200,
+          },
+          reconciliation: {
+            state: "shortage",
+            counted_tzs: 88_200,
+            expected_tzs: 88_500,
+            variance_tzs: -300,
+            variance_reason: "counting_error",
+            missing_reason: null,
+          },
+        },
+      },
+    },
+  });
+
+  it("shows the count's outcome on its heading, and its reason in words", () => {
+    inEnglish(<ReportView report={stated} />);
+
+    expect(screen.getByTestId("report-state-imprestReconciliation")).toHaveTextContent(/^Shortage$/);
+    expect(screen.getByTestId("report-row-imprestReconciliation-varianceReason")).toHaveTextContent(
+      "Counting error",
+    );
+    expect(screen.getByTestId("report-row-imprestReconciliation-varianceTzs")).toHaveTextContent(
+      /300/,
+    );
+  });
+
+  it("states the balance and expected cash as at the end of the day, with no withheld sentence", () => {
+    inEnglish(<ReportView report={stated} />);
+
+    const balance = screen.getByRole("region", { name: /imprest balance/i });
+    expect(balance).toHaveTextContent(/how it stood at the end of this business day/i);
+    expect(screen.getByTestId("report-row-imprestPosition-postedBalanceTzs")).toHaveTextContent(/93,200/);
+    expect(screen.getByTestId("report-row-imprestPosition-expectedCashTzs")).toHaveTextContent(
+      /88,200/,
+    );
+    expect(balance).not.toHaveTextContent(/Not available|not in the system yet/);
+
+    const expenses = screen.getByRole("region", { name: /approved imprest expenses/i });
+    expect(screen.getByTestId("report-row-imprestExpenses-netExpenseTzs")).toHaveTextContent(/6,000/);
+    expect(expenses).not.toHaveTextContent(/Not available|not in the system yet/);
+  });
+});

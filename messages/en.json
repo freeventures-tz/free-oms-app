@@ -1950,6 +1950,7 @@
     "empty": "No report has been written yet. The first one is produced at one minute past midnight, for the day before.",
     "count": "{count} reports",
     "open": "Open",
+    "opening": "Opening…",
     "deliveredTo": "Delivered to {count}",
     "generatedAt": "Written",
     "detailTitle": "Report for {date}",
@@ -1991,6 +1992,9 @@
       "not_counted": "Not counted",
       "awaiting_manager_confirmation": "Awaiting Manager confirmation",
       "confirmed": "Counted and confirmed",
+      "balanced": "Balanced",
+      "shortage": "Shortage",
+      "excess": "Excess",
       "no_fund": "No fund open",
       "active": "Open"
     },
@@ -2002,11 +2006,13 @@
     "missingReasons": {
       "no_cash_reconciliation_record": "Nobody counted the till on this day.",
       "no_reconciliation_record": "Nobody counted the imprest cash on this day.",
-      "no_imprest_fund": "There is no imprest fund to count."
+      "no_imprest_fund": "There is no imprest fund to count.",
+      "count_sent_back": "The Manager sent the count back for a recount, and no recount was entered before the day ended."
     },
     "unavailableReasons": {
       "funding_aggregation_deferred": "Approved and handed-over amounts are not totalled in this report yet; their full history is on the imprest screen. Only receipts the Manager confirmed count as money received.",
       "imprest_spending_not_built": "Imprest spending is not in the system yet, so there are no approved expenses or balance to report. This is not a zero.",
+      "no_imprest_fund": "There was no imprest fund on this day, so there are no expenses or balance to report. This is not a zero.",
       "unrecognised": "This figure is not available in this report."
     },
     "notes": {
@@ -2086,10 +2092,20 @@
       "fundingReceivedTzs": "Confirmed received",
       "approvedExpenseCount": "Expenses approved",
       "approvedExpenseTzs": "Amount approved",
+      "verifiedExpenseCount": "Expenses verified",
+      "verifiedExpenseTzs": "Amount verified",
+      "reversedExpenseTzs": "Reversed",
+      "replacementExpenseTzs": "Posted again at the correct amount",
+      "netExpenseTzs": "Net expenses",
+      "unexplainedLossTzs": "Unexplained losses, net",
       "postedTzs": "In the fund",
       "encumberedTzs": "Committed",
       "availableTzs": "Available to spend",
+      "postedBalanceTzs": "Posted balance",
+      "setAsideTzs": "Set aside",
+      "freeToApproveTzs": "Free to approve",
       "awaitingVerificationTzs": "Awaiting verification",
+      "expectedCashTzs": "Expected cash",
       "summaryInvoicedTzs": "Invoiced",
       "summaryCollectedTzs": "Money taken",
       "summaryOutstandingTzs": "Still owed",

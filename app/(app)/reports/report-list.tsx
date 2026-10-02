@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 
 import { IntegrityChip } from "@/app/(app)/reports/report-chips";
 import { Card } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
 import { formatBusinessDate, formatBusinessStamp } from "@/lib/time/business-date";
 import type { ReportSummary } from "@/lib/reports/reports";
 
@@ -23,6 +24,29 @@ import type { ReportSummary } from "@/lib/reports/reports";
  * "No reports yet" is only ever reached with a successful, genuinely empty read: `loadReportSummaries`
  * throws on a failed one, and the shell's error boundary says so instead (§12.5, §12.7 rule 7).
  */
+/**
+ * "Open", answering the tap before the server does (design.md §12.7 rule 2), the way `NavLink`
+ * does: while the report is on its way the word becomes "Opening" at once, so a Director on a slow
+ * connection does not tap again. `useLinkStatus` has to be read from inside the `Link`.
+ */
+function OpenLabel() {
+  const t = useTranslations("reports");
+  const { pending } = useLinkStatus();
+
+  return (
+    <span
+      data-pending-link={pending || undefined}
+      aria-busy={pending || undefined}
+      className={cn(
+        "text-sm font-medium text-primary",
+        pending && "rounded-sm bg-accent px-1 text-accent-foreground",
+      )}
+    >
+      {pending ? t("opening") : t("open")}
+    </span>
+  );
+}
+
 export function ReportList({ reports }: { reports: ReportSummary[] }) {
   const t = useTranslations("reports");
   const locale = useLocale();
@@ -62,7 +86,7 @@ export function ReportList({ reports }: { reports: ReportSummary[] }) {
               </div>
               <div className="flex items-center gap-3">
                 <IntegrityChip integrity={report.integrity} />
-                <span className="text-sm font-medium text-primary">{t("open")}</span>
+                <OpenLabel />
               </div>
             </Link>
           </Card>

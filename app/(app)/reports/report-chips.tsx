@@ -1,7 +1,10 @@
 "use client";
 
 import {
+  ArrowDown,
+  ArrowUp,
   CircleHelp,
+  Equal,
   CircleSlash,
   Clock,
   ShieldAlert,
@@ -63,10 +66,18 @@ export function IntegrityChip({ integrity }: { integrity: ReportIntegrity }) {
  * confirmed is not a settled one, and giving it the same quiet chip as `Confirmed` would put the
  * distinction in the wording alone, where a reader scanning the page will miss it.
  */
+/**
+ * A confirmed imprest count's outcome (issue #82) is settled, so it is not listed as unresolved. A
+ * shortage or an excess is still a finding both Directors are told about, so those two keep the
+ * attention tone, with the arrow the variance itself carries.
+ */
 const STATE_TONE: Record<ReportState, "neutral" | "attention"> = {
   not_counted: "attention",
   awaiting_manager_confirmation: "attention",
   confirmed: "neutral",
+  balanced: "neutral",
+  shortage: "attention",
+  excess: "attention",
   no_fund: "neutral",
   active: "neutral",
 };
@@ -75,6 +86,9 @@ const STATE_ICON: Record<ReportState, LucideIcon> = {
   not_counted: CircleSlash,
   awaiting_manager_confirmation: Clock,
   confirmed: ShieldCheck,
+  balanced: Equal,
+  shortage: ArrowDown,
+  excess: ArrowUp,
   no_fund: CircleHelp,
   active: CircleHelp,
 };
