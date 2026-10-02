@@ -87,12 +87,22 @@ function superSql(sql: string) {
   }
 }
 
-/** Closes whatever fund is active and opens an empty one, below the triggers. */
+/**
+ * Closes whatever fund is active and opens an empty one, below the triggers.
+ *
+ * A report reads the fund whose business days include its date, and a fund retired TODAY by a real
+ * approval (as `imprest-retirement.spec.ts` leaves several) still owns today: its closing count is
+ * today's. Those retirements are moved to yesterday here, so today belongs to this spec's fund alone.
+ */
 async function freshFund(): Promise<void> {
   const manager = await sessionFor("manager");
   superSql(`
     set session_replication_role = replica;
-    update public.imprest_funds set is_active = false, retired_at = now() where is_active;
+    update public.imprest_retirements set business_date = business_date - 1
+     where status = 'approved' and business_date >= private.imprest_business_date();
+    update public.imprest_funds set retired_at = retired_at - interval '1 day'
+     where private.imprest_business_date_of(retired_at) >= private.imprest_business_date();
+    update public.imprest_funds set is_active = false, retired_at = now() - interval '1 day' where is_active;
     insert into public.imprest_funds (opened_by) values ('${manager.userId}');
   `);
 }

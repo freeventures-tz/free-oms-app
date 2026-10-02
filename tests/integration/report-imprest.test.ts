@@ -54,10 +54,18 @@ async function rpc(who: Fixture, fn: string, args: Record<string, unknown>): Pro
   return result;
 }
 
+/**
+ * A fund retired today by a real approval still owns today (its closing count is today's), so those
+ * retirements are moved to yesterday and today belongs to this file's fund alone.
+ */
 function freshFund(): void {
   runSql(`
     set session_replication_role = replica;
-    update public.imprest_funds set is_active = false, retired_at = now() where is_active;
+    update public.imprest_retirements set business_date = business_date - 1
+     where status = 'approved' and business_date >= private.imprest_business_date();
+    update public.imprest_funds set retired_at = retired_at - interval '1 day'
+     where private.imprest_business_date_of(retired_at) >= private.imprest_business_date();
+    update public.imprest_funds set is_active = false, retired_at = now() - interval '1 day' where is_active;
     insert into public.imprest_funds (opened_by) values ('${manager.userId}');
     set session_replication_role = origin;`);
 }
