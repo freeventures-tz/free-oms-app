@@ -143,9 +143,9 @@ async function as(page: Page, who: Who) {
   await expectLandsOn(page, who === "cashier" ? "/payments" : "/dashboard");
 }
 
-/** The control shown on this tier: a card on a phone, a grid row from tablet up. */
+/** One payment method's figures: a card on a phone, a grid row from tablet up. */
 function lineOf(scope: Locator, method: Method): Locator {
-  return scope.locator(`[data-testid=till-card-${method}]:visible, [data-testid=till-row-${method}]:visible`);
+  return scope.getByTestId(`till-line-${method}`);
 }
 
 async function fillCount(form: Locator, figures: Record<Method, number>) {
@@ -240,9 +240,7 @@ test.describe("till count", () => {
 
     // No tier scrolls sideways; on tablet and desktop the grid scrolls inside its own box.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    if (testInfo.project.name !== "mobile") {
-      await expect(today.getByTestId("till-grid-scroll")).toHaveCSS("overflow-x", "auto");
-    }
+    await expect(today.getByTestId("till-grid-scroll")).toHaveCSS("overflow-x", "auto");
   });
 
   test("a missed day reads Not counted, never zero, and is counted late with a reason", async ({ page }, testInfo) => {
@@ -420,7 +418,9 @@ async function measureTap(page: Page, profile: Profile, target: Locator, busy: s
           page,
           profile,
           page.locator("#fv-drawer").getByRole("link", { name: "Till count" }),
-          "[data-pending-link], [role=status][aria-busy=true], [data-testid=till-today]",
+          // The navigation item's own pending state (`NavLink`), the route's loading region, or
+          // the page itself when the route was already prefetched.
+          "[data-pending-nav], [role=status][aria-busy=true], [data-testid=till-today]",
           "[data-testid=till-today]",
           "Awaiting Manager confirmation",
         );

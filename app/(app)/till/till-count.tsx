@@ -70,75 +70,56 @@ async function TillLines({ count, testId }: { count: TillCount; testId: string }
   const { short, over } = shortAndOver(count.lines);
   const counted = (value: number | null) => (value === null ? t("notCounted") : formatTzs(value, locale));
 
+  // One structure for every tier, so the page carries each figure once: a card per method on a
+  // phone, the same rows as a four-column grid from `md`. The column labels repeat inside each card
+  // on a phone and are read out, not shown, from `md`, where the header row names the columns.
+  const row =
+    "grid grid-cols-3 gap-x-2 gap-y-1 rounded-lg border border-border p-3 text-sm " +
+    "md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-4 md:rounded-none md:border-0 md:border-b md:px-0 md:py-2";
+  const label = "block text-muted-foreground md:sr-only";
+  const figure = "flex flex-col md:block md:text-right";
+  const cells = (expected: number, countedValue: number | null, difference: string, short: boolean) => (
+    <>
+      <p className={figure}>
+        <span className={label}>{t("expected")}</span>
+        <span className="fv-numeric">{formatTzs(expected, locale)}</span>
+      </p>
+      <p className={figure}>
+        <span className={label}>{t("counted")}</span>
+        <span className="fv-numeric">{counted(countedValue)}</span>
+      </p>
+      <p className={figure}>
+        <span className={label}>{t("variance")}</span>
+        <span className={`fv-numeric ${short ? "text-danger" : ""}`}>{difference}</span>
+      </p>
+    </>
+  );
+
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      <ul className="flex flex-col gap-2 md:hidden">
-        {rows.map((l) => (
-          <li key={l.line} className="rounded-lg border border-border p-3" data-testid={`till-card-${l.line}`}>
-            <p className="font-medium">{m(l.line)}</p>
-            <dl className="mt-1 grid grid-cols-3 gap-2 text-sm">
-              <div>
-                <dt className="text-muted-foreground">{t("expected")}</dt>
-                <dd className="fv-numeric">{formatTzs(l.expected, locale)}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">{t("counted")}</dt>
-                <dd className="fv-numeric">{counted(l.counted)}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">{t("variance")}</dt>
-                <dd className={`fv-numeric ${(l.variance ?? 0) < 0 ? "text-danger" : ""}`}>{l.difference}</dd>
-              </div>
-            </dl>
-          </li>
-        ))}
-      </ul>
-      <div className="hidden overflow-x-auto md:block" data-testid="till-grid-scroll">
-        <table className="w-full min-w-[36rem] text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-muted-foreground">
-              <th scope="col" className="py-2 pr-4 font-medium">{t("method")}</th>
-              <th scope="col" className="py-2 pr-4 text-right font-medium">{t("expected")}</th>
-              <th scope="col" className="py-2 pr-4 text-right font-medium">{t("counted")}</th>
-              <th scope="col" className="py-2 text-right font-medium">{t("variance")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((l) => (
-              <tr key={l.line} className="border-b border-border/60" data-testid={`till-row-${l.line}`}>
-                <th scope="row" className="py-2 pr-4 text-left font-normal">{m(l.line)}</th>
-                <td className="fv-numeric py-2 pr-4 text-right">{formatTzs(l.expected, locale)}</td>
-                <td className="fv-numeric py-2 pr-4 text-right">{counted(l.counted)}</td>
-                <td className={`fv-numeric py-2 text-right ${(l.variance ?? 0) < 0 ? "text-danger" : ""}`}>
-                  {l.difference}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="font-semibold">
-              <th scope="row" className="py-2 pr-4 text-left">{t("total")}</th>
-              <td className="fv-numeric py-2 pr-4 text-right">{formatTzs(count.expected, locale)}</td>
-              <td className="fv-numeric py-2 pr-4 text-right">{counted(count.counted)}</td>
-              <td className="fv-numeric py-2 text-right">{totalDifference}</td>
-            </tr>
-          </tfoot>
-        </table>
+      <div className="overflow-x-auto" data-testid="till-grid-scroll">
+        <div className="flex flex-col gap-2 md:min-w-[36rem] md:gap-0">
+          <div
+            aria-hidden
+            className="hidden border-b border-border py-2 text-sm text-muted-foreground md:grid md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-4"
+          >
+            <span>{t("method")}</span>
+            <span className="text-right">{t("expected")}</span>
+            <span className="text-right">{t("counted")}</span>
+            <span className="text-right">{t("variance")}</span>
+          </div>
+          {rows.map((l) => (
+            <div key={l.line} className={row} data-testid={`till-line-${l.line}`}>
+              <p className="col-span-3 font-medium md:col-span-1 md:font-normal">{m(l.line)}</p>
+              {cells(l.expected, l.counted, l.difference, (l.variance ?? 0) < 0)}
+            </div>
+          ))}
+          <div className={`${row} bg-muted/40 font-semibold md:border-b-0 md:bg-transparent`} data-testid="till-totals">
+            <p className="col-span-3 md:col-span-1">{t("total")}</p>
+            {cells(count.expected, count.counted, totalDifference, (count.variance ?? 0) < 0)}
+          </div>
+        </div>
       </div>
-      <dl className="grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-3 text-sm md:hidden" data-testid="till-totals">
-        <div>
-          <dt className="text-muted-foreground">{t("expected")}</dt>
-          <dd className="fv-numeric font-semibold">{formatTzs(count.expected, locale)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t("counted")}</dt>
-          <dd className="fv-numeric font-semibold">{counted(count.counted)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t("variance")}</dt>
-          <dd className="fv-numeric font-semibold">{totalDifference}</dd>
-        </div>
-      </dl>
       {short > 0 && over > 0 ? (
         <p className="text-sm font-medium" data-testid="till-short-and-over">
           {t("shortAndOver", { short: formatTzs(short, locale), over: formatTzs(over, locale) })}
