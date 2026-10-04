@@ -65,7 +65,7 @@ export function normaliseVitest(suite, json, root) {
     suite,
     shard: null,
     tests,
-    durationMs: starts.length && ends.length ? Math.max(...ends) - Math.min(...starts) : null,
+    durationMs: Number.isFinite(json.wallMs) ? json.wallMs : starts.length && ends.length ? Math.max(...ends) - Math.min(...starts) : null,
     runnerSuccess: json.success === true,
   };
 }
