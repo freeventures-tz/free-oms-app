@@ -16,8 +16,8 @@
  * `approval` field is filled by the Owner's review, not by this script, and any drift invalidates it.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson, FULL_SHA, gitRunner, listFiles, parseArgs, readJson, repositoryFiles, selectorDigest, sha256 } from "./common.mjs";
@@ -222,7 +222,9 @@ export function runReleaseCli(argv, root = process.cwd()) {
       batchHead: typeof args["batch-head"] === "string" ? args["batch-head"] : null,
       pullRequests: typeof args.pr === "string" ? [args.pr] : [],
     });
-    writeFileSync(args.output, `${canonicalJson(manifest)}\n`);
+    mkdirSync(dirname(resolve(args.output)), { recursive: true });
+    writeFileSync(args.output, `${canonicalJson(manifest)}
+`);
     return { prepared: manifest };
   }
 

@@ -15,8 +15,8 @@
  * inventory, a stale or malformed manifest, or any error inside the selector itself.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -467,7 +467,9 @@ export function runSelectCli(argv, root = process.cwd()) {
     plan = fallbackPlan({ manifest, files, reason: `selector error: ${error.message}` });
   }
 
-  writeFileSync(args.output, `${canonicalJson(plan)}\n`);
+  mkdirSync(dirname(resolve(args.output)), { recursive: true });
+  writeFileSync(args.output, `${canonicalJson(plan)}
+`);
   return plan;
 }
 
