@@ -118,7 +118,7 @@ describe("plan runner", () => {
       print: () => {},
     });
     expect(result.ok).toBe(false);
-    expect(guarded).toEqual(["migration chain", "reset before pgTAP", "pgTAP", "reset before integration"]);
+    expect(guarded).toEqual(["migration chain", "reset before pgTAP", "pgTAP", "database lint", "advisors", "reset before integration"]);
     // Nothing after the refused check ran, and the refused step itself never started.
     expect(spawned.some((line) => line.includes("integration"))).toBe(false);
     expect(result.outcomes.at(-1)).toMatchObject({ name: "reset before integration", ok: false });

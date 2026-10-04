@@ -12,7 +12,7 @@
  *   5. integration, behind its own reset (one bootstrap per database);
  *   6. build, then E2E behind its own reset.
  *
- * Every step that resets or writes to a database is marked `destructive`, and the runner checks the
+ * Every step that resets, writes or reads a database names its `targets`, and the runner checks the
  * targets (target-guard.mjs) immediately before each one. A suite with nothing selected is skipped
  * and recorded as not selected: no runner is ever started with an empty path list, because Vitest
  * and Playwright both treat "no paths" as "every test".
@@ -69,8 +69,8 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
     steps.push({ name: "migration chain", job: "database", destructive: true, targets: [], log: "migration-chain.log", ...npm(["run", "test:migration-chain"]) });
     steps.push({ name: "reset before pgTAP", job: "database", destructive: true, targets: [], ...npx(["supabase", "db", "reset"]) });
     steps.push({ name: "pgTAP", job: "database", destructive: true, targets: [], log: "pgtap.log", ...npx(["supabase", "test", "db"]) });
-    steps.push({ name: "database lint", job: "database", ...npx(["supabase", "db", "lint", "--level", "warning"]) });
-    steps.push({ name: "advisors", job: "database", ...{ command: process.execPath, args: ["scripts/run-advisors.mjs"] } });
+    steps.push({ name: "database lint", job: "database", targets: [], ...npx(["supabase", "db", "lint", "--level", "warning"]) });
+    steps.push({ name: "advisors", job: "database", targets: [], ...{ command: process.execPath, args: ["scripts/run-advisors.mjs"] } });
   } else {
     skipped.push({ suite: "pgtap", reason: "local tier runs the database suites only for high-risk plans" });
     skipped.push({ suite: "migrationChain", reason: "local tier runs the database suites only for high-risk plans" });
@@ -124,7 +124,7 @@ export function runSteps(steps, { root, resultsDir, guard = assertSafeTargets, s
   mkdirSync(resultsDir, { recursive: true });
   const outcomes = [];
   for (const step of steps) {
-    if (step.destructive) {
+    if (step.destructive || step.targets) {
       try {
         guard(`${step.name}`, { root, env: testEnvironment(root), require: step.targets ?? ["api"] });
       } catch (error) {
@@ -138,7 +138,7 @@ export function runSteps(steps, { root, resultsDir, guard = assertSafeTargets, s
     const result = spawn(shell ? step.command : step.command, shell ? step.args.map(quote) : step.args, {
       cwd: root,
       shell,
-      env: { ...process.env, ...step.env, OMS_TEST_RESULTS_DIR: resultsDir },
+      env: { ...testEnvironment(root), ...step.env, OMS_TEST_RESULTS_DIR: resultsDir },
       stdio: step.log ? ["ignore", "pipe", "pipe"] : "inherit",
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
