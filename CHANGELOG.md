@@ -2,6 +2,23 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.12.4] — 2026-10-15
+
+A change to how the app is tested before a release. Nothing changes in the app itself, and every
+test that ran before still runs.
+
+### IMPROVED
+
+- Each update to a pull request is now tested once, not twice. A newer update stops the older
+  test run for the same pull request, and never any other run.
+- One final check, Development Gate, now says whether everything that had to run did run and pass.
+  A missing result, a run with no tests, or a test skipped without a reviewed reason counts as a
+  failure.
+- A release candidate can now be tested in full against its exact commit, version, migrations and
+  settings, with a separate Release Gate. It deploys nothing.
+- Before a test creates accounts or resets a database, it now checks that the database is the
+  local test copy for that checkout, and stops if it is anything else.
+
 ## [0.12.3] — 2026-10-14
 
 The menu and the dashboard work on every screen size and from the keyboard, and a few screens read

@@ -1,0 +1,69 @@
+{
+  "about": "Every skip a gate accepts. A skipped test that matches no entry refuses the gate, so a required case cannot be waived by relabelling it skipped. Each entry names why the skip is correct and where the behaviour is otherwise covered; review the list at every release candidate.",
+  "reviewedAt": "2026-10-04",
+  "skips": [
+    {
+      "suite": "integration",
+      "file": "tests/integration/stock-benchmark.test.ts",
+      "title": "/^stock command timings on a loaded ledger > /",
+      "projects": "*",
+      "reason": "Opt-in benchmark (FV_BENCHMARK=1). Measures timings; stock correctness is covered by stock-invariant and inventory.",
+      "owner": "Owner",
+      "review": "Run with --benchmarks on a release candidate that touches stock commands."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/stock-mobile-benchmark.spec.ts",
+      "title": "/^stock commands on a phone over 4G > /",
+      "projects": "*",
+      "reason": "Opt-in benchmark (FV_BENCHMARK=1) on the mobile profile. Stock journeys are covered by inventory, production and stock-invariant on all three tiers.",
+      "owner": "Owner",
+      "review": "Run with --benchmarks on a release candidate that touches stock screens."
+    },
+    {
+      "suite": "e2e",
+      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
+      "title": "/mobile benchmark > /",
+      "projects": "*",
+      "reason": "Opt-in benchmarks (FV_BENCHMARK=1), measured on the mobile profile only. The journeys they time run unskipped in the same files on all three tiers.",
+      "owner": "Owner",
+      "review": "Run with --benchmarks on a release candidate that touches imprest or report screens."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the rail or sidebar sits beside the page, not above it",
+      "projects": ["mobile"],
+      "reason": "The phone has a drawer, not a rail; the drawer is tested on mobile in the same file.",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "touch targets on the sign-in form meet the 44px floor",
+      "projects": ["desktop"],
+      "reason": "The 44px floor applies to touch tiers only (design.md §9.9).",
+      "owner": "Owner",
+      "review": "Permanent: by design."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/production.spec.ts",
+      "title": "/every control a thumb reaches is at least 44 pixels tall on a touch tier$/",
+      "projects": ["desktop"],
+      "reason": "The 44px floor applies to touch tiers only (design.md §9.9); desktop controls are 40px and 32px by design.",
+      "owner": "Owner",
+      "review": "Permanent: by design."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/sales.spec.ts",
+      "title": "/^the three-step order on a phone > /",
+      "projects": ["tablet", "desktop"],
+      "reason": "The three-step order exists only below the md breakpoint; tablet and desktop order entry is covered elsewhere in the same file.",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design."
+    }
+  ]
+}

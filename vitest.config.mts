@@ -36,6 +36,15 @@ class RunFirstSequencer extends BaseSequencer {
 }
 
 /**
+ * When OMS_TEST_RESULTS_DIR is set (CI, `npm run test:plan`, `npm run test:release`), Vitest also
+ * writes its JSON report there as `<project>.vitest.json`, which is what the Development Gate and
+ * Release Gate count. Unset, nothing changes.
+ */
+const RESULTS_DIR = process.env.OMS_TEST_RESULTS_DIR;
+const projectArgument = process.argv.find((arg, i) => process.argv[i - 1] === "--project") ?? process.argv.find((arg) => arg.startsWith("--project="))?.slice(10);
+const RESULTS_NAME = process.env.OMS_TEST_SUITE ?? projectArgument ?? "vitest";
+
+/**
  * Two projects, because they have different jobs and different costs.
  *
  *   unit        — pure logic and components, jsdom, no network. Fast enough to run on every save.
@@ -48,6 +57,9 @@ export default defineConfig({
   test: {
     // Vitest accepts a sequencer only at the root, not per project.
     sequence: { sequencer: RunFirstSequencer },
+    ...(RESULTS_DIR
+      ? { reporters: ["default", "json"], outputFile: { json: `${RESULTS_DIR}/${RESULTS_NAME}.vitest.json` } }
+      : {}),
     projects: [
       {
         extends: true,

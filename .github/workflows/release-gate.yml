@@ -1,0 +1,74 @@
+name: Release Gate
+
+# Full verification of one exact release candidate, started by hand. It is evidence for the Owner's
+# release decision and nothing more: it does not merge, tag, deploy, link a hosted project, apply a
+# hosted migration or publish anything, and it holds no secret.
+#
+# It first records the candidate's identity (scripts/testing/release.mjs --prepare), refusing a
+# commit whose version, lockfile and changelog disagree. Then it runs the same suites as every pull
+# request, in full, through ci.yml, whose final job reports as "Release Gate". Nothing cancels a run
+# of this workflow: it has no concurrency group, and pull-request activity cannot reach it.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Full 40-character commit of the release candidate
+        type: string
+        required: true
+      production_base:
+        description: Full commit production runs today, if known
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  identity:
+    name: Release candidate identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse anything but a full commit name
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          PRODUCTION_BASE: ${{ inputs.production_base }}
+        run: |
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::candidate must be a full commit"; exit 1; }
+          [[ -z "$PRODUCTION_BASE" || "$PRODUCTION_BASE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::production_base must be a full commit"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Record the candidate
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          PRODUCTION_BASE: ${{ inputs.production_base }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "$CANDIDATE" ] || { echo "::error::checkout is not the candidate"; exit 1; }
+          mkdir -p oms-test
+          args=(--prepare --output oms-test/candidate.json)
+          [ -n "$PRODUCTION_BASE" ] && args+=(--production-base "$PRODUCTION_BASE")
+          node scripts/testing/release.mjs "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: oms-test/candidate.json
+          retention-days: 90
+
+  suites:
+    needs: identity
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.candidate }}
+      gate: release
+      base: ${{ inputs.production_base }}

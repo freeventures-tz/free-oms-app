@@ -1,5 +1,7 @@
 import { config } from "dotenv";
 
+import { assertSafeTargets } from "@/scripts/testing/target-guard.mjs";
+
 /**
  * Integration tests run against the LOCAL Supabase stack and nothing else.
  *
@@ -7,24 +9,17 @@ import { config } from "dotenv";
  * write audit rows. Pointing them at a hosted project — by a stale `.env.local`, a shell variable,
  * or a copied CI secret — would do all of that to real data. Refusing to start is the only
  * acceptable behaviour, so the check is on the URL itself rather than on an opt-in flag.
+ *
+ * `assertSafeTargets` parses every target and requires a loopback host on the ports this checkout's
+ * supabase/config.toml declares, so an environment file copied from another worktree's stack is
+ * refused as well.
  */
 config({ path: ".env.test.local", quiet: true });
 config({ path: ".env.local", quiet: true });
 
+assertSafeTargets("Integration tests");
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-
-const isLocal =
-  url.startsWith("http://127.0.0.1:") ||
-  url.startsWith("http://localhost:") ||
-  url.startsWith("http://[::1]:");
-
-if (!isLocal) {
-  throw new Error(
-    `Integration tests refuse to run against ${url || "(unset)"}. ` +
-      "They must target the local Supabase stack — run `npm run db:start` and point " +
-      "NEXT_PUBLIC_SUPABASE_URL at http://127.0.0.1:54321.",
-  );
-}
 
 if (!process.env.SUPABASE_SECRET_KEY) {
   throw new Error("SUPABASE_SECRET_KEY is required for integration tests.");

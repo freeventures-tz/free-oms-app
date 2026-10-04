@@ -26,6 +26,8 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 - Upload images with `IMAGE_ADAPTER=gist`. Post videos through the PR comment box in the signed-in browser.
 ## Checks
 `npm run lint`, `npm run typecheck`, `npm run test`, `npm run test:e2e`, `npm run build`. Run all of them before opening a PR and again after rebasing.
+
+`docs/testing-and-release.md` is the authoritative reference for test selection, the Development Gate and Release Gate, and the staged changes to this process. It says what is implemented and what is activated. Until the Owner approves an activation there, the checks above and *Releasing* below stay in force unchanged.
 ## Multi-agent rules
 - Work on your own task branch; `main` changes only by merged PR.
 - Leave other agents' worktrees, branches and uncommitted work untouched.

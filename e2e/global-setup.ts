@@ -14,6 +14,7 @@ import { adminApi, createAdminClient } from "@/lib/supabase/admin";
 import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
 import { derivedAuthIdentifier } from "@/lib/auth/phone-identity";
 import type { AppRole } from "@/lib/auth/roles";
+import { assertSafeTargets } from "@/scripts/testing/target-guard.mjs";
 
 export type Credentials = { phone: string; password: string };
 export type GatedCredentials = Credentials & { userId: string };
@@ -139,10 +140,8 @@ async function directorSession(phone: string, password: string): Promise<Directo
 }
 
 export default async function globalSetup(): Promise<void> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  if (!url.includes("127.0.0.1") && !url.includes("localhost")) {
-    throw new Error(`E2E refuses to run against ${url || "(unset)"} — use the local stack.`);
-  }
+  // Before the bootstrap, which is the first write: exact hosts, and this checkout's own ports.
+  assertSafeTargets("E2E");
 
   const directorPhone = randomPhone();
   const bootstrapped = await provisionBootstrapDirector({

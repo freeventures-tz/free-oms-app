@@ -18,6 +18,9 @@
 /playwright/.cache
 # E2E fixture accounts, including their temporary passwords. Generated per run, never committed.
 /e2e/.fixtures.json
+# Test plans, runner reports, timings and gate decisions (scripts/testing). Generated per run.
+/oms-test/
+/.base-policy/
 
 # next.js
 /.next/

@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "about": "Reviewed test-selection rules. Read with docs/testing-and-release.md. A path no rule below names forces full coverage, and so does any change to this file.",
+  "activation": {
+    "selectiveEnforcement": false,
+    "note": "Selection runs in shadow only. Turning enforcement on needs the Owner's approval of the phase 4 settings; until then every gate requires full execution."
+  },
+  "suites": {
+    "unit": ["tests/unit/**/*.test.{ts,tsx}"],
+    "integration": ["tests/integration/**/*.test.ts"],
+    "e2e": ["e2e/**/*.spec.ts"],
+    "pgtap": ["supabase/tests/database/*.sql"]
+  },
+  "minimums": {
+    "migrations": 55,
+    "pgtapFiles": 28,
+    "migrationChainCounterexamples": 155,
+    "responsiveProjects": ["mobile", "tablet", "desktop"]
+  },
+  "forceFull": [
+    { "pattern": "supabase/**", "reason": "migrations, database tests, release checks and stack configuration" },
+    { "pattern": "scripts/**", "reason": "release, migration-chain and test infrastructure" },
+    { "pattern": ".github/**", "reason": "CI workflow" },
+    { "pattern": "{package.json,package-lock.json}", "reason": "dependencies or scripts" },
+    { "pattern": "{next.config.ts,proxy.ts,tsconfig.json,eslint.config.mjs,postcss.config.mjs,components.json,.env.example,.gitignore}", "reason": "application or build configuration" },
+    { "pattern": "{vitest.config.mts,playwright.config.ts}", "reason": "test runner configuration" },
+    { "pattern": "{AGENTS.md,CLAUDE.md}", "reason": "policy and process documentation changes operational behaviour" },
+    { "pattern": "docs/**", "reason": "policy and process documentation changes operational behaviour" },
+    { "pattern": "tests/setup/**", "reason": "global test setup" },
+    { "pattern": "tests/support/**", "reason": "shared test support" },
+    { "pattern": "tests/integration/helpers.ts", "reason": "shared integration helpers" },
+    { "pattern": "e2e/{fixtures.ts,global-setup.ts,receipt-photo.ts}", "reason": "shared E2E fixtures" },
+    { "pattern": "lib/{auth,admin,supabase}/**", "reason": "authentication, authorization or the database client" },
+    { "pattern": "lib/{imprest,inventory,production,sales,settlement,validation}/**", "reason": "financial or stock commands and their validation" },
+    { "pattern": "lib/{money.ts,time/**,stock-refusal.ts}", "reason": "business money, date or stock helpers" },
+    { "pattern": "lib/{env.ts,nav.ts,utils.ts,ui/**}", "reason": "shared environment, navigation or UI helpers" },
+    { "pattern": "app/**/actions.ts", "reason": "server actions run financial, stock or account commands" },
+    { "pattern": "app/actions/**", "reason": "shared server actions" },
+    { "pattern": "app/{layout.tsx,page.tsx,globals.css}", "reason": "shared layout" },
+    { "pattern": "app/(app)/{layout.tsx,loading.tsx,error.tsx}", "reason": "shared signed-in layout" },
+    { "pattern": "app/{auth,sign-in,first-login,no-access}/**", "reason": "authentication screens" },
+    { "pattern": "app/(app)/admin/**", "reason": "account administration" },
+    { "pattern": "components/{ui,auth}/**", "reason": "shared UI components" },
+    { "pattern": "components/{app-shell.tsx,nav-link.tsx,language-switcher.tsx}", "reason": "shared shell" },
+    { "pattern": "{i18n,messages}/**", "reason": "translation dictionaries reach every screen" },
+    { "pattern": "public/sw.js", "reason": "the service worker caches every page" }
+  ],
+  "docsOnly": ["README.md", "CHANGELOG.md"],
+  "domains": {
+    "reports-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/reports/**", "lib/reports/**"],
+      "e2e": ["e2e/reports.spec.ts", "e2e/report-imprest.spec.ts"]
+    },
+    "catalogue-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/settings/products/**", "app/(app)/settings/suppliers/**", "lib/catalogue/**"],
+      "e2e": ["e2e/catalogue.spec.ts", "e2e/inventory.spec.ts"]
+    },
+    "storekeepers-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/settings/storekeepers/**"],
+      "e2e": ["e2e/settlement.spec.ts"]
+    },
+    "imprest-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/imprest/**"],
+      "e2e": ["e2e/imprest-funding.spec.ts"]
+    },
+    "inventory-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/inventory/**", "components/inventory/**"],
+      "e2e": ["e2e/inventory.spec.ts", "e2e/stock-invariant.spec.ts"]
+    },
+    "production-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/production/**"],
+      "e2e": ["e2e/production.spec.ts"]
+    },
+    "orders-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/orders/**"],
+      "e2e": ["e2e/sales.spec.ts"]
+    },
+    "payments-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/payments/**", "app/(app)/dispatch/**"],
+      "e2e": ["e2e/settlement.spec.ts"]
+    },
+    "dashboard": {
+      "risk": "low",
+      "sources": ["app/(app)/dashboard/**"],
+      "e2e": ["e2e/role-routing.spec.ts", "e2e/responsive-shell.spec.ts"]
+    },
+    "pwa": {
+      "risk": "low",
+      "sources": ["app/manifest.ts", "app/favicon.ico", "components/pwa/**", "public/icons/**", "public/brand/**", "public/*.svg"],
+      "e2e": ["e2e/pwa.spec.ts", "e2e/authentication.spec.ts"]
+    },
+    "brand": {
+      "risk": "low",
+      "sources": ["components/brand/**"],
+      "e2e": ["e2e/authentication.spec.ts", "e2e/responsive-shell.spec.ts"]
+    }
+  },
+  "groups": {
+    "integration": {
+      "imprest-fund": {
+        "why": "One active fund, one Auth instance and one database. Funding must run first so its first-open race starts with no fund; the not-counted file runs late and retirement runs last (vitest.config.mts).",
+        "files": [
+          "tests/integration/imprest-daily-count.test.ts",
+          "tests/integration/imprest-disbursements.test.ts",
+          "tests/integration/imprest-funding.test.ts",
+          "tests/integration/imprest-lost-response.test.ts",
+          "tests/integration/imprest-not-counted.test.ts",
+          "tests/integration/imprest-raised-approval.test.ts",
+          "tests/integration/imprest-retirement.test.ts",
+          "tests/integration/imprest-reversal.test.ts",
+          "tests/integration/imprest-send-back.test.ts",
+          "tests/integration/imprest-settlement.test.ts",
+          "tests/integration/imprest-stock-receipt-link.test.ts",
+          "tests/integration/imprest-verification.test.ts",
+          "tests/integration/report-imprest.test.ts",
+          "tests/integration/reports.test.ts"
+        ]
+      },
+      "seeded-stock": {
+        "why": "Stock invariant tests share seeded products, locations and ledger rows with production, sales, settlement and report tests.",
+        "files": [
+          "tests/integration/catalogue.test.ts",
+          "tests/integration/counting-units.test.ts",
+          "tests/integration/imprest-disbursements.test.ts",
+          "tests/integration/imprest-stock-receipt-link.test.ts",
+          "tests/integration/inventory.test.ts",
+          "tests/integration/production.test.ts",
+          "tests/integration/regressions.test.ts",
+          "tests/integration/report-alerts-paging.test.ts",
+          "tests/integration/report-claim-concurrency.test.ts",
+          "tests/integration/report-deliveries-paging.test.ts",
+          "tests/integration/report-generation-timeout.test.ts",
+          "tests/integration/report-lease-expiry.test.ts",
+          "tests/integration/reports.test.ts",
+          "tests/integration/sales.test.ts",
+          "tests/integration/settlement.test.ts",
+          "tests/integration/stock-benchmark.test.ts",
+          "tests/integration/stock-invariant.test.ts"
+        ]
+      }
+    },
+    "e2e": {
+      "imprest-and-reports": {
+        "why": "One active fund across every imprest screen, read as deltas tier after tier; retirement closes it; the report specs read what the imprest specs leave.",
+        "files": [
+          "e2e/imprest-daily-count.spec.ts",
+          "e2e/imprest-disbursements.spec.ts",
+          "e2e/imprest-funding.spec.ts",
+          "e2e/imprest-not-counted.spec.ts",
+          "e2e/imprest-raised-approval.spec.ts",
+          "e2e/imprest-retirement.spec.ts",
+          "e2e/imprest-reversal.spec.ts",
+          "e2e/imprest-send-back.spec.ts",
+          "e2e/imprest-settlement.spec.ts",
+          "e2e/imprest-stock-receipt-link.spec.ts",
+          "e2e/imprest-verification.spec.ts",
+          "e2e/report-imprest.spec.ts",
+          "e2e/reports.spec.ts"
+        ]
+      },
+      "seeded-stock": {
+        "why": "Products, locations and stock created through the screens are shared by the catalogue, stock, production, sales and settlement journeys.",
+        "files": [
+          "e2e/catalogue.spec.ts",
+          "e2e/imprest-stock-receipt-link.spec.ts",
+          "e2e/inventory.spec.ts",
+          "e2e/production.spec.ts",
+          "e2e/sales.spec.ts",
+          "e2e/settlement.spec.ts",
+          "e2e/stock-invariant.spec.ts",
+          "e2e/stock-mobile-benchmark.spec.ts"
+        ]
+      }
+    }
+  },
+  "independent": {
+    "integration": [
+      "tests/integration/api-boundaries.test.ts",
+      "tests/integration/authority.test.ts",
+      "tests/integration/director-set-concurrency.test.ts",
+      "tests/integration/provisioning.test.ts",
+      "tests/integration/recovery.test.ts"
+    ],
+    "e2e": [
+      "e2e/authentication.spec.ts",
+      "e2e/interaction-feedback.spec.ts",
+      "e2e/pwa.spec.ts",
+      "e2e/responsive-shell.spec.ts",
+      "e2e/role-routing.spec.ts"
+    ]
+  },
+  "smoke": {
+    "pgtap": [
+      "supabase/tests/database/001_authorization.sql",
+      "supabase/tests/database/002_first_login_and_bypass.sql",
+      "supabase/tests/database/003_grants_rls_hook.sql",
+      "supabase/tests/database/004_audit_attribution.sql",
+      "supabase/tests/database/006_api_bridge_and_admin.sql",
+      "supabase/tests/database/014_stock_invariant.sql"
+    ],
+    "integration": [
+      "tests/integration/api-boundaries.test.ts",
+      "tests/integration/authority.test.ts",
+      "tests/integration/director-set-concurrency.test.ts",
+      "tests/integration/imprest-lost-response.test.ts",
+      "tests/integration/recovery.test.ts",
+      "tests/integration/stock-invariant.test.ts"
+    ],
+    "e2e": [
+      "e2e/authentication.spec.ts",
+      "e2e/interaction-feedback.spec.ts",
+      "e2e/responsive-shell.spec.ts",
+      "e2e/role-routing.spec.ts"
+    ]
+  }
+}
