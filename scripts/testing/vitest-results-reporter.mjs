@@ -2,11 +2,14 @@
  * A Vitest reporter that writes one results file when the run ends, and does nothing while tests
  * run.
  *
- * Vitest's built-in JSON reporter made existing timing-sensitive unit tests fail under the full
- * suite (`imprest-count-lost-response`, `imprest-retirement`, `order-confirmation-refusal`): three
- * full runs out of three with it, none without it. This reporter listens to nothing until the run
- * is over, then writes the same shape the JSON reporter writes (the fields reports.mjs reads), to
- * `$OMS_TEST_RESULTS_DIR/<project>.vitest.json`.
+ * It listens to nothing until the run is over, then writes the fields reports.mjs reads, in the
+ * shape of Vitest's JSON reporter, to `$OMS_TEST_RESULTS_DIR/<project>.vitest.json`. It adds the
+ * run's wall time, which the built-in reporter does not record.
+ *
+ * It was written while chasing failures in timing-sensitive unit tests (`imprest-count-lost-response`,
+ * `imprest-retirement`, `order-confirmation-refusal`). Those turned out to fail on the unchanged
+ * base commit too, under load, with no reporter at all: they are pre-existing flakes, not caused by
+ * any reporter.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";

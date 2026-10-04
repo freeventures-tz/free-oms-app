@@ -57,8 +57,8 @@ export default defineConfig({
   test: {
     // Vitest accepts a sequencer only at the root, not per project.
     sequence: { sequencer: RunFirstSequencer },
-    // Not Vitest's built-in JSON reporter: with it, timing-sensitive unit tests failed under the full
-    // suite. This one does nothing until the run has ended (scripts/testing/vitest-results-reporter.mjs).
+    // A reporter that does nothing until the run has ended, then writes the results the gates count
+    // (scripts/testing/vitest-results-reporter.mjs).
     ...(RESULTS_DIR
       ? {
           reporters: [
