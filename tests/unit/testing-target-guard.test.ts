@@ -69,6 +69,13 @@ describe("test target guard", () => {
     expect(targetRefusals(mixed, stack)).toHaveLength(1);
   });
 
+  it("checks the older SUPABASE_URL name too, when it is set", () => {
+    expect(targetRefusals({ ...local, SUPABASE_URL: "http://127.0.0.1:54321" }, stack)).toEqual([]);
+    expect(targetRefusals({ ...local, SUPABASE_URL: "http://127.0.0.1:56421" }, stack)).toEqual([
+      "SUPABASE_URL port 56421 is not this checkout's stack port 54321 (supabase/config.toml)",
+    ]);
+  });
+
   it("refuses a database container that is not this checkout's", () => {
     expect(targetRefusals({ ...local, SUPABASE_DB_CONTAINER: "supabase_db_free-oms-app" }, stack)).toEqual([]);
     expect(targetRefusals({ ...local, SUPABASE_DB_CONTAINER: "supabase_db_free-oms-83" }, stack)).toEqual([

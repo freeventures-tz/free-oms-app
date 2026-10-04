@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   SECRET_KEY,
+  SUPABASE_URL,
   createLiveStaff,
   ensureDirector,
   type Fixture,
@@ -807,7 +808,7 @@ describe("who wrote this order", () => {
 
   it("is unreachable with the SECRET key", async () => {
     const response = await fetch(
-      `${process.env.SUPABASE_URL ?? "http://127.0.0.1:54321"}/rest/v1/rpc/staff_order_creator_name`,
+      `${SUPABASE_URL}/rest/v1/rpc/staff_order_creator_name`,
       {
         method: "POST",
         headers: {
@@ -841,7 +842,7 @@ describe("the sales tables, from outside the database", () => {
       "document_sequences",
     ]) {
       const response = await fetch(
-        `${process.env.SUPABASE_URL ?? "http://127.0.0.1:54321"}/rest/v1/${table}?select=*`,
+        `${SUPABASE_URL}/rest/v1/${table}?select=*`,
         { headers: { apikey: SECRET_KEY, Authorization: `Bearer ${SECRET_KEY}` } },
       );
       expect(response.status, `the secret key read ${table}`).toBe(403);

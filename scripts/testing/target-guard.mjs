@@ -85,6 +85,8 @@ export function targetRefusals(env, stack, { require = ["api"] } = {}) {
 
   const api = env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   if (require.includes("api") || api) checkHttp("NEXT_PUBLIC_SUPABASE_URL", api, refusals, stack.apiPort);
+  // Older tests read this name; it must name the same stack when it is set at all.
+  if (env.SUPABASE_URL) checkHttp("SUPABASE_URL", env.SUPABASE_URL, refusals, stack.apiPort);
 
   for (const name of ["SUPABASE_DB_URL", "SUPABASE_SUPERUSER_DB_URL"]) {
     const value = env[name];

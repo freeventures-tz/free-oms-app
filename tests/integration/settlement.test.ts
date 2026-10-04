@@ -9,6 +9,7 @@ import {
 } from "@/lib/sales/invoice-settlement";
 import {
   SECRET_KEY,
+  SUPABASE_URL,
   createLiveStaff,
   ensureDirector,
   type Fixture,
@@ -1840,7 +1841,7 @@ describe("the settlement tables, from outside the database", () => {
       "storekeepers",
     ]) {
       const response = await fetch(
-        `${process.env.SUPABASE_URL ?? "http://127.0.0.1:54321"}/rest/v1/${table}?select=*`,
+        `${SUPABASE_URL}/rest/v1/${table}?select=*`,
         { headers: { apikey: SECRET_KEY, Authorization: `Bearer ${SECRET_KEY}` } },
       );
       expect(response.status, `the secret key read ${table}`).toBe(403);
