@@ -92,6 +92,10 @@ if (invokedDirectly) {
       process.exit(0);
     }
     for (const step of result.timing.steps) {
+      if (step.skipped) {
+        console.log(`skip ${step.name}: job ${step.job} had already failed`);
+        continue;
+      }
       console.log(`${step.ok ? "ok  " : "FAIL"} ${step.name} ${Math.round(step.durationMs / 1000)} s${step.refused ? ` — ${step.refused}` : ""}`);
     }
     for (const skip of result.skipped) console.log(`skip ${skip.suite}: ${skip.reason}`);
