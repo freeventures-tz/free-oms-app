@@ -92,7 +92,8 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
 
   const e2e = files("e2e");
   if (full("e2e") || e2e.length > 0) {
-    if (tier === "local") steps.push({ name: "build", job: "e2e", ...npm(["run", "build"]) });
+    // The E2E job builds the current source itself, as its CI job does, so it never depends on another job's build.
+    steps.push({ name: "build for E2E", job: "e2e", ...npm(["run", "build"]) });
     steps.push({ name: "reset before E2E", job: "e2e", destructive: true, ...npx(["supabase", "db", "reset"]) });
     steps.push({
       name: full("e2e") ? "e2e" : "e2e (selected)",
@@ -116,14 +117,23 @@ function quote(arg) {
 }
 
 /**
- * Runs the steps in order and stops at the first failure. Each step's time is measured, and steps
- * with a `log` keep their output in the results directory for the gate to count.
+ * Runs the steps in order. Each step's time is measured, and steps with a `log` keep their output in
+ * the results directory for the gate to count.
+ *
+ * By default the first failure stops the run. With `keepGoing`, a failure ends only its own job and
+ * the other jobs still run, which is how CI's independent jobs behave; the gate still refuses. A
+ * refused target check always stops everything.
  */
 /** @param {any[]} steps @param {any} options @returns {{ ok: boolean, outcomes: any[] }} */
-export function runSteps(steps, { root, resultsDir, guard = assertSafeTargets, spawn = spawnSync, now = () => Date.now(), print = console.log }) {
+export function runSteps(steps, { root, resultsDir, keepGoing = false, guard = assertSafeTargets, spawn = spawnSync, now = () => Date.now(), print = console.log }) {
   mkdirSync(resultsDir, { recursive: true });
   const outcomes = [];
+  const failedJobs = new Set();
   for (const step of steps) {
+    if (failedJobs.has(step.job)) {
+      outcomes.push({ name: step.name, job: step.job, ok: false, durationMs: 0, skipped: true });
+      continue;
+    }
     if (step.destructive || step.targets) {
       try {
         guard(`${step.name}`, { root, env: testEnvironment(root), require: step.targets ?? ["api"] });
@@ -151,9 +161,12 @@ export function runSteps(steps, { root, resultsDir, guard = assertSafeTargets, s
     }
     const ok = !result.error && result.status === 0;
     outcomes.push({ name: step.name, job: step.job, ok, durationMs, status: result.status ?? null });
-    if (!ok) return { ok: false, outcomes };
+    if (!ok) {
+      if (!keepGoing) return { ok: false, outcomes };
+      failedJobs.add(step.job);
+    }
   }
-  return { ok: true, outcomes };
+  return { ok: failedJobs.size === 0, outcomes };
 }
 
 /** GitHub's `needs` shape, from local step outcomes, so the same gate decision applies locally. */
@@ -171,7 +184,14 @@ export function jobsFromOutcomes(outcomes, expectedJobs) {
 /** @param {any[]} outcomes @param {any[]} skipped */
 export function timingReport(outcomes, skipped) {
   return {
-    steps: outcomes.map(({ name, job, ok, durationMs, refused }) => ({ name, job, ok, durationMs, ...(refused ? { refused } : {}) })),
+    steps: outcomes.map((outcome) => ({
+      name: outcome.name,
+      job: outcome.job,
+      ok: outcome.ok,
+      durationMs: outcome.durationMs,
+      ...(outcome.refused ? { refused: outcome.refused } : {}),
+      ...(outcome.skipped ? { skipped: true } : {}),
+    })),
     skipped,
     totalMs: outcomes.reduce((total, outcome) => total + outcome.durationMs, 0),
   };

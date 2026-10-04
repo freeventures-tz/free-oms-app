@@ -37,7 +37,7 @@ export function planRefusals(plan, { head, digest, worktreeDigest }) {
 
 export function runPlanCli(argv, root = process.cwd()) {
   const args = parseArgs(argv);
-  const known = new Set(["plan", "tier", "results", "dry-run", "benchmarks"]);
+  const known = new Set(["plan", "tier", "results", "dry-run", "benchmarks", "keep-going"]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
   if (typeof args.plan !== "string") throw new Error("--plan <plan.json> is required");
   if (args.tier !== "local" && args.tier !== "development") throw new Error("--tier must be local or development");
@@ -61,7 +61,7 @@ export function runPlanCli(argv, root = process.cwd()) {
   if (args["dry-run"] === true) return { dryRun: true, steps, skipped };
 
   const resultsDir = resolve(root, typeof args.results === "string" ? args.results : "oms-test/results");
-  const { ok, outcomes } = runSteps(steps, { root, resultsDir });
+  const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true });
   const timing = timingReport(outcomes, skipped);
   writeFileSync(resolve(resultsDir, "timing.json"), `${canonicalJson(timing)}\n`);
 

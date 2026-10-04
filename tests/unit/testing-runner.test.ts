@@ -65,7 +65,7 @@ describe("plan runner", () => {
     const e2e = steps.find((step: { name: string }) => step.name === "e2e (selected)");
     expect(e2e.args).toEqual(["playwright", "test", "e2e/auth.spec.ts"]);
     // E2E runs a production build of the current source, then a reset, then the specs.
-    expect(names(steps).slice(-3)).toEqual(["build", "reset before E2E", "e2e (selected)"]);
+    expect(names(steps).slice(-3)).toEqual(["build for E2E", "reset before E2E", "e2e (selected)"]);
   });
 
   it("runs every suite, in isolation order, on the development tier while selection is in shadow", () => {
@@ -82,6 +82,7 @@ describe("plan runner", () => {
       "advisors",
       "reset before integration",
       "integration",
+      "build for E2E",
       "reset before E2E",
       "e2e",
     ]);
@@ -135,6 +136,51 @@ describe("plan runner", () => {
     });
     expect(result.outcomes.map((outcome: { name: string }) => outcome.name)).toEqual(["lint", "typecheck"]);
     expect(jobsFromOutcomes(result.outcomes, ["static", "database"])).toEqual({ static: { result: "failure" } });
+  });
+
+  it("with keep-going, a failure ends only its own job, the way CI's jobs are independent", () => {
+    const { steps } = buildSteps(plan("lib/money.ts"), "development");
+    const result = runSteps(steps, {
+      root: "/tmp/not-used",
+      resultsDir: join(tmpdir(), "oms-unit-runner"),
+      keepGoing: true,
+      guard: () => {},
+      spawn: (_command: string, args: string[]) => ({ status: args.includes("unit") ? 1 : 0, stdout: "", stderr: "" }),
+      print: () => {},
+    });
+    expect(result.ok).toBe(false);
+    // The static job stops at unit, so its build is skipped; every other job still runs, and the
+    // E2E job builds for itself.
+    expect(result.outcomes.find((outcome: { name: string }) => outcome.name === "build")).toMatchObject({ skipped: true, ok: false });
+    for (const name of ["migration chain", "pgTAP", "integration", "build for E2E", "e2e"]) {
+      expect(result.outcomes.find((outcome: { name: string }) => outcome.name === name), name).toMatchObject({ ok: true });
+    }
+    expect(jobsFromOutcomes(result.outcomes, ["static", "database", "integration", "e2e"])).toEqual({
+      static: { result: "failure" },
+      database: { result: "success" },
+      integration: { result: "success" },
+      e2e: { result: "success" },
+    });
+  });
+
+  it("with keep-going, a refused target check still stops everything", () => {
+    const { steps } = buildSteps(plan("lib/money.ts"), "development");
+    const spawned: string[] = [];
+    const result = runSteps(steps, {
+      root: "/tmp/not-used",
+      resultsDir: join(tmpdir(), "oms-unit-runner"),
+      keepGoing: true,
+      guard: (what: string) => {
+        if (what === "migration chain") throw new Error("not loopback");
+      },
+      spawn: (_command: string, args: string[]) => {
+        spawned.push(args.join(" "));
+        return { status: 0, stdout: "", stderr: "" };
+      },
+      print: () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(spawned.some((line) => /integration|playwright/.test(line))).toBe(false);
   });
 
   it("refuses a plan made elsewhere, altered, made by another selector, or before the tree changed", () => {

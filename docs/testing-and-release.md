@@ -32,10 +32,10 @@ All four commands live in `scripts/testing/`, need only Node, and never touch a 
 
 ```text
 npm run test:select -- --base <full-sha> --head <full-sha> [--mode shadow|full] [--worktree] --output <plan.json>
-npm run test:plan   -- --plan <plan.json> --tier local|development [--results <dir>] [--dry-run]
+npm run test:plan   -- --plan <plan.json> --tier local|development [--results <dir>] [--keep-going] [--dry-run]
 npm run test:gate   -- --plan <plan.json> --results <dir> [--jobs <needs.json>] [--base-plan <plan.json>] [--head <sha>]
 npm run test:release -- --prepare --output <candidate.json> [--production-base <sha>]
-npm run test:release -- --manifest <candidate.json> [--check-only] [--benchmarks]
+npm run test:release -- --manifest <candidate.json> [--check-only] [--benchmarks] [--keep-going]
 ```
 
 - **`test:select`** writes a plan: the exact base, head, merge base and trees; the changed paths;
@@ -45,7 +45,9 @@ npm run test:release -- --manifest <candidate.json> [--check-only] [--benchmarks
 - **`test:plan`** refuses a plan that is stale, altered, made on another commit or made before the
   working tree changed. It then runs the plan's commands with explicit paths. `local` runs the
   selection. `development` runs what the gate requires, in CI job order, and finishes with the
-  same gate decision CI makes. Each step's time goes to `timing.json`.
+  same gate decision CI makes. Each step's time goes to `timing.json`. The first failure stops
+  the run unless you pass `--keep-going`, which ends only the failing job and runs the others,
+  as CI's independent jobs do. A refused target check always stops everything.
 - **`test:gate`** is the decision behind both required checks (section 4).
 - **`test:release`** records and checks a release candidate's identity and runs every broad suite
   against it (section 6).

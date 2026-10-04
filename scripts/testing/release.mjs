@@ -201,7 +201,7 @@ export function prepareManifest(described, extra = {}) {
 export function runReleaseCli(argv, root = process.cwd()) {
   const args = parseArgs(argv);
   const known = new Set([
-    "prepare", "output", "manifest", "check-only", "results", "benchmarks",
+    "prepare", "output", "manifest", "check-only", "results", "benchmarks", "keep-going",
     "production-base", "production-version", "batch-base", "batch-head", "pr",
   ]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
@@ -254,7 +254,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
 
   const resultsDir = resolve(root, typeof args.results === "string" ? args.results : "oms-test/release");
   const { steps } = buildSteps(plan, "release", { benchmarks: args.benchmarks === true });
-  const { ok, outcomes } = runSteps(steps, { root, resultsDir });
+  const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true });
   const artifact = artifactDigest(root);
 
   const after = candidateRefusals(manifest, describeCandidate(root, git, testEnvironment(root)));
