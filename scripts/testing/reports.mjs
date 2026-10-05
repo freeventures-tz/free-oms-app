@@ -8,6 +8,9 @@
  *   e2e.playwright.shard-2-of-3.json               one shard of a sharded run
  *   pgtap.log                                      `supabase test db` output (pg_prove)
  *   migration-chain.log                            `npm run test:migration-chain` output
+ *   unit.vitest-list.json, integration.vitest-list.json, e2e.playwright-list.json
+ *                                                  the tests each runner listed before running
+ *   artifact.json                                  the build the E2E job tested (release.mjs)
  *
  * Every test becomes { id, suite, file, project, title, status, retries, durationMs } with status
  * one of passed, failed, skipped or flaky (passed only on a retry). A file that cannot be parsed is
@@ -158,18 +161,57 @@ export function normaliseMigrationChain(text) {
   return { suite: "migrationChain", shard: null, tests, durationMs: null, runnerSuccess: passed };
 }
 
-/** Reads every report in a directory. Returns { reports, problems }. */
-/** @param {string} dir @param {string} root @returns {{ reports: any[], problems: string[] }} */
+/**
+ * The test IDs a runner says exist, before anything runs: `vitest list --json` (an array of
+ * `{ name, file }`, name already joined with " > ") or `playwright test --list --reporter=json`.
+ * The IDs use the same form as the run reports, so the gate can require every listed test to have
+ * run.
+ */
+/** @param {string} suite @param {any} json @param {string} root @returns {Set<string>} */
+export function listedIds(suite, json, root) {
+  if (suite === "e2e") return new Set(normalisePlaywright(json).tests.map((test) => test.id));
+  if (!Array.isArray(json)) throw new Error("a Vitest listing is an array");
+  return new Set(json.map((entry) => `${suite}:${repoPath(root, entry.file)}:${entry.name}`));
+}
+
+const LISTING = /^(unit|integration)\.vitest-list\.json$|^(e2e)\.playwright-list\.json$/;
+
+/**
+ * Reads every report in a directory. Returns the run reports, the listings by suite, the recorded
+ * build artifact (artifact.json, written by the E2E job after its build), and every problem.
+ */
+/** @param {string} dir @param {string} root @returns {{ reports: any[], listings: Record<string, Set<string>>, artifact: any, problems: string[] }} */
 export function readResults(dir, root) {
   const reports = [];
+  /** @type {Record<string, Set<string>>} */
+  const listings = {};
+  let artifact = null;
   const problems = [];
   let names;
   try {
     names = readdirSync(dir).sort();
   } catch (error) {
-    return { reports, problems: [`results directory ${dir} cannot be read: ${error.message}`] };
+    return { reports, listings, artifact, problems: [`results directory ${dir} cannot be read: ${error.message}`] };
   }
   for (const name of names) {
+    const listing = name.match(LISTING);
+    if (listing) {
+      const suite = listing[1] ?? listing[2];
+      try {
+        listings[suite] = listedIds(suite, JSON.parse(readFileSync(join(dir, name), "utf8")), root);
+      } catch (error) {
+        problems.push(`${name} cannot be parsed: ${error.message}`);
+      }
+      continue;
+    }
+    if (name === "artifact.json") {
+      try {
+        artifact = JSON.parse(readFileSync(join(dir, name), "utf8"));
+      } catch (error) {
+        problems.push(`${name} cannot be parsed: ${error.message}`);
+      }
+      continue;
+    }
     const match = name.match(NAME);
     if (!match) continue;
     const text = readFileSync(join(dir, name), "utf8");
@@ -191,5 +233,5 @@ export function readResults(dir, root) {
       problems.push(`${name} cannot be parsed: ${error.message}`);
     }
   }
-  return { reports, problems };
+  return { reports, listings, artifact, problems };
 }

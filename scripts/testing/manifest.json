@@ -14,8 +14,15 @@
   "minimums": {
     "migrations": 55,
     "pgtapFiles": 28,
+    "pgtapAssertions": 1926,
     "migrationChainCounterexamples": 155,
     "responsiveProjects": ["mobile", "tablet", "desktop"]
+  },
+  "retiredTests": [],
+  "benchmarks": {
+    "flag": "FV_BENCHMARK=1",
+    "developmentGate": "opt-in; the reviewed skips in known-skips.json apply",
+    "releaseGate": "always applicable and always enabled; a skipped benchmark refuses the gate"
   },
   "forceFull": [
     { "pattern": "supabase/**", "reason": "migrations, database tests, release checks and stack configuration" },

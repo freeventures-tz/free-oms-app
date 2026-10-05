@@ -5,6 +5,7 @@ import {
   collectIdentity,
   parseNameStatus,
   parsePorcelain,
+  revisionFiles,
   selectTests,
   validateManifest,
 } from "@/scripts/testing/select.mjs";
@@ -241,6 +242,57 @@ describe("test selection", () => {
     expect(second.digest).toBe(first.digest);
   });
 
+  it("R7: resolves a .js specifier to the TypeScript source it names, so its dependants are selected", () => {
+    // The review's probe: a `.js` import of a `.tsx` module was unresolved, stayed low risk and lost
+    // its dependent test.
+    const withJs = {
+      ...sources,
+      "components/brand/badge.tsx": "export const Badge = () => null;",
+      "components/brand/logo.tsx": 'import { Badge } from "./badge.js";\nexport const Logo = Badge;',
+    };
+    const jsFiles = Object.keys(withJs).sort();
+    const graph = buildGraph(jsFiles, (path: string) => withJs[path as keyof typeof withJs]);
+    expect(graph.unresolved).toEqual([]);
+    const result = selectTests({
+      manifest,
+      files: jsFiles,
+      edges: graph.edges,
+      unresolved: graph.unresolved,
+      changes: [{ status: "M", path: "components/brand/badge.tsx" }],
+      identity: proven,
+    });
+    expect(result.selection.unit.files).toEqual(["tests/unit/logo.test.ts"]);
+  });
+
+  it("R7: an import the graph cannot resolve in non-test source forces full coverage", () => {
+    const unresolved = [{ from: "lib/reports/query.ts", specifier: "./missing.js" }];
+    const result = select([{ status: "M", path: "components/brand/logo.tsx" }], { unresolved });
+    expect(result.risk).toBe("high");
+    expect(result.selection.unit.mode).toBe("full");
+    expect(result.fullReasons).toEqual(["lib/reports/query.ts imports ./missing.js, which the import graph cannot resolve"]);
+  });
+
+  it("R7: an unresolved import inside a test file does not force full coverage", () => {
+    const unresolved = [{ from: "tests/unit/query.test.ts", specifier: "@/lib/nowhere" }];
+    expect(select([{ status: "M", path: "components/brand/logo.tsx" }], { unresolved }).fullReasons).toEqual([]);
+  });
+
+  it("R6: selects the migration chain locally for high-risk changes only, and says why not otherwise", () => {
+    expect(select([{ status: "M", path: "lib/money.ts" }]).selection.migrationChain.mode).toBe("full");
+    const low = select([{ status: "M", path: "components/brand/logo.tsx" }]).selection.migrationChain;
+    expect(low.mode).toBe("not selected");
+    expect(low.reason).toMatch(/CI and every release candidate still run it/);
+    // Execution, which the gates enforce, keeps it full either way.
+    expect(select([{ status: "M", path: "components/brand/logo.tsx" }]).execution.migrationChain.mode).toBe("full");
+  });
+
+  it("R4: carries the manifest's retired tests into the plan for the gate to read", () => {
+    const retiring = { ...manifest, retiredTests: [{ file: "tests/unit/old.test.ts", reason: "merged" }] };
+    expect(selectTests({ manifest: retiring, files, edges, changes: [], identity: proven }).retiredTests).toEqual([
+      { file: "tests/unit/old.test.ts", reason: "merged" },
+    ]);
+  });
+
   it("survives an import cycle", () => {
     const cyclic = {
       "lib/reports/a.ts": 'import "./b";',
@@ -274,6 +326,14 @@ describe("test selection", () => {
 });
 
 describe("reading git", () => {
+  it("R4: lists another commit's whole tree without a checkout, so a base keeps the tests a change deletes", () => {
+    const git = (args: string[]) => {
+      expect(args).toEqual(["ls-tree", "-r", "--name-only", "-z", SHA_A]);
+      return "tests/unit/old.test.ts\0lib/money.ts\0";
+    };
+    expect(revisionFiles(git, SHA_A)).toEqual(["lib/money.ts", "tests/unit/old.test.ts"]);
+  });
+
   it("parses renames and deletions from a -z name-status diff", () => {
     const raw = ["M", "lib/a.ts", "R087", "lib/old.ts", "lib/new.ts", "D", "lib/gone.ts", "A", "lib/b.ts", ""].join("\0");
     expect(parseNameStatus(raw)).toEqual([

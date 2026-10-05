@@ -1,3 +1,4 @@
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -54,18 +55,32 @@ const names = (steps: Array<{ name: string }>) => steps.map((step) => step.name)
 describe("plan runner", () => {
   it("runs only the selected tests on the local tier, and skips empty suites instead of running them unfiltered", () => {
     const { steps, skipped } = buildSteps(plan("README.md"), "local");
-    expect(names(steps)).toEqual(["lint", "typecheck"]);
-    expect(skipped.map((skip: { suite: string }) => skip.suite)).toEqual(["unit", "pgtap", "migrationChain", "integration", "e2e"]);
+    // pgTAP holds the mandatory database smoke, so it runs in full on every tier (finding R6).
+    expect(names(steps)).toEqual(["lint", "typecheck", "reset before pgTAP", "pgTAP", "database lint", "advisors"]);
+    expect(skipped.map((skip: { suite: string }) => skip.suite)).toEqual(["unit", "migrationChain", "integration", "e2e"]);
   });
 
-  it("passes explicit paths for a selection", () => {
+  it("R6: keeps full pgTAP, lint and advisors on a lower-risk local plan, and runs the chain only when the plan selects it", () => {
+    const lower = plan("components/brand/logo.tsx");
+    expect(lower.risk).toBe("low");
+    const local = names(buildSteps(lower, "local").steps);
+    for (const step of ["reset before pgTAP", "pgTAP", "database lint", "advisors"]) expect(local).toContain(step);
+    expect(local).not.toContain("migration chain");
+
+    const high = plan("lib/money.ts");
+    expect(high.selection.migrationChain.mode).toBe("full");
+    expect(names(buildSteps(high, "local").steps)).toContain("migration chain");
+  });
+
+  it("passes explicit paths for a selection, to the listing and the run alike", () => {
     const { steps } = buildSteps(plan("components/brand/logo.tsx"), "local");
-    const unit = steps.find((step: { name: string }) => step.name === "unit (selected)");
-    expect(unit.args).toEqual(["vitest", "run", "--project", "unit", "tests/unit/logo.test.ts"]);
-    const e2e = steps.find((step: { name: string }) => step.name === "e2e (selected)");
-    expect(e2e.args).toEqual(["playwright", "test", "e2e/auth.spec.ts"]);
-    // E2E runs a production build of the current source, then a reset, then the specs.
-    expect(names(steps).slice(-3)).toEqual(["build for E2E", "reset before E2E", "e2e (selected)"]);
+    const step = (name: string) => steps.find((entry: { name: string }) => entry.name === name);
+    expect(step("list unit").args).toEqual(["vitest", "list", "--project", "unit", "--json={results}/unit.vitest-list.json", "tests/unit/logo.test.ts"]);
+    expect(step("unit (selected)").args).toEqual(["vitest", "run", "--project", "unit", "tests/unit/logo.test.ts"]);
+    expect(step("list e2e").args).toEqual(["playwright", "test", "--list", "--reporter=json", "e2e/auth.spec.ts"]);
+    expect(step("e2e (selected)").args).toEqual(["playwright", "test", "e2e/auth.spec.ts"]);
+    // E2E builds the current source, records that build, lists, resets, then runs.
+    expect(names(steps).slice(-5)).toEqual(["build for E2E", "record the tested build", "list e2e", "reset before E2E", "e2e (selected)"]);
   });
 
   it("runs every suite, in isolation order, on the development tier while selection is in shadow", () => {
@@ -73,6 +88,7 @@ describe("plan runner", () => {
     expect(names(steps)).toEqual([
       "lint",
       "typecheck",
+      "list unit",
       "unit",
       "build",
       "migration chain",
@@ -80,25 +96,43 @@ describe("plan runner", () => {
       "pgTAP",
       "database lint",
       "advisors",
+      "list integration",
       "reset before integration",
       "integration",
       "build for E2E",
+      "record the tested build",
+      "list e2e",
       "reset before E2E",
       "e2e",
     ]);
   });
 
+  it("R3: lists without writing the run's results, and the listing of integration comes before its reset", () => {
+    const { steps } = buildSteps(plan("lib/money.ts"), "development");
+    for (const name of ["list unit", "list integration", "list e2e"]) {
+      expect(steps.find((step: { name: string }) => step.name === name).env.OMS_TEST_RESULTS_DIR).toBe("");
+    }
+    const order = names(steps);
+    expect(order.indexOf("list integration")).toBeLessThan(order.indexOf("reset before integration"));
+    expect(steps.find((step: { name: string }) => step.name === "list integration").destructive).toBe(true);
+  });
+
   it("runs everything on the release tier whatever the plan selected", () => {
     const release = buildSteps(plan("README.md"), "release");
     expect(names(release.steps)).toContain("integration");
-    expect(names(release.steps)).toContain("e2e");
+    expect(names(release.steps)).toContain("migration chain");
     expect(release.steps.find((step: { name: string }) => step.name === "e2e").args).toEqual(["playwright", "test"]);
   });
 
-  it("turns on the opt-in benchmarks only when asked", () => {
-    const withBenchmarks = buildSteps(plan("README.md"), "release", { benchmarks: true }).steps;
-    expect(withBenchmarks.find((step: { name: string }) => step.name === "e2e").env).toEqual({ FV_BENCHMARK: "1" });
-    expect(buildSteps(plan("README.md"), "release").steps.find((step: { name: string }) => step.name === "e2e").env).toEqual({});
+  it("R2: always runs the benchmarks on the release tier, and only on request elsewhere", () => {
+    const release = buildSteps(plan("README.md"), "release").steps;
+    for (const name of ["integration", "e2e"]) {
+      expect(release.find((step: { name: string }) => step.name === name).env).toEqual({ FV_BENCHMARK: "1" });
+    }
+    const development = buildSteps(plan("lib/money.ts"), "development").steps;
+    expect(development.find((step: { name: string }) => step.name === "e2e").env).toEqual({});
+    const asked = buildSteps(plan("lib/money.ts"), "development", { benchmarks: true }).steps;
+    expect(asked.find((step: { name: string }) => step.name === "e2e").env).toEqual({ FV_BENCHMARK: "1" });
   });
 
   it("checks the targets before every destructive step, and stops before the step when refused", () => {
@@ -110,7 +144,7 @@ describe("plan runner", () => {
       resultsDir: join(tmpdir(), "oms-unit-runner"),
       guard: (what: string) => {
         guarded.push(what);
-        if (what === "reset before integration") throw new Error("NEXT_PUBLIC_SUPABASE_URL host db.example is not loopback");
+        if (what === "list integration") throw new Error("NEXT_PUBLIC_SUPABASE_URL host db.example is not loopback");
       },
       spawn: (command: string, args: string[]) => {
         spawned.push(args.join(" "));
@@ -119,10 +153,33 @@ describe("plan runner", () => {
       print: () => {},
     });
     expect(result.ok).toBe(false);
-    expect(guarded).toEqual(["migration chain", "reset before pgTAP", "pgTAP", "database lint", "advisors", "reset before integration"]);
+    expect(guarded).toEqual(["migration chain", "reset before pgTAP", "pgTAP", "database lint", "advisors", "list integration"]);
     // Nothing after the refused check ran, and the refused step itself never started.
     expect(spawned.some((line) => line.includes("integration"))).toBe(false);
-    expect(result.outcomes.at(-1)).toMatchObject({ name: "reset before integration", ok: false });
+    expect(result.outcomes.at(-1)).toMatchObject({ name: "list integration", ok: false });
+  });
+
+  it("fills in the results directory and keeps a listing's stdout apart from its stderr", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oms-runner-"));
+    const calls: string[][] = [];
+    runSteps(
+      [
+        { name: "list e2e", job: "e2e", command: "npx", args: ["x", "--json={results}/a.json"], stdoutTo: "e2e.playwright-list.json", env: { OMS_TEST_RESULTS_DIR: "" } },
+      ],
+      {
+        root: "/tmp/not-used",
+        resultsDir: dir,
+        guard: () => {},
+        spawn: (_command: string, args: string[], options: { env: Record<string, string> }) => {
+          calls.push(args);
+          expect(options.env.OMS_TEST_RESULTS_DIR).toBe("");
+          return { status: 0, stdout: '{"suites":[]}', stderr: "a warning" };
+        },
+        print: () => {},
+      },
+    );
+    expect(calls[0].at(-1)).toBe(`--json=${dir}/a.json`);
+    expect(readFileSync(join(dir, "e2e.playwright-list.json"), "utf8")).toBe('{"suites":[]}');
   });
 
   it("stops at the first failing step", () => {
@@ -192,5 +249,15 @@ describe("plan runner", () => {
 
     const local = selectTests({ manifest, files, edges, changes: [], identity: { ...identity, worktreeDigest: "1" }, selector: { selectorDigest: "d" } });
     expect(planRefusals(local, { head: HEAD, digest: "d", worktreeDigest: "2" })).toEqual(["the working tree changed after the plan was made"]);
+  });
+
+  it("R5: refuses a commit-only plan on a working tree with changes, and accepts a worktree plan bound to them", () => {
+    // The review's probe: plan a commit, then edit business source, then run under the old identity.
+    const made = plan("README.md");
+    expect(planRefusals(made, { head: HEAD, digest: "d", worktreeDigest: null, dirty: true })).toEqual([
+      "the working tree has changes the plan's commit does not hold: commit them, or plan with --worktree",
+    ]);
+    const bound = selectTests({ manifest, files, edges, changes: [], identity: { ...identity, worktreeDigest: "1" }, selector: { selectorDigest: "d" } });
+    expect(planRefusals(bound, { head: HEAD, digest: "d", worktreeDigest: "1", dirty: true })).toEqual([]);
   });
 });

@@ -130,11 +130,26 @@ function goodReports() {
 
 const goodJobs = { plan: { result: "success" }, static: { result: "success" }, database: { result: "success" }, integration: { result: "success" }, e2e: { result: "success" } };
 
+/** What each runner would have listed: by default, exactly the tests its report holds. */
+function listingsOf(reports: Array<{ suite: string; tests: Array<{ id: string }> }>) {
+  const listings: Record<string, Set<string>> = {};
+  for (const report of reports) {
+    if (!["unit", "integration", "e2e"].includes(report.suite)) continue;
+    listings[report.suite] ??= new Set();
+    for (const test of report.tests) listings[report.suite].add(test.id);
+  }
+  return listings;
+}
+
+const ARTIFACT = { commit: HEAD, digest: "a".repeat(64), files: 100, clean: true, buildEnvironment: {} };
+
 function decide(overrides: Partial<Parameters<typeof evaluateGate>[0]> = {}) {
+  const reports = overrides.reports ?? goodReports();
   return evaluateGate({
     plan: makePlan(),
     jobs: goodJobs,
-    reports: goodReports(),
+    reports,
+    listings: listingsOf(reports),
     knownSkips: [],
     expect: { head: HEAD, selectorDigest: SELECTOR },
     ...overrides,
@@ -250,7 +265,7 @@ describe("the aggregate gate", () => {
     const flaky = normalisePlaywright(playwrightJson([...allE2e.slice(1), ["shell.spec.ts", "mobile", "works", "flaky"]]));
     const decision = decide({ reports: replace("e2e", flaky) });
     expect(decision.pass).toBe(true);
-    expect(decision.warnings[0]).toMatch(/e2e:e2e\/shell\.spec\.ts:mobile:works passed only on retry 1/);
+    expect(decision.warnings.some((line: string) => line.includes("e2e:e2e/shell.spec.ts:mobile:works passed only on retry 1"))).toBe(true);
   });
 
   it("refuses a missing shard, and shards that report the same test", () => {
@@ -300,7 +315,7 @@ describe("the aggregate gate", () => {
     const onlyMoney = normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
     const decision = decide({ plan: head, basePlan: base, reports: replace("unit", onlyMoney) });
     expect(decision.refusals).toContain("unit: required file tests/unit/report.test.ts did not run");
-    expect(decision.warnings[0]).toMatch(/approved base requires 1 file/);
+    expect(decision.warnings.some((line: string) => /approved base requires 1 file/.test(line))).toBe(true);
   });
 
   it("requires the full inventory when the base has no selector", () => {
@@ -312,7 +327,7 @@ describe("the aggregate gate", () => {
 
   it("refuses a Release Gate on anything but a full plan", () => {
     expect(decide({ gate: "Release Gate" }).refusals).toContain("a Release Gate requires a full plan");
-    expect(decide({ gate: "Release Gate", plan: makePlan({ mode: "full" }) }).pass).toBe(true);
+    expect(decide({ gate: "Release Gate", plan: makePlan({ mode: "full" }), artifact: ARTIFACT }).pass).toBe(true);
   });
 
   it("reports a failing test the shadow selection would have missed", () => {
@@ -339,6 +354,79 @@ describe("the aggregate gate", () => {
       expect(entry.review).toBeTruthy();
       expect(["unit", "integration", "e2e", "pgtap"]).toContain(entry.suite);
     }
+  });
+
+  describe("review findings R1 to R4", () => {
+    it("R3: refuses one passing test per file when the runner listed more", () => {
+      // The review's probe: a report with just one passing case per required file. The listing says
+      // money.test.ts also holds "subtracts", which never ran.
+      const listings = listingsOf(goodReports());
+      listings.unit.add("unit:tests/unit/money.test.ts:suite > subtracts");
+      const refusals = decide({ listings }).refusals;
+      expect(refusals).toContain("unit: 1 listed test(s) did not run: unit:tests/unit/money.test.ts:suite > subtracts");
+    });
+
+    it("R3: refuses a suite whose listing never arrived", () => {
+      const listings = listingsOf(goodReports());
+      delete listings.integration;
+      expect(decide({ listings }).refusals).toContain("integration: no test listing arrived, so the run cannot be checked test by test");
+    });
+
+    it("R3: refuses an absent planner job", () => {
+      const jobs: Record<string, { result: string }> = { ...goodJobs };
+      delete jobs.plan;
+      expect(decide({ jobs }).refusals).toContain("job plan is absent");
+    });
+
+    it("R4: holds the base's numeric floors when the head lowers its own", () => {
+      // The head's manifest lowers the counterexample floor to one; the base's is three.
+      const lowered = { ...manifest, minimums: { ...manifest.minimums, migrationChainCounterexamples: 1 } };
+      const head = makePlan({ manifest: lowered });
+      const one = normaliseMigrationChain("--- counterexample: one ---\nmigration-chain: PASS");
+      const reports = replace("migrationChain", one);
+      expect(decide({ plan: head, basePlan: null, reports }).pass).toBe(true);
+      expect(decide({ plan: head, basePlan: makePlan(), reports }).refusals).toContain(
+        "migrationChain: 1 counterexamples ran; at least 3 are required",
+      );
+    });
+
+    it("R4: refuses a change that deletes a test the base requires, unless the manifest retires it", () => {
+      const baseFiles = [...files, "tests/unit/old.test.ts"];
+      const base = selectTests({ manifest, files: baseFiles, edges: new Map(), changes: [], identity, mode: "full", selector: { selectorDigest: SELECTOR } });
+      expect(decide({ basePlan: base }).refusals).toContain(
+        "unit: the base requires tests/unit/old.test.ts, which this change deletes; retire it in the manifest's retiredTests for review, or keep it",
+      );
+
+      const retiring = { ...manifest, retiredTests: [{ file: "tests/unit/old.test.ts", reason: "merged into money.test.ts" }] };
+      const decision = decide({ plan: makePlan({ manifest: retiring }), basePlan: base });
+      expect(decision.pass).toBe(true);
+      expect(decision.warnings.some((line: string) => line.includes("tests/unit/old.test.ts is required by the base but retired"))).toBe(true);
+    });
+
+    it("refuses a pgTAP run below the assertion floor", () => {
+      const floored = { ...manifest, minimums: { ...manifest.minimums, pgtapAssertions: 41 } };
+      expect(decide({ plan: makePlan({ manifest: floored }) }).refusals).toContain("pgtap: 40 assertions ran; at least 41 are required");
+    });
+
+    it("R2: a benchmark skip the Development Gate accepts refuses the Release Gate", () => {
+      const benchmarkSkipped = normalisePlaywright(playwrightJson([...allE2e, ["shell.spec.ts", "mobile", "shell mobile benchmark > times it", "skipped"]]));
+      const knownSkips = [{ suite: "e2e", file: "e2e/shell.spec.ts", title: "/mobile benchmark > /", projects: "*", gates: ["Development Gate"], reason: "opt-in" }];
+      const reports = replace("e2e", benchmarkSkipped);
+      expect(decide({ reports, knownSkips }).pass).toBe(true);
+      const release = decide({ reports, knownSkips, gate: "Release Gate", plan: makePlan({ mode: "full" }), artifact: ARTIFACT });
+      expect(release.refusals).toContain("e2e: unexplained skip e2e:e2e/shell.spec.ts:mobile:shell mobile benchmark > times it");
+    });
+
+    it("R1: refuses a Release Gate with no recorded build, another commit's build, or a build from a dirty tree", () => {
+      const full = makePlan({ mode: "full" });
+      expect(decide({ gate: "Release Gate", plan: full }).refusals).toContain("no build artifact was recorded by the E2E job");
+      expect(decide({ gate: "Release Gate", plan: full, artifact: { ...ARTIFACT, commit: "c".repeat(40) } }).refusals).toContain(
+        `the recorded build is of ${"c".repeat(40)}, not ${HEAD}`,
+      );
+      expect(decide({ gate: "Release Gate", plan: full, artifact: { ...ARTIFACT, clean: false } }).refusals).toContain(
+        "the recorded build was made from a working tree with changes",
+      );
+    });
   });
 
   it("refuses unreadable report files by name", () => {

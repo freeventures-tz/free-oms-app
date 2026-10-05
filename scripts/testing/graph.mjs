@@ -12,7 +12,8 @@
  *
  * What the graph cannot see (SQL called by name, routes a browser visits, files read at run time)
  * is the manifest's job. A source file the graph and the manifest both miss is unmapped, and an
- * unmapped path forces full coverage.
+ * unmapped path forces full coverage. A repository import the graph cannot resolve is an edge it
+ * cannot follow, so the selector forces full coverage for that too.
  */
 import { posix } from "node:path";
 
@@ -49,8 +50,21 @@ export function resolveSpecifier(from, specifier, files) {
   for (const extension of RESOLVE_EXTENSIONS) {
     if (files.has(base + extension)) return base + extension;
   }
+  // TypeScript lets `./x.js` name `x.ts` or `x.tsx` (and `.mjs` name `.mts`, `.jsx` name `.tsx`).
+  const substituted = SUBSTITUTIONS.find(([from]) => base.endsWith(from));
+  if (substituted) {
+    const stem = base.slice(0, -substituted[0].length);
+    for (const extension of substituted[1]) if (files.has(stem + extension)) return stem + extension;
+  }
   return null;
 }
+
+const SUBSTITUTIONS = [
+  [".js", [".ts", ".tsx"]],
+  [".jsx", [".tsx"]],
+  [".mjs", [".mts"]],
+  [".cjs", [".cts"]],
+];
 
 /**
  * `readText(path)` returns a file's text. Returns the forward edges and, for each file, the

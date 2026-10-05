@@ -1,33 +1,54 @@
 {
-  "about": "Every skip a gate accepts. A skipped test that matches no entry refuses the gate, so a required case cannot be waived by relabelling it skipped. Each entry names why the skip is correct and where the behaviour is otherwise covered; review the list at every release candidate.",
-  "reviewedAt": "2026-10-04",
+  "about": "Every skip a gate accepts. A skipped test that matches no entry refuses the gate, so a required case cannot be waived by relabelling it skipped. An entry with `gates` applies only to the gates it names: the opt-in benchmarks may be skipped for a Development Gate, never for a Release Gate, which always runs them. Each entry names why the skip is correct and where the behaviour is otherwise covered; review the list at every release candidate.",
+  "reviewedAt": "2026-10-05",
   "skips": [
     {
       "suite": "integration",
       "file": "tests/integration/stock-benchmark.test.ts",
       "title": "/^stock command timings on a loaded ledger > /",
       "projects": "*",
-      "reason": "Opt-in benchmark (FV_BENCHMARK=1). Measures timings; stock correctness is covered by stock-invariant and inventory.",
+      "gates": ["Development Gate"],
+      "reason": "Opt-in benchmark (FV_BENCHMARK=1). Measures timings; stock correctness is covered by stock-invariant and inventory. Every Release Gate runs it.",
       "owner": "Owner",
-      "review": "Run with --benchmarks on a release candidate that touches stock commands."
+      "review": "At every release candidate, which runs it."
     },
     {
       "suite": "e2e",
       "file": "e2e/stock-mobile-benchmark.spec.ts",
       "title": "/^stock commands on a phone over 4G > /",
       "projects": "*",
-      "reason": "Opt-in benchmark (FV_BENCHMARK=1) on the mobile profile. Stock journeys are covered by inventory, production and stock-invariant on all three tiers.",
+      "gates": ["Development Gate"],
+      "reason": "Opt-in benchmark (FV_BENCHMARK=1). Stock journeys are covered by inventory, production and stock-invariant on all three tiers. Every Release Gate runs it.",
       "owner": "Owner",
-      "review": "Run with --benchmarks on a release candidate that touches stock screens."
+      "review": "At every release candidate, which runs it."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/stock-mobile-benchmark.spec.ts",
+      "title": "/^stock commands on a phone over 4G > /",
+      "projects": ["tablet", "desktop"],
+      "reason": "Measured on the mobile profile only, by design; with benchmarks on, the mobile run is required.",
+      "owner": "Owner",
+      "review": "Permanent: the benchmark defines a phone over 4G."
     },
     {
       "suite": "e2e",
       "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
       "title": "/mobile benchmark > /",
       "projects": "*",
-      "reason": "Opt-in benchmarks (FV_BENCHMARK=1), measured on the mobile profile only. The journeys they time run unskipped in the same files on all three tiers.",
+      "gates": ["Development Gate"],
+      "reason": "Opt-in benchmarks (FV_BENCHMARK=1). The journeys they time run unskipped in the same files on all three tiers. Every Release Gate runs them.",
       "owner": "Owner",
-      "review": "Run with --benchmarks on a release candidate that touches imprest or report screens."
+      "review": "At every release candidate, which runs them."
+    },
+    {
+      "suite": "e2e",
+      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
+      "title": "/mobile benchmark > /",
+      "projects": ["tablet", "desktop"],
+      "reason": "Measured on the mobile profile only, by design; with benchmarks on, the mobile run is required.",
+      "owner": "Owner",
+      "review": "Permanent: the benchmarks define a phone profile."
     },
     {
       "suite": "e2e",

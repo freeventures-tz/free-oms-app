@@ -15,7 +15,8 @@ test that ran before still runs.
   A missing result, a run with no tests, or a test skipped without a reviewed reason counts as a
   failure.
 - A release candidate can now be tested in full against its exact commit, version, migrations and
-  settings, with a separate Release Gate. It deploys nothing.
+  settings, with a separate Release Gate that also runs the performance benchmarks. Its result
+  names the exact build that was tested. It deploys nothing.
 - Before a test creates accounts or resets a database, it now checks that the database is the
   local test copy for that checkout, and stops if it is anything else.
 

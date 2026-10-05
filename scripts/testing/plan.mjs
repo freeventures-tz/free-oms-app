@@ -20,8 +20,8 @@ import { buildSteps, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs"
 import { collectIdentity, planDigest } from "./select.mjs";
 
 /** Every reason this checkout may not run this plan. Empty means it may. */
-/** @param {any} plan @param {{ head: string, digest: string, worktreeDigest: string | null }} context @returns {string[]} */
-export function planRefusals(plan, { head, digest, worktreeDigest }) {
+/** @param {any} plan @param {{ head: string, digest: string, worktreeDigest: string | null, dirty?: boolean }} context @returns {string[]} */
+export function planRefusals(plan, { head, digest, worktreeDigest, dirty = false }) {
   const refusals = [];
   if (plan?.schemaVersion !== PLAN_SCHEMA_VERSION) refusals.push(`plan schema ${plan?.schemaVersion} is not ${PLAN_SCHEMA_VERSION}`);
   if (!plan || plan.digest !== planDigest(plan)) refusals.push("plan digest does not match its contents");
@@ -31,6 +31,10 @@ export function planRefusals(plan, { head, digest, worktreeDigest }) {
   }
   if (plan?.identity?.worktreeDigest && plan.identity.worktreeDigest !== worktreeDigest) {
     refusals.push("the working tree changed after the plan was made");
+  }
+  // A plan made without --worktree names a commit, so the files run must be that commit's files.
+  if (!plan?.identity?.worktreeDigest && dirty) {
+    refusals.push("the working tree has changes the plan's commit does not hold: commit them, or plan with --worktree");
   }
   return refusals;
 }
@@ -54,7 +58,8 @@ export function runPlanCli(argv, root = process.cwd()) {
         readFile: (path) => readFileSync(resolve(root, path)),
       }).identity.worktreeDigest
     : null;
-  const refusals = planRefusals(plan, { head, digest: selectorDigest(root), worktreeDigest });
+  const dirty = git(["status", "--porcelain=v1", "--untracked-files=all"]) !== "";
+  const refusals = planRefusals(plan, { head, digest: selectorDigest(root), worktreeDigest, dirty });
   if (refusals.length > 0) throw new Error(refusals.join("; "));
 
   const { steps, skipped } = buildSteps(plan, args.tier, { benchmarks: args.benchmarks === true });
@@ -67,11 +72,14 @@ export function runPlanCli(argv, root = process.cwd()) {
 
   let decision = null;
   if (args.tier === "development") {
-    const { reports, problems } = readResults(resultsDir, root);
+    const { reports, listings, artifact, problems } = readResults(resultsDir, root);
     decision = evaluateGate({
       plan,
-      jobs: jobsFromOutcomes(outcomes, plan.expectedJobs),
+      // The plan was validated above, which is the local planner job.
+      jobs: { plan: { result: "success" }, ...jobsFromOutcomes(outcomes, plan.expectedJobs) },
       reports,
+      listings,
+      artifact,
       reportProblems: problems,
       knownSkips: readJson(resolve(root, "scripts/testing/known-skips.json")).skips,
       expect: { head, selectorDigest: selectorDigest(root) },

@@ -50,6 +50,9 @@ defaults:
 
 env:
   OMS_TEST_RESULTS_DIR: ${{ github.workspace }}/oms-test/results
+  # The opt-in benchmarks run on every release candidate, and the Release Gate refuses a skipped one
+  # (scripts/testing/known-skips.json). Pull requests and pushes leave them off.
+  FV_BENCHMARK: ${{ inputs.gate == 'release' && '1' || '' }}
 
 # The order below is deliberate: the cheapest checks that can fail run first, and every test that
 # touches a database runs against a stack started FROM THIS REPOSITORY'S config.toml. Auth settings
@@ -104,17 +107,19 @@ jobs:
           mkdir -p oms-test/plan
           node scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode "$MODE" --output oms-test/plan/plan.json
       - name: Plan with the approved base's rules
-        # The minimum a pull request must run comes from the base it merges into, never from the
-        # pull request alone. While the base has no selector, the gate requires the full inventory.
-        if: github.event_name == 'pull_request'
+        # The minimum a change must run comes from the base it merges into, never from the change
+        # alone: the base's own selector and manifest, over the base's own file tree, so a test the
+        # change deletes is still required and the base's numeric floors still hold. While the base
+        # has no selector, the gate requires the full inventory.
         env:
           BASE: ${{ steps.identity.outputs.base }}
           HEAD_SHA: ${{ steps.identity.outputs.head }}
         run: |
-          if git cat-file -e "$BASE:scripts/testing/select.mjs" 2>/dev/null; then
+          if [[ "$BASE" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$BASE:scripts/testing/select.mjs" 2>/dev/null; then
             mkdir -p .base-policy
             git archive "$BASE" scripts/testing | tar -x -C .base-policy
-            node .base-policy/scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode shadow \
+            node .base-policy/scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode full \
+              --inventory-rev "$BASE" \
               --manifest .base-policy/scripts/testing/manifest.json --output oms-test/plan/base-plan.json
           else
             echo "The approved base has no selector; the gate requires the full inventory."
@@ -139,6 +144,13 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - name: List unit tests
+        # The gate requires every listed test to appear in the results, not just every file.
+        env:
+          OMS_TEST_RESULTS_DIR: ""
+        run: |
+          mkdir -p oms-test/results
+          npx vitest list --project unit --json=oms-test/results/unit.vitest-list.json
       - run: npm run test:unit
       - run: npm run build
       - uses: actions/upload-artifact@v4
@@ -246,6 +258,13 @@ jobs:
             echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(supabase status -o env | grep '^PUBLISHABLE_KEY=' | cut -d= -f2- | tr -d '\"')"
             echo "SUPABASE_SECRET_KEY=$(supabase status -o env | grep '^SECRET_KEY=' | cut -d= -f2- | tr -d '\"')"
           } > .env.test.local
+      - name: List integration tests
+        # Listing runs the global setup, which bootstraps a Director; test:integration resets first.
+        env:
+          OMS_TEST_RESULTS_DIR: ""
+        run: |
+          mkdir -p oms-test/results
+          npx vitest list --project integration --json=oms-test/results/integration.vitest-list.json
       - run: npm run test:integration
       - uses: actions/upload-artifact@v4
         if: always()
@@ -283,6 +302,13 @@ jobs:
           } > .env.local
       - run: npx playwright install --with-deps chromium
       - run: npm run build
+      - name: Record the tested build
+        # A release candidate's evidence names this build; release-gate.yml binds it to the manifest.
+        run: node scripts/testing/release.mjs --describe-artifact --output oms-test/results/artifact.json
+      - name: List E2E tests
+        env:
+          OMS_TEST_RESULTS_DIR: ""
+        run: npx playwright test --list --reporter=json > oms-test/results/e2e.playwright-list.json
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

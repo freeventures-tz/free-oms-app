@@ -40,8 +40,14 @@ function textMatches(pattern, value) {
   return pattern === value;
 }
 
-/** @param {any} entry @param {any} test */
-export function skipMatches(entry, test) {
+/**
+ * Whether a reviewed skip entry covers a skipped test. An entry with `gates` applies only to the
+ * gates it names: the opt-in benchmarks may be skipped for a Development Gate but never for a
+ * Release Gate, which runs them.
+ */
+/** @param {any} entry @param {any} test @param {string} [gate] */
+export function skipMatches(entry, test, gate = "Development Gate") {
+  if (entry.gates && !entry.gates.includes(gate)) return false;
   if (entry.suite !== test.suite || !textMatches(entry.file, test.file)) return false;
   if (entry.projects && entry.projects !== "*" && !entry.projects.includes(test.project)) return false;
   return textMatches(entry.title, test.title);
@@ -54,17 +60,19 @@ export function skipMatches(entry, test) {
  *   basePlan    the approved base's plan, or null when the base has no selector
  *   jobs        { jobName: { result } } as GitHub's `needs` context reports it
  *   reports     normalised reports (reports.mjs)
+ *   listings    { suite: Set of test IDs } each runner listed before it ran (reports.mjs)
+ *   artifact    the build the E2E job recorded, or null
  *   knownSkips  the reviewed skip list
  *   expect      { head, selectorDigest } this checkout and event say the plan must match
  *   gate        "Development Gate" or "Release Gate"
  */
 /** @param {any} options @returns {any} */
-export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], reportProblems = [], knownSkips = [], expect = {}, gate = "Development Gate" }) {
+export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], listings = {}, artifact = null, reportProblems = [], knownSkips = [], expect = {}, gate = "Development Gate" }) {
   const refusals = [];
   const warnings = [];
 
   if (!plan) {
-    return { pass: false, gate, refusals: ["no plan: the planner did not produce one"], warnings, summary: {} };
+    return { pass: false, gate, head: expect.head ?? null, refusals: ["no plan: the planner did not produce one"], warnings, summary: {} };
   }
   if (plan.schemaVersion !== PLAN_SCHEMA_VERSION) refusals.push(`plan schema ${plan.schemaVersion} is not ${PLAN_SCHEMA_VERSION}`);
   if (plan.digest !== planDigest(plan)) refusals.push("plan digest does not match its contents: the plan was altered or is malformed");
@@ -83,22 +91,54 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], r
   if (gate === "Release Gate" && plan.mode !== "full") refusals.push("a Release Gate requires a full plan");
 
   // The minimum is whatever the base requires, or everything when the base has no selector yet.
+  // The base plan is made from the base's own file tree, so a test the change deletes is still
+  // required here. It stops being required only when the change's manifest retires it by name,
+  // which is itself a manifest change and so forces full coverage and review.
+  const retired = new Map((plan.retiredTests ?? []).map((entry) => [entry.file, entry]));
   const required = {};
   for (const suite of SUITES) {
     const own = plan.execution[suite]?.files ?? [];
     const minimum = basePlan ? (basePlan.execution?.[suite]?.files ?? plan.inventory[suite]) : plan.inventory[suite];
-    required[suite] = [...new Set([...own, ...minimum])].sort();
+    const wanted = [...new Set([...own, ...minimum])].sort();
+    required[suite] = [];
+    for (const file of wanted) {
+      if (!plan.inventory[suite].includes(file) && retired.has(file)) {
+        warnings.push(`${suite}: ${file} is required by the base but retired by this change (${retired.get(file).reason}); review its replacement coverage`);
+        continue;
+      }
+      if (!plan.inventory[suite].includes(file)) {
+        refusals.push(`${suite}: the base requires ${file}, which this change deletes; retire it in the manifest's retiredTests for review, or keep it`);
+        continue;
+      }
+      required[suite].push(file);
+    }
     if (required[suite].length > own.length) {
       warnings.push(`${suite}: the approved base requires ${required[suite].length - own.length} file(s) the head plan left out; they are required anyway`);
     }
   }
 
-  for (const job of [...new Set([...EXPECTED_JOBS, ...(plan.expectedJobs ?? [])])]) {
+  // Numeric floors are the higher of the head's and the base's, so a change cannot lower them.
+  const minimums = { ...(plan.minimums ?? {}) };
+  for (const [key, value] of Object.entries(basePlan?.minimums ?? {})) {
+    if (typeof value === "number") minimums[key] = Math.max(value, typeof minimums[key] === "number" ? minimums[key] : 0);
+    else if (Array.isArray(value)) minimums[key] = [...new Set([...(minimums[key] ?? []), ...value])];
+  }
+  if (!basePlan) warnings.push("no base plan: the full inventory is required and the head's floors apply");
+
+  // The planner is a required job like any other: a gate without it has nothing to stand on.
+  for (const job of [...new Set(["plan", ...EXPECTED_JOBS, ...(plan.expectedJobs ?? [])])]) {
     const result = jobs[job]?.result;
     if (!result) refusals.push(`job ${job} is absent`);
     else if (result !== "success") refusals.push(`job ${job} finished as ${result}`);
   }
-  if (jobs.plan && jobs.plan.result !== "success") refusals.push(`job plan finished as ${jobs.plan.result}`);
+
+  // A release candidate is only evidence for the build it tested.
+  if (gate === "Release Gate") {
+    if (!artifact) refusals.push("no build artifact was recorded by the E2E job");
+    else if (expect.head && artifact.commit !== expect.head) refusals.push(`the recorded build is of ${artifact.commit}, not ${expect.head}`);
+    else if (!artifact.digest) refusals.push("the recorded build has no digest");
+    else if (artifact.clean !== true) refusals.push("the recorded build was made from a working tree with changes");
+  }
 
   refusals.push(...reportProblems);
 
@@ -148,14 +188,14 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], r
       refusals.push(`${suite}: the runner reported failure (a setup or load error outside any single test)`);
     }
     for (const test of tests.filter((entry) => entry.status === "skipped")) {
-      if (!knownSkips.some((entry) => skipMatches(entry, test))) refusals.push(`${suite}: unexplained skip ${test.id}`);
+      if (!knownSkips.some((entry) => skipMatches(entry, test, gate))) refusals.push(`${suite}: unexplained skip ${test.id}`);
     }
     for (const test of tests.filter((entry) => entry.status === "flaky" || (entry.status === "passed" && entry.retries > 0))) {
       warnings.push(`${suite}: ${test.id} passed only on retry ${test.retries}; record why the first attempt failed`);
     }
 
     if (suite === "migrationChain") {
-      const minimum = plan.minimums?.migrationChainCounterexamples ?? 0;
+      const minimum = minimums.migrationChainCounterexamples ?? 0;
       if (tests.length < minimum) refusals.push(`migrationChain: ${tests.length} counterexamples ran; at least ${minimum} are required`);
       continue;
     }
@@ -164,6 +204,25 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], r
     for (const file of required[suite]) {
       if (!files.has(file)) refusals.push(`${suite}: required file ${file} did not run`);
     }
+
+    // Every test the runner listed in a required file must appear in the results. A file being
+    // present proves one test ran; this proves each one did.
+    if (suite !== "pgtap") {
+      const listed = listings[suite];
+      if (!listed) {
+        refusals.push(`${suite}: no test listing arrived, so the run cannot be checked test by test`);
+      } else {
+        const wantedFiles = new Set(required[suite]);
+        const ran = new Set(tests.map((test) => test.id));
+        const missing = [...listed].filter((id) => wantedFiles.has(id.split(":")[1]) && !ran.has(id));
+        if (missing.length > 0) {
+          refusals.push(`${suite}: ${missing.length} listed test(s) did not run: ${missing.slice(0, 5).join("; ")}${missing.length > 5 ? "; …" : ""}`);
+        }
+        const unlisted = [...ran].filter((id) => !listed.has(id));
+        if (unlisted.length > 0) warnings.push(`${suite}: ${unlisted.length} test(s) ran that the listing did not name`);
+      }
+    }
+
     if (suite === "e2e") {
       const projects = plan.execution.projects ?? RESPONSIVE_PROJECTS;
       for (const project of RESPONSIVE_PROJECTS) {
@@ -177,8 +236,17 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], r
         }
       }
     }
-    if (suite === "pgtap" && plan.minimums?.pgtapFiles && files.size < plan.minimums.pgtapFiles) {
-      refusals.push(`pgtap: ${files.size} files ran; at least ${plan.minimums.pgtapFiles} are required`);
+    if (suite === "pgtap" && minimums.pgtapFiles && files.size < minimums.pgtapFiles) {
+      refusals.push(`pgtap: ${files.size} files ran; at least ${minimums.pgtapFiles} are required`);
+    }
+    // Five pgTAP files declare no plan count, so a lost assertion inside one cannot be seen per
+    // file. The total is held to a floor instead, which only a reviewed manifest change can lower.
+    if (suite === "pgtap" && minimums.pgtapAssertions) {
+      const assertions = summary.pgtap.assertions;
+      if (assertions == null) refusals.push("pgtap: the run reported no assertion total");
+      else if (assertions < minimums.pgtapAssertions) {
+        refusals.push(`pgtap: ${assertions} assertions ran; at least ${minimums.pgtapAssertions} are required`);
+      }
     }
   }
 
@@ -195,6 +263,9 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], r
   return {
     pass: refusals.length === 0,
     gate,
+    head: expect.head ?? plan.identity?.head ?? null,
+    minimums,
+    artifact,
     refusals,
     warnings,
     summary,
@@ -261,7 +332,7 @@ export function runGateCli(argv, root = process.cwd(), env = process.env) {
   const plan = readOptionalJson(args.plan);
   const basePlan = readOptionalJson(args["base-plan"]);
   const jobs = typeof args.jobs === "string" ? readOptionalJson(args.jobs) ?? {} : JSON.parse(env.OMS_GATE_NEEDS ?? "{}");
-  const { reports, problems } = readResults(args.results, root);
+  const { reports, listings, artifact, problems } = readResults(args.results, root);
   const knownSkips = readJson(typeof args["known-skips"] === "string" ? args["known-skips"] : resolve(root, "scripts/testing/known-skips.json")).skips;
 
   const decision = evaluateGate({
@@ -269,6 +340,8 @@ export function runGateCli(argv, root = process.cwd(), env = process.env) {
     basePlan,
     jobs,
     reports,
+    listings,
+    artifact,
     reportProblems: problems,
     knownSkips,
     expect: { head: typeof args.head === "string" ? args.head : undefined, selectorDigest: selectorDigest(root) },

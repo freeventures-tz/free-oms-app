@@ -123,7 +123,7 @@ function suiteOf(path, manifest) {
  *   identity  { base, head, ... } plus `problems`: identity doubts found while collecting it
  */
 /** @param {any} options @returns {any} */
-export function selectTests({ manifest, files, edges, changes, mode = "shadow", identity = {}, selector = {} }) {
+export function selectTests({ manifest, files, edges, changes, unresolved = [], mode = "shadow", identity = {}, selector = {} }) {
   if (!["shadow", "full", "enforce"].includes(mode)) throw new Error(`unknown mode ${mode}`);
   if (mode === "enforce" && manifest?.activation?.selectiveEnforcement !== true) {
     throw new Error("selective enforcement is not activated; plan with --mode shadow or --mode full");
@@ -146,6 +146,15 @@ export function selectTests({ manifest, files, edges, changes, mode = "shadow", 
   }
 
   if (mode === "full") fullReasons.push("full coverage requested");
+
+  // An import the graph could not resolve is a dependency the selector cannot follow. Test files
+  // are left out: a test that imports something missing fails on its own, and the selector's own
+  // tests hold imports inside fixture strings.
+  const testGlobs = SUITES.flatMap((suite) => manifest.suites?.[suite] ?? []);
+  for (const entry of unresolved) {
+    if (matchesAny(entry.from, testGlobs)) continue;
+    fullReasons.push(`${entry.from} imports ${entry.specifier}, which the import graph cannot resolve`);
+  }
   if (changes.length === 0 && !identity.proven) {
     fullReasons.push("no changed paths, and the base and head identities are not proven");
   }
@@ -241,7 +250,12 @@ export function selectTests({ manifest, files, edges, changes, mode = "shadow", 
       ),
     };
   }
-  selection.migrationChain = { mode: "full", reason: "the historical chain always runs in full" };
+  // The chain takes twenty minutes and checks released migrations; locally it runs for high-risk
+  // changes, which include every change under supabase/. CI and release candidates always run it.
+  selection.migrationChain =
+    risk === "high"
+      ? { mode: "full", reason: "high risk: the historical chain runs in full" }
+      : { mode: "not selected", reason: "no migration, release check or other high-risk path changed; CI and every release candidate still run it" };
   selection.advisors = { mode: "full", reason: "database lint and advisors always run" };
 
   const enforced = mode === "enforce" && manifest.activation?.selectiveEnforcement === true;
@@ -271,9 +285,19 @@ export function selectTests({ manifest, files, edges, changes, mode = "shadow", 
     execution,
     inventory,
     minimums: manifest.minimums ?? {},
+    retiredTests: manifest.retiredTests ?? [],
     expectedJobs: EXPECTED_JOBS,
   };
   return { ...plan, digest: planDigest(plan) };
+}
+
+/** Every file in a commit's tree, without needing it checked out. */
+/** @param {(args: string[]) => string} git @param {string} rev @returns {string[]} */
+export function revisionFiles(git, rev) {
+  return git(["ls-tree", "-r", "--name-only", "-z", rev])
+    .split("\0")
+    .filter(Boolean)
+    .sort();
 }
 
 /** @param {any} plan @returns {string} */
@@ -421,6 +445,7 @@ export function fallbackPlan({ manifest, files, reason, identity = {} }) {
     },
     inventory,
     minimums: manifest.minimums ?? {},
+    retiredTests: manifest.retiredTests ?? [],
     expectedJobs: EXPECTED_JOBS,
   };
   return { ...plan, digest: planDigest(plan) };
@@ -429,14 +454,20 @@ export function fallbackPlan({ manifest, files, reason, identity = {} }) {
 /** @param {string[]} argv @returns {any} */
 export function runSelectCli(argv, root = process.cwd()) {
   const args = parseArgs(argv);
-  const known = new Set(["base", "head", "mode", "output", "worktree", "manifest"]);
+  const known = new Set(["base", "head", "mode", "output", "worktree", "manifest", "inventory-rev"]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
   if (!args.output || args.output === true) throw new Error("--output <plan.json> is required");
 
   const manifestPath = typeof args.manifest === "string" ? args.manifest : resolve(root, "scripts/testing/manifest.json");
   const manifest = readJson(manifestPath);
   const git = gitRunner(root);
-  const files = repositoryFiles(git).filter((path) => existsSync(resolve(root, path)));
+
+  // --inventory-rev plans over another commit's tree, unchecked out: CI uses it to take the approved
+  // base's own test inventory, so tests a pull request deletes still count against it. Only a full
+  // plan can be made that way, because the import graph needs the files' contents.
+  const inventoryRev = typeof args["inventory-rev"] === "string" ? args["inventory-rev"] : null;
+  if (inventoryRev && args.mode !== "full") throw new Error("--inventory-rev needs --mode full");
+  const files = inventoryRev ? revisionFiles(git, inventoryRev) : repositoryFiles(git).filter((path) => existsSync(resolve(root, path)));
   const readText = (path) => readFileSync(resolve(root, path), "utf8");
 
   let plan;
@@ -448,12 +479,13 @@ export function runSelectCli(argv, root = process.cwd()) {
       worktree: args.worktree === true,
       readFile: (path) => readFileSync(resolve(root, path)),
     });
-    const { edges } = buildGraph(files, readText);
+    const { edges, unresolved } = inventoryRev ? { edges: new Map(), unresolved: [] } : buildGraph(files, readText);
     plan = selectTests({
       manifest,
       files,
       edges,
       changes,
+      unresolved,
       mode: typeof args.mode === "string" ? args.mode : "shadow",
       identity,
       selector: {
@@ -468,8 +500,7 @@ export function runSelectCli(argv, root = process.cwd()) {
   }
 
   mkdirSync(dirname(resolve(args.output)), { recursive: true });
-  writeFileSync(args.output, `${canonicalJson(plan)}
-`);
+  writeFileSync(args.output, `${canonicalJson(plan)}\n`);
   return plan;
 }
 

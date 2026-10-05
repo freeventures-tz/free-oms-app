@@ -1,8 +1,14 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  bindEvidence,
   candidateRefusals,
   changelogVersion,
+  describeArtifact,
   describeCandidate,
   identityDrift,
   metadataProblems,
@@ -115,6 +121,74 @@ describe("release candidate identity", () => {
     expect(Object.keys(withSecret.identity.buildEnvironment)).toEqual(["NEXT_PUBLIC_SUPABASE_URL"]);
     expect(JSON.stringify(withSecret)).not.toContain("sb_secret_never_recorded");
     expect(JSON.stringify(withSecret)).not.toContain("127.0.0.1:54321");
+  });
+});
+
+describe("R1: evidence is bound to the build it tested", () => {
+  const artifact = { commit: COMMIT, tree: TREE, clean: true, digest: "a".repeat(64), files: 120, buildEnvironment: { NEXT_PUBLIC_SUPABASE_URL: "x" } };
+  const passing = { gate: "Release Gate", pass: true, head: COMMIT, artifact, refusals: [] };
+
+  it("binds a passing Release Gate and its build into the final manifest", () => {
+    const { refusals, final } = bindEvidence(manifest, { artifact, decision: passing, source: "local" });
+    expect(refusals).toEqual([]);
+    expect(final.artifact).toEqual({ commit: COMMIT, tree: TREE, digest: artifact.digest, files: 120, buildEnvironment: artifact.buildEnvironment });
+    expect(final.evidence).toEqual([expect.objectContaining({ gate: "Release Gate", pass: true, head: COMMIT, artifactDigest: artifact.digest, source: "local" })]);
+    expect(final.approval).toBeNull();
+    // The final manifest accepts the same build and refuses any other.
+    expect(candidateRefusals(final, described, { artifact })).toEqual([]);
+  });
+
+  it("refuses to bind a failed gate, a Development Gate, another commit, or a build from a dirty tree", () => {
+    const bind = (overrides: { artifact?: unknown; decision?: unknown }) =>
+      bindEvidence(manifest, { artifact, decision: passing, source: "ci", ...overrides }).refusals;
+    expect(bind({ decision: { ...passing, pass: false } })).toContain("the Release Gate did not pass");
+    expect(bind({ decision: { ...passing, gate: "Development Gate" } })).toContain("the decision is a Development Gate, not a Release Gate");
+    expect(bind({ decision: { ...passing, head: "d".repeat(40) } })).toContain(`the Release Gate tested ${"d".repeat(40)}, not ${COMMIT}`);
+    expect(bind({ artifact: { ...artifact, clean: false } })).toContain("the recorded build was made from a working tree with changes");
+    expect(bind({ artifact: null })).toContain("no tested build was recorded");
+    expect(bind({ decision: { ...passing, artifact: { ...artifact, digest: "b".repeat(64) } } })).toContain(
+      "the gate saw a different build from the one recorded here",
+    );
+  });
+
+  it("refuses a different build than the one the final manifest names (the review's altered-artifact probe)", () => {
+    const { final } = bindEvidence(manifest, { artifact, decision: passing, source: "local" });
+    const altered = { ...artifact, digest: "c".repeat(64) };
+    expect(candidateRefusals(final, described, { artifact: altered })).toEqual([
+      `drift: artifact.digest: recorded "${"a".repeat(64)}", found "${"c".repeat(64)}"`,
+    ]);
+    expect(candidateRefusals(final, described, { artifact: null })[0]).toMatch(/has no build/);
+    const otherEnv = { ...artifact, buildEnvironment: { NEXT_PUBLIC_SUPABASE_URL: "y" } };
+    expect(candidateRefusals(final, described, { artifact: otherEnv })).toHaveLength(1);
+  });
+
+  it("withdraws an approval when the build drifts, and refuses an approval with no passing evidence", () => {
+    const { final } = bindEvidence(manifest, { artifact, decision: passing, source: "local" });
+    const approved = { ...final, approval: { approver: "Owner", operations: ["promote"] } };
+    expect(candidateRefusals(approved, described, { artifact })).toEqual([]);
+    expect(candidateRefusals(approved, described, { artifact: { ...artifact, digest: "c".repeat(64) } })).toContain(
+      "the recorded approval no longer applies: the identity it approved has changed",
+    );
+    const noEvidence = { ...manifest, approval: { approver: "Owner" } };
+    expect(candidateRefusals(noEvidence, described)).toContain("the recorded approval has no passing Release Gate evidence for this commit and build");
+    const failedEvidence = { ...approved, evidence: [{ ...approved.evidence[0], pass: false }] };
+    expect(candidateRefusals(failedEvidence, described, { artifact })).toContain(
+      "the recorded approval has no passing Release Gate evidence for this commit and build",
+    );
+  });
+
+  it("describes a build by commit, cleanliness, digest and public build values only", () => {
+    const root = mkdtempSync(join(tmpdir(), "oms-artifact-"));
+    expect(describeArtifact(root, fakeGit(), {})).toBeNull();
+    for (const dir of [".next/server", ".next/static"]) mkdirSync(join(root, dir), { recursive: true });
+    writeFileSync(join(root, ".next/server/page.js"), "one");
+    writeFileSync(join(root, ".next/static/chunk.js"), "two");
+    const first = describeArtifact(root, fakeGit(), { NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SECRET_KEY: "never" });
+    expect(first).toMatchObject({ commit: COMMIT, tree: TREE, clean: true, files: 2 });
+    expect(Object.keys(first.buildEnvironment)).toEqual(["NEXT_PUBLIC_SUPABASE_URL"]);
+    writeFileSync(join(root, ".next/static/chunk.js"), "changed");
+    expect(describeArtifact(root, fakeGit(), {}).digest).not.toBe(first.digest);
+    expect(describeArtifact(root, fakeGit(" M lib/money.ts"), {}).clean).toBe(false);
   });
 });
 

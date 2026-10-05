@@ -184,6 +184,54 @@ describe("CI routing", () => {
     }
   });
 
+  it("R2: turns the benchmarks on for a release candidate and off otherwise", () => {
+    expect(render(ci.env.FV_BENCHMARK, called("1"))).toBe("1");
+    expect(render(ci.env.FV_BENCHMARK, pr(7, "1"))).toBe("");
+    expect(render(ci.env.FV_BENCHMARK, push("1"))).toBe("");
+  });
+
+  it("R3: every test job lists its tests, without the results reporter, before it runs them", () => {
+    const listing = (job: string, command: string) => {
+      const steps = ci.jobs[job].steps;
+      const index = steps.findIndex((step: { run?: string }) => step.run?.includes(command));
+      expect(index, `${job} lists with ${command}`).toBeGreaterThan(-1);
+      expect(steps[index].env.OMS_TEST_RESULTS_DIR).toBe("");
+      return index;
+    };
+    const runIndex = (job: string, command: string) => ci.jobs[job].steps.findIndex((step: { run?: string }) => step.run === command);
+    expect(listing("static", "vitest list --project unit --json=oms-test/results/unit.vitest-list.json")).toBeLessThan(runIndex("static", "npm run test:unit"));
+    expect(listing("integration", "vitest list --project integration --json=oms-test/results/integration.vitest-list.json")).toBeLessThan(
+      runIndex("integration", "npm run test:integration"),
+    );
+    expect(listing("e2e", "playwright test --list --reporter=json > oms-test/results/e2e.playwright-list.json")).toBeLessThan(runIndex("e2e", "npm run test:e2e"));
+  });
+
+  it("R4: plans the base's minimum from the base's own tree, on every event with a base selector", () => {
+    const step = ci.jobs.plan.steps.find((entry: { name?: string }) => entry.name === "Plan with the approved base's rules");
+    expect(step.if).toBeUndefined();
+    expect(step.run).toContain('--inventory-rev "$BASE"');
+    expect(step.run).toContain("--mode full");
+    expect(step.run).toContain("--manifest .base-policy/scripts/testing/manifest.json");
+  });
+
+  it("R1: records the tested build after the E2E build, and binds it with the Release Gate decision", () => {
+    const e2e = ci.jobs.e2e.steps;
+    const build = e2e.findIndex((step: { run?: string }) => step.run === "npm run build");
+    const record = e2e.findIndex((step: { run?: string }) => step.run?.includes("--describe-artifact --output oms-test/results/artifact.json"));
+    expect(record).toBe(build + 1);
+    // Unconditional: a Release Gate without the record refuses, and so must this check.
+    expect(e2e[record].if).toBeUndefined();
+
+    const bind = release.jobs.bind;
+    expect(bind.needs).toEqual(["identity", "suites"]);
+    expect(bind.if).toBe("always()");
+    expect(bind.steps[0].run).toContain('[ "$SUITES" = success ]');
+    const binding = bind.steps.find((step: { name?: string }) => step.name === "Bind the evidence");
+    expect(binding.run).toContain("--bind");
+    expect(binding.run).toContain("--gate-report oms-test/gate-report.json");
+    expect(binding.run).toContain("--artifact oms-test/e2e/artifact.json");
+  });
+
   it("the plan job keeps full history and checks it tests the pull request's real merge", () => {
     const checkout = ci.jobs.plan.steps.find((step: { uses?: string }) => step.uses === "actions/checkout@v4");
     expect(checkout.with["fetch-depth"]).toBe(0);

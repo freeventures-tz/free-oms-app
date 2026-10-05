@@ -9,8 +9,8 @@
  *      latest database itself;
  *   3. a fresh reset, then pgTAP, which needs an untouched database for its plan counts;
  *   4. database lint and advisors;
- *   5. integration, behind its own reset (one bootstrap per database);
- *   6. build, then E2E behind its own reset.
+ *   5. the integration listing, then a reset, then integration (one bootstrap per database);
+ *   6. build, a record of that build, the E2E listing, then E2E behind its own reset.
  *
  * Every step that resets, writes or reads a database names its `targets`, and the runner checks the
  * targets (target-guard.mjs) immediately before each one. A suite with nothing selected is skipped
@@ -36,10 +36,15 @@ function npm(args) {
 /**
  * The steps for a tier.
  *
- *   local        what the plan's SELECTION needs: lint, types, the selected unit files, and real
- *                database, HTTP and E2E proof only where the selection reaches them
+ *   local        what the plan's SELECTION needs: lint, types, the selected unit files, the full
+ *                pgTAP suite (which holds the mandatory database smoke), database lint and advisors
+ *                every time, the migration chain when the plan selects it, and HTTP and E2E proof
+ *                where the selection reaches them
  *   development  what the plan's EXECUTION requires, in the CI job order (full while in shadow)
- *   release      everything, always, whatever the plan says
+ *   release      everything, always, whatever the plan says, with the opt-in benchmarks on
+ *
+ * Each runner lists its tests before it runs them, so the gate can require every listed test to
+ * have run. `{results}` in an argument is the results directory, filled in by runSteps.
  */
 /** @param {any} plan @param {string} tier @param {{ benchmarks?: boolean }} [options] @returns {{ steps: any[], skipped: Array<{ suite: string, reason: string }> }} */
 export function buildSteps(plan, tier, { benchmarks = false } = {}) {
@@ -47,60 +52,84 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
   const source = tier === "local" ? plan.selection : plan.execution;
   const full = (suite) => tier === "release" || source[suite]?.mode === "full";
   const files = (suite) => (tier === "release" ? plan.inventory[suite] : source[suite]?.files ?? []);
-  const benchmarkEnv = benchmarks ? { FV_BENCHMARK: "1" } : {};
+  // A release candidate always runs the benchmarks: they are applicable to every candidate, and
+  // the Release Gate refuses a skipped one (known-skips.json).
+  const benchmarkEnv = tier === "release" || benchmarks ? { FV_BENCHMARK: "1" } : {};
+  // Listing must not write the run's results file.
+  const listEnv = { OMS_TEST_RESULTS_DIR: "" };
   const steps = [];
   const skipped = [];
 
   steps.push({ name: "lint", job: "static", ...npm(["run", "lint"]) });
   steps.push({ name: "typecheck", job: "static", ...npm(["run", "typecheck"]) });
 
-  if (tier !== "local" || full("unit")) {
-    steps.push({ name: "unit", job: "static", ...npx(["vitest", "run", "--project", "unit"]) });
-  } else if (files("unit").length > 0) {
-    steps.push({ name: "unit (selected)", job: "static", ...npx(["vitest", "run", "--project", "unit", ...files("unit")]) });
+  const unit = full("unit") || tier !== "local" ? [] : files("unit");
+  if (full("unit") || tier !== "local" || unit.length > 0) {
+    steps.push({ name: "list unit", job: "static", env: listEnv, ...npx(["vitest", "list", "--project", "unit", "--json={results}/unit.vitest-list.json", ...unit]) });
+    steps.push({ name: unit.length > 0 ? "unit (selected)" : "unit", job: "static", ...npx(["vitest", "run", "--project", "unit", ...unit]) });
   } else {
     skipped.push({ suite: "unit", reason: "no unit test selected" });
   }
-
-  const database = tier !== "local" || plan.risk === "high";
   if (tier !== "local") steps.push({ name: "build", job: "static", ...npm(["run", "build"]) });
 
-  if (database) {
+  const chain = tier !== "local" || plan.selection?.migrationChain?.mode === "full";
+  if (chain) {
     steps.push({ name: "migration chain", job: "database", destructive: true, targets: [], log: "migration-chain.log", ...npm(["run", "test:migration-chain"]) });
-    steps.push({ name: "reset before pgTAP", job: "database", destructive: true, targets: [], ...npx(["supabase", "db", "reset"]) });
-    steps.push({ name: "pgTAP", job: "database", destructive: true, targets: [], log: "pgtap.log", ...npx(["supabase", "test", "db"]) });
-    steps.push({ name: "database lint", job: "database", targets: [], ...npx(["supabase", "db", "lint", "--level", "warning"]) });
-    steps.push({ name: "advisors", job: "database", targets: [], ...{ command: process.execPath, args: ["scripts/run-advisors.mjs"] } });
   } else {
-    skipped.push({ suite: "pgtap", reason: "local tier runs the database suites only for high-risk plans" });
-    skipped.push({ suite: "migrationChain", reason: "local tier runs the database suites only for high-risk plans" });
+    skipped.push({ suite: "migrationChain", reason: plan.selection?.migrationChain?.reason ?? "not selected" });
   }
+  steps.push({ name: "reset before pgTAP", job: "database", destructive: true, targets: [], ...npx(["supabase", "db", "reset"]) });
+  steps.push({ name: "pgTAP", job: "database", destructive: true, targets: [], log: "pgtap.log", ...npx(["supabase", "test", "db"]) });
+  steps.push({ name: "database lint", job: "database", targets: [], ...npx(["supabase", "db", "lint", "--level", "warning"]) });
+  steps.push({ name: "advisors", job: "database", targets: [], ...{ command: process.execPath, args: ["scripts/run-advisors.mjs"] } });
 
-  const integration = files("integration");
+  const integration = full("integration") ? [] : files("integration");
   if (full("integration") || integration.length > 0) {
+    // Listing integration runs its global setup, which bootstraps the database's one Director, so
+    // it comes before the reset that the run itself needs.
+    steps.push({
+      name: "list integration",
+      job: "integration",
+      destructive: true,
+      env: listEnv,
+      ...npx(["vitest", "list", "--project", "integration", "--json={results}/integration.vitest-list.json", ...integration]),
+    });
     steps.push({ name: "reset before integration", job: "integration", destructive: true, ...npx(["supabase", "db", "reset"]) });
     steps.push({
-      name: full("integration") ? "integration" : "integration (selected)",
+      name: integration.length > 0 ? "integration (selected)" : "integration",
       job: "integration",
       destructive: true,
       env: { ...benchmarkEnv },
-      ...npx(["vitest", "run", "--project", "integration", ...(full("integration") ? [] : integration)]),
+      ...npx(["vitest", "run", "--project", "integration", ...integration]),
     });
   } else {
     skipped.push({ suite: "integration", reason: "no integration test selected" });
   }
 
-  const e2e = files("e2e");
+  const e2e = full("e2e") ? [] : files("e2e");
   if (full("e2e") || e2e.length > 0) {
-    // The E2E job builds the current source itself, as its CI job does, so it never depends on another job's build.
+    // The E2E job builds the current source itself, as its CI job does, so it never depends on
+    // another job's build, and records that build so a release is bound to what was tested.
     steps.push({ name: "build for E2E", job: "e2e", ...npm(["run", "build"]) });
+    steps.push({
+      name: "record the tested build",
+      job: "e2e",
+      ...{ command: process.execPath, args: ["scripts/testing/release.mjs", "--describe-artifact", "--output", "{results}/artifact.json"] },
+    });
+    steps.push({
+      name: "list e2e",
+      job: "e2e",
+      env: { ...listEnv, ...benchmarkEnv },
+      stdoutTo: "e2e.playwright-list.json",
+      ...npx(["playwright", "test", "--list", "--reporter=json", ...e2e]),
+    });
     steps.push({ name: "reset before E2E", job: "e2e", destructive: true, ...npx(["supabase", "db", "reset"]) });
     steps.push({
-      name: full("e2e") ? "e2e" : "e2e (selected)",
+      name: e2e.length > 0 ? "e2e (selected)" : "e2e",
       job: "e2e",
       destructive: true,
       env: { ...benchmarkEnv },
-      ...npx(["playwright", "test", ...(full("e2e") ? [] : e2e)]),
+      ...npx(["playwright", "test", ...e2e]),
     });
   } else {
     skipped.push({ suite: "e2e", reason: "no E2E spec selected" });
@@ -142,14 +171,17 @@ export function runSteps(steps, { root, resultsDir, keepGoing = false, guard = a
         return { ok: false, outcomes };
       }
     }
-    print(`\n▶ ${step.name}: ${[step.command, ...step.args].join(" ")}`);
+    const args = step.args.map((arg) => arg.replaceAll("{results}", resultsDir));
+    print(`\n▶ ${step.name}: ${[step.command, ...args].join(" ")}`);
     const started = now();
     const shell = IS_WINDOWS && step.command !== process.execPath;
-    const result = spawn(shell ? step.command : step.command, shell ? step.args.map(quote) : step.args, {
+    const captured = Boolean(step.log || step.stdoutTo);
+    const result = spawn(step.command, shell ? args.map(quote) : args, {
       cwd: root,
       shell,
-      env: { ...testEnvironment(root), ...step.env, OMS_TEST_RESULTS_DIR: resultsDir },
-      stdio: step.log ? ["ignore", "pipe", "pipe"] : "inherit",
+      // The step's own variables win, so a listing step can switch off the results reporter.
+      env: { ...testEnvironment(root), OMS_TEST_RESULTS_DIR: resultsDir, ...step.env },
+      stdio: captured ? ["ignore", "pipe", "pipe"] : "inherit",
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
     });
@@ -158,6 +190,10 @@ export function runSteps(steps, { root, resultsDir, keepGoing = false, guard = a
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
       writeFileSync(join(resultsDir, step.log), output);
       print(output);
+    }
+    if (step.stdoutTo) {
+      writeFileSync(join(resultsDir, step.stdoutTo), result.stdout ?? "");
+      if (result.stderr) print(result.stderr);
     }
     const ok = !result.error && result.status === 0;
     outcomes.push({ name: step.name, job: step.job, ok, durationMs, status: result.status ?? null });

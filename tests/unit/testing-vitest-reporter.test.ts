@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { normaliseVitest } from "@/scripts/testing/reports.mjs";
+import { listedIds, normaliseVitest } from "@/scripts/testing/reports.mjs";
 import ResultsReporter from "@/scripts/testing/vitest-results-reporter.mjs";
 
 /**
@@ -43,6 +43,20 @@ describe("results reporter", () => {
       ["unit:tests/unit/b.test.ts:report > pages", "failed"],
       ["unit:tests/unit/c.test.ts:(file failed to run)", "failed"],
     ]);
+  });
+
+  it("R3: names each test the same way in the runner's listing and in the run's results", () => {
+    // `vitest list --json` output for the same module the reporter wrote above.
+    const listing = [
+      { name: "money > adds", file: "/repo/tests/unit/a.test.ts", projectName: "unit" },
+      { name: "later", file: "/repo/tests/unit/a.test.ts", projectName: "unit" },
+    ];
+    const outputFile = join(mkdtempSync(join(tmpdir(), "oms-reporter-")), "unit.vitest.json");
+    new ResultsReporter({ outputFile }).onTestRunEnd([
+      testModule("/repo/tests/unit/a.test.ts", "passed", [testCase("adds", "passed", "money"), testCase("later", "skipped")]),
+    ]);
+    const ran = normaliseVitest("unit", JSON.parse(readFileSync(outputFile, "utf8")), "/repo").tests.map((test: { id: string }) => test.id);
+    expect([...listedIds("unit", listing, "/repo")].sort()).toEqual([...ran].sort());
   });
 
   it("counts an unhandled error as a failed run even when every test passed", () => {
