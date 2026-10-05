@@ -1,5 +1,5 @@
 {
-  "about": "Every skip a gate accepts. A skipped test that matches no entry refuses the gate, so a required case cannot be waived by relabelling it skipped. An entry with `gates` applies only to the gates it names: the opt-in benchmarks may be skipped for a Development Gate, never for a Release Gate, which always runs them. Each entry names why the skip is correct and where the behaviour is otherwise covered; review the list at every release candidate.",
+  "about": "Every skip a gate accepts. A skipped test that matches no entry refuses the gate, so a required case cannot be waived by relabelling it skipped. An entry with `gates` applies only to the gates it names: the opt-in benchmarks may be skipped for a Development Gate. A Release Gate runs each benchmark file alone in its own pass (benchmarks.mjs) and accepts the main run's skip only for a test that passed there. Each entry names why the skip is correct and where the behaviour is otherwise covered; review the list at every release candidate.",
   "reviewedAt": "2026-10-05",
   "skips": [
     {

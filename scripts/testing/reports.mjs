@@ -11,6 +11,8 @@
  *   unit.vitest-list.json, integration.vitest-list.json, e2e.playwright-list.json
  *                                                  the tests each runner listed before running
  *   artifact.json                                  the build the E2E job tested (release.mjs)
+ *   e2e-benchmark-<name>.playwright.json, integration-benchmark.vitest.json
+ *                                                  an isolated benchmark pass (benchmarks.mjs)
  *
  * Every test becomes { id, suite, file, project, title, status, retries, durationMs } with status
  * one of passed, failed, skipped or flaky (passed only on a retry). A file that cannot be parsed is
@@ -199,6 +201,18 @@ export function readResults(dir, root) {
       const suite = listing[1] ?? listing[2];
       try {
         listings[suite] = listedIds(suite, JSON.parse(readFileSync(join(dir, name), "utf8")), root);
+      } catch (error) {
+        problems.push(`${name} cannot be parsed: ${error.message}`);
+      }
+      continue;
+    }
+    // Benchmark passes (benchmarks.mjs): their tests keep the main suite's IDs, marked as benchmarks.
+    const benchmark = name.match(/^e2e-benchmark-[\w.-]+\.playwright\.json$|^integration-benchmark\.vitest\.json$/);
+    if (benchmark) {
+      try {
+        const json = JSON.parse(readFileSync(join(dir, name), "utf8"));
+        const report = name.startsWith("e2e") ? normalisePlaywright(json) : normaliseVitest("integration", json, root);
+        reports.push({ ...report, benchmark: true, source: name });
       } catch (error) {
         problems.push(`${name} cannot be parsed: ${error.message}`);
       }

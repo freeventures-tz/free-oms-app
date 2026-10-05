@@ -41,7 +41,7 @@ function npm(args) {
  *                every time, the migration chain when the plan selects it, and HTTP and E2E proof
  *                where the selection reaches them
  *   development  what the plan's EXECUTION requires, in the CI job order (full while in shadow)
- *   release      everything, always, whatever the plan says, with the opt-in benchmarks on
+ *   release      everything, always, whatever the plan says, then every opt-in benchmark
  *
  * Each runner lists its tests before it runs them, so the gate can require every listed test to
  * have run. `{results}` in an argument is the results directory, filled in by runSteps.
@@ -52,9 +52,11 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
   const source = tier === "local" ? plan.selection : plan.execution;
   const full = (suite) => tier === "release" || source[suite]?.mode === "full";
   const files = (suite) => (tier === "release" ? plan.inventory[suite] : source[suite]?.files ?? []);
-  // A release candidate always runs the benchmarks: they are applicable to every candidate, and
-  // the Release Gate refuses a skipped one (known-skips.json).
-  const benchmarkEnv = tier === "release" || benchmarks ? { FV_BENCHMARK: "1" } : {};
+  // A release candidate always runs the benchmarks, and the Release Gate accepts a benchmark skipped
+  // in the main run only when it passed in its own pass. The main suites never switch them on: they
+  // leave their samples in the database the later specs read. Each benchmark file runs alone after
+  // its own reset instead (benchmarks.mjs), as the specs document.
+  const benchmarkPasses = tier === "release" || benchmarks;
   // Listing must not write the run's results file.
   const listEnv = { OMS_TEST_RESULTS_DIR: "" };
   const steps = [];
@@ -99,9 +101,16 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
       name: integration.length > 0 ? "integration (selected)" : "integration",
       job: "integration",
       destructive: true,
-      env: { ...benchmarkEnv },
       ...npx(["vitest", "run", "--project", "integration", ...integration]),
     });
+    if (benchmarkPasses) {
+      steps.push({
+        name: "integration benchmarks",
+        job: "integration",
+        destructive: true,
+        ...{ command: process.execPath, args: ["scripts/testing/benchmarks.mjs", "--suite", "integration", "--results", "{results}"] },
+      });
+    }
   } else {
     skipped.push({ suite: "integration", reason: "no integration test selected" });
   }
@@ -119,7 +128,7 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
     steps.push({
       name: "list e2e",
       job: "e2e",
-      env: { ...listEnv, ...benchmarkEnv },
+      env: listEnv,
       stdoutTo: "e2e.playwright-list.json",
       ...npx(["playwright", "test", "--list", "--reporter=json", ...e2e]),
     });
@@ -128,9 +137,16 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
       name: e2e.length > 0 ? "e2e (selected)" : "e2e",
       job: "e2e",
       destructive: true,
-      env: { ...benchmarkEnv },
       ...npx(["playwright", "test", ...e2e]),
     });
+    if (benchmarkPasses) {
+      steps.push({
+        name: "e2e benchmarks",
+        job: "e2e",
+        destructive: true,
+        ...{ command: process.execPath, args: ["scripts/testing/benchmarks.mjs", "--suite", "e2e", "--results", "{results}"] },
+      });
+    }
   } else {
     skipped.push({ suite: "e2e", reason: "no E2E spec selected" });
   }

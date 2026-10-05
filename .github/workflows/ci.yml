@@ -50,9 +50,6 @@ defaults:
 
 env:
   OMS_TEST_RESULTS_DIR: ${{ github.workspace }}/oms-test/results
-  # The opt-in benchmarks run on every release candidate, and the Release Gate refuses a skipped one
-  # (scripts/testing/known-skips.json). Pull requests and pushes leave them off.
-  FV_BENCHMARK: ${{ inputs.gate == 'release' && '1' || '' }}
 
 # The order below is deliberate: the cheapest checks that can fail run first, and every test that
 # touches a database runs against a stack started FROM THIS REPOSITORY'S config.toml. Auth settings
@@ -266,6 +263,12 @@ jobs:
           mkdir -p oms-test/results
           npx vitest list --project integration --json=oms-test/results/integration.vitest-list.json
       - run: npm run test:integration
+      - name: Integration benchmarks (release candidates)
+        # Each benchmark file alone, after its own reset, with FV_BENCHMARK=1. Never inside the main
+        # run: the samples stay in the database the other files read. The Release Gate accepts the
+        # main run's benchmark skips only for tests that passed here.
+        if: inputs.gate == 'release'
+        run: node scripts/testing/benchmarks.mjs --suite integration --results oms-test/results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -310,6 +313,11 @@ jobs:
           OMS_TEST_RESULTS_DIR: ""
         run: npx playwright test --list --reporter=json > oms-test/results/e2e.playwright-list.json
       - run: npm run test:e2e
+      - name: E2E benchmarks (release candidates)
+        # The documented method: each benchmark spec alone, after its own reset, on the mobile
+        # project, filtered to its benchmark block, with FV_BENCHMARK=1.
+        if: inputs.gate == 'release'
+        run: node scripts/testing/benchmarks.mjs --suite e2e --results oms-test/results
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

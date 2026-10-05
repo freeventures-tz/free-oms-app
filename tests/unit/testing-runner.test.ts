@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { benchmarkSteps } from "@/scripts/testing/benchmarks.mjs";
 import { planRefusals } from "@/scripts/testing/plan.mjs";
 import { buildSteps, jobsFromOutcomes, runSteps } from "@/scripts/testing/run.mjs";
 import { selectTests } from "@/scripts/testing/select.mjs";
@@ -124,15 +125,47 @@ describe("plan runner", () => {
     expect(release.steps.find((step: { name: string }) => step.name === "e2e").args).toEqual(["playwright", "test"]);
   });
 
-  it("R2: always runs the benchmarks on the release tier, and only on request elsewhere", () => {
+  it("R2: runs the benchmarks after the main suites on the release tier, never inside them", () => {
     const release = buildSteps(plan("README.md"), "release").steps;
-    for (const name of ["integration", "e2e"]) {
-      expect(release.find((step: { name: string }) => step.name === name).env).toEqual({ FV_BENCHMARK: "1" });
-    }
-    const development = buildSteps(plan("lib/money.ts"), "development").steps;
-    expect(development.find((step: { name: string }) => step.name === "e2e").env).toEqual({});
-    const asked = buildSteps(plan("lib/money.ts"), "development", { benchmarks: true }).steps;
-    expect(asked.find((step: { name: string }) => step.name === "e2e").env).toEqual({ FV_BENCHMARK: "1" });
+    const order = names(release);
+    for (const step of release) expect(step.env?.FV_BENCHMARK, step.name).toBeUndefined();
+    expect(order.indexOf("integration benchmarks")).toBe(order.indexOf("integration") + 1);
+    expect(order.indexOf("e2e benchmarks")).toBe(order.indexOf("e2e") + 1);
+    expect(release.find((step: { name: string }) => step.name === "e2e benchmarks").args).toEqual([
+      "scripts/testing/benchmarks.mjs", "--suite", "e2e", "--results", "{results}",
+    ]);
+
+    // Elsewhere only on request.
+    expect(names(buildSteps(plan("lib/money.ts"), "development").steps)).not.toContain("e2e benchmarks");
+    expect(names(buildSteps(plan("lib/money.ts"), "development", { benchmarks: true }).steps)).toContain("e2e benchmarks");
+  });
+
+  it("R2: runs each benchmark file alone, after its own reset, the way the specs document", () => {
+    const benchmarks = {
+      e2e: [
+        { file: "e2e/imprest-funding.spec.ts", grep: "mobile benchmark" },
+        { file: "e2e/stock-mobile-benchmark.spec.ts", grep: "phone over 4G" },
+      ],
+      integration: [{ file: "tests/integration/stock-benchmark.test.ts" }],
+    };
+    const e2e = benchmarkSteps({ benchmarks }, "e2e");
+    expect(e2e.map((step: { name: string }) => step.name)).toEqual([
+      "reset before benchmark imprest-funding",
+      "benchmark imprest-funding",
+      "reset before benchmark stock-mobile-benchmark",
+      "benchmark stock-mobile-benchmark",
+    ]);
+    expect(e2e[1].args).toEqual(["playwright", "test", "--project=mobile", "e2e/imprest-funding.spec.ts", "-g", "mobile benchmark"]);
+    expect(e2e[1].env).toEqual({ FV_BENCHMARK: "1", OMS_E2E_RESULTS_NAME: "e2e-benchmark-imprest-funding.playwright.json" });
+    // Each pass is its own job, so one slow benchmark does not stop the others under keep-going.
+    expect(new Set(e2e.map((step: { job: string }) => step.job)).size).toBe(2);
+    for (const step of e2e) expect(step.destructive).toBe(true);
+
+    const integration = benchmarkSteps({ benchmarks }, "integration");
+    expect(integration[1].args).toEqual(["vitest", "run", "--project", "integration", "tests/integration/stock-benchmark.test.ts"]);
+    expect(integration[1].env).toEqual({ FV_BENCHMARK: "1", OMS_TEST_SUITE: "integration-benchmark" });
+
+    expect(() => benchmarkSteps({}, "e2e")).toThrow(/lists no e2e benchmarks/);
   });
 
   it("checks the targets before every destructive step, and stops before the step when refused", () => {

@@ -184,10 +184,26 @@ describe("CI routing", () => {
     }
   });
 
-  it("R2: turns the benchmarks on for a release candidate and off otherwise", () => {
-    expect(render(ci.env.FV_BENCHMARK, called("1"))).toBe("1");
-    expect(render(ci.env.FV_BENCHMARK, pr(7, "1"))).toBe("");
-    expect(render(ci.env.FV_BENCHMARK, push("1"))).toBe("");
+  it("R2: never turns the benchmarks on inside the main suites, and runs each one alone for a release candidate", () => {
+    // Benchmarks inside the main run left their samples in the shared database and broke 16 later
+    // specs in a local release run; they belong in isolated passes after the main run.
+    expect(rawCi).not.toMatch(/FV_BENCHMARK\s*:/);
+    expect(ci.env.FV_BENCHMARK).toBeUndefined();
+    for (const job of Object.values(ci.jobs as Record<string, { env?: object; steps: Array<{ env?: object }> }>)) {
+      expect(job.env ?? {}).not.toHaveProperty("FV_BENCHMARK");
+      for (const step of job.steps) expect(step.env ?? {}).not.toHaveProperty("FV_BENCHMARK");
+    }
+    for (const [job, main, suite] of [
+      ["integration", "npm run test:integration", "integration"],
+      ["e2e", "npm run test:e2e", "e2e"],
+    ] as const) {
+      const steps = ci.jobs[job].steps;
+      const mainIndex = steps.findIndex((step: { run?: string }) => step.run === main);
+      const bench = steps.findIndex((step: { run?: string }) => step.run === `node scripts/testing/benchmarks.mjs --suite ${suite} --results oms-test/results`);
+      expect(bench, job).toBeGreaterThan(mainIndex);
+      expect(steps[bench].if).toBe("inputs.gate == 'release'");
+      expect(steps.findIndex((step: { with?: { name?: string } }) => step.with?.name === `results-${job}`)).toBeGreaterThan(bench);
+    }
   });
 
   it("R3: every test job lists its tests, without the results reporter, before it runs them", () => {

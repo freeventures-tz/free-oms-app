@@ -22,7 +22,23 @@
   "benchmarks": {
     "flag": "FV_BENCHMARK=1",
     "developmentGate": "opt-in; the reviewed skips in known-skips.json apply",
-    "releaseGate": "always applicable and always enabled; a skipped benchmark refuses the gate"
+    "releaseGate": "always applicable: each file below runs alone after its own reset (scripts/testing/benchmarks.mjs), never inside the main suite, and a benchmark skipped in the main run is accepted only when it passed there",
+    "e2e": [
+      { "file": "e2e/imprest-daily-count.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-disbursements.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-funding.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-not-counted.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-raised-approval.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-retirement.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-reversal.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-send-back.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-settlement.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-stock-receipt-link.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/imprest-verification.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/report-imprest.spec.ts", "grep": "mobile benchmark" },
+      { "file": "e2e/stock-mobile-benchmark.spec.ts", "grep": "phone over 4G" }
+    ],
+    "integration": [{ "file": "tests/integration/stock-benchmark.test.ts" }]
   },
   "forceFull": [
     { "pattern": "supabase/**", "reason": "migrations, database tests, release checks and stack configuration" },

@@ -417,6 +417,43 @@ describe("the aggregate gate", () => {
       expect(release.refusals).toContain("e2e: unexplained skip e2e:e2e/shell.spec.ts:mobile:shell mobile benchmark > times it");
     });
 
+    it("R2: a Release Gate accepts the main run's benchmark skip only when the test passed in its own pass", () => {
+      const id = "shell mobile benchmark > times it";
+      const mainRun = normalisePlaywright(playwrightJson([...allE2e, ["shell.spec.ts", "mobile", id, "skipped"]]));
+      const knownSkips = [{ suite: "e2e", file: "e2e/shell.spec.ts", title: "/mobile benchmark > /", projects: "*", gates: ["Development Gate"], reason: "opt-in" }];
+      const release = (benchmark: unknown[]) =>
+        decide({
+          reports: [...replace("e2e", mainRun), ...benchmark],
+          knownSkips,
+          gate: "Release Gate",
+          plan: makePlan({ mode: "full" }),
+          artifact: ARTIFACT,
+        });
+      const pass = (status: string, unexpected = 0) => ({
+        ...normalisePlaywright(playwrightJson([["shell.spec.ts", "mobile", id, status]], unexpected)),
+        benchmark: true,
+        source: "e2e-benchmark-shell.playwright.json",
+      });
+
+      // Passed alone: the skip stands, and the pass is not counted as a second main E2E report.
+      const proven = release([pass("expected")]);
+      expect(proven.refusals).toEqual([]);
+      expect(proven.summary.benchmarks).toMatchObject({ passed: 1, failed: 0, passes: ["e2e-benchmark-shell.playwright.json"] });
+
+      // Failed alone, or never run: refused.
+      expect(release([pass("unexpected", 1)]).refusals).toContain(`benchmarks: 1 failed: e2e:e2e/shell.spec.ts:mobile:${id}`);
+      expect(release([]).refusals).toContain(`e2e: unexplained skip e2e:e2e/shell.spec.ts:mobile:${id}`);
+      // Skipped inside its own pass (a grep that matched nothing) proves nothing either.
+      expect(release([pass("skipped")]).refusals).toContain(`e2e: unexplained skip e2e:e2e/shell.spec.ts:mobile:${id}`);
+    });
+
+    it("R2: a benchmark pass that failed outside any test refuses the gate", () => {
+      const broken = { ...normalisePlaywright(playwrightJson([], 1)), benchmark: true, source: "e2e-benchmark-x.playwright.json" };
+      expect(decide({ reports: [...goodReports(), broken] }).refusals).toContain(
+        "benchmarks: e2e-benchmark-x.playwright.json reported failure outside any single test",
+      );
+    });
+
     it("R1: refuses a Release Gate with no recorded build, another commit's build, or a build from a dirty tree", () => {
       const full = makePlan({ mode: "full" });
       expect(decide({ gate: "Release Gate", plan: full }).refusals).toContain("no build artifact was recorded by the E2E job");

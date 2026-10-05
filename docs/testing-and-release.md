@@ -167,10 +167,18 @@ A candidate is an identity. `npm run test:release -- --prepare` records:
 - digests of the public `NEXT_PUBLIC_*` build values, never their text, and no secret at all.
 
 `--manifest` refuses a dirty tree or any difference from the recorded identity. It then runs every
-broad suite with the opt-in benchmarks on (`FV_BENCHMARK=1`) and the Release Gate decision, and
-checks the identity again at the end. The benchmarks count as applicable to every candidate: the
-Release Gate refuses a skipped benchmark, while a Development Gate accepts the reviewed opt-in
-skips.
+broad suite, then every opt-in benchmark, and the Release Gate decision, and checks the identity
+again at the end.
+
+The benchmarks count as applicable to every candidate. They never run inside the main suites:
+each one takes many samples and leaves the records behind, and the suites share one database. A
+local release run that switched them on in the main E2E suite failed 16 ordinary specs that ran
+after them. Instead, `scripts/testing/benchmarks.mjs` runs each benchmark file listed in the
+manifest's `benchmarks` alone, after its own reset, the way each spec documents
+(`FV_BENCHMARK=1`, mobile project only, filtered to the benchmark block). The Release Gate accepts
+a benchmark skipped in the main run only when the same test passed in its own pass; a failed or
+missing pass refuses it. A Development Gate accepts the reviewed opt-in skips, and `test:plan
+--benchmarks` adds the same passes to a local run.
 
 Evidence is bound to the build it tested. The E2E step records that build: commit, tree, whether
 the tree was clean, a digest of `.next/server` and `.next/static`, and digests of the public build

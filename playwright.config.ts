@@ -7,7 +7,11 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const RESULTS_DIR = process.env.OMS_TEST_RESULTS_DIR;
 const shard = (process.argv.find((arg) => arg.startsWith("--shard="))?.slice(8) ?? "").match(/^(\d+)\/(\d+)$/);
-const RESULTS_FILE = shard ? `e2e.playwright.shard-${shard[1]}-of-${shard[2]}.json` : "e2e.playwright.json";
+// A benchmark pass (scripts/testing/benchmarks.mjs) names its own file, so it never overwrites the
+// main run's report.
+const RESULTS_FILE =
+  process.env.OMS_E2E_RESULTS_NAME ??
+  (shard ? `e2e.playwright.shard-${shard[1]}-of-${shard[2]}.json` : "e2e.playwright.json");
 const BASE_REPORTERS: Array<[string] | [string, Record<string, unknown>]> = process.env.CI
   ? [["github"], ["list"]]
   : [["list"]];

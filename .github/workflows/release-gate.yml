@@ -6,7 +6,7 @@ name: Release Gate
 #
 # It first records the candidate's identity (scripts/testing/release.mjs --prepare), refusing a
 # commit whose version, lockfile and changelog disagree. Then it runs the same suites as every pull
-# request, in full and with the benchmarks on, through ci.yml, whose final job reports as "Release
+# request, in full and followed by each benchmark in its own pass, through ci.yml, whose final job reports as "Release
 # Gate". Last, it binds that decision and the build the E2E job tested into candidate-final.json.
 # Nothing cancels a run of this workflow: it has no concurrency group, and pull-request activity
 # cannot reach it.

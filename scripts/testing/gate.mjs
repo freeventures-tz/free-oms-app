@@ -142,7 +142,24 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
 
   refusals.push(...reportProblems);
 
-  const bySuite = Object.fromEntries(REPORTED_SUITES.map((suite) => [suite, reports.filter((report) => report.suite === suite)]));
+  // Isolated benchmark passes (benchmarks.mjs) are judged on their own: a failure in one refuses
+  // the gate, and a test that passed in one may stand in for its skip in the main run.
+  const benchmarkReports = reports.filter((report) => report.benchmark);
+  const benchmarkTests = benchmarkReports.flatMap((report) => report.tests);
+  const benchmarkPassed = new Set(benchmarkTests.filter((test) => test.status === "passed" || test.status === "flaky").map((test) => test.id));
+  const benchmarkFailed = benchmarkTests.filter((test) => test.status === "failed");
+  if (benchmarkFailed.length > 0) {
+    refusals.push(`benchmarks: ${benchmarkFailed.length} failed: ${benchmarkFailed.slice(0, 5).map((test) => test.id).join("; ")}${benchmarkFailed.length > 5 ? "; …" : ""}`);
+  }
+  for (const report of benchmarkReports) {
+    if (report.runnerSuccess === false && !report.tests.some((test) => test.status === "failed")) {
+      refusals.push(`benchmarks: ${report.source} reported failure outside any single test`);
+    }
+  }
+
+  const bySuite = Object.fromEntries(
+    REPORTED_SUITES.map((suite) => [suite, reports.filter((report) => report.suite === suite && !report.benchmark)]),
+  );
   const summary = {};
   for (const suite of REPORTED_SUITES) {
     const suiteReports = bySuite[suite];
@@ -188,7 +205,10 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
       refusals.push(`${suite}: the runner reported failure (a setup or load error outside any single test)`);
     }
     for (const test of tests.filter((entry) => entry.status === "skipped")) {
-      if (!knownSkips.some((entry) => skipMatches(entry, test, gate))) refusals.push(`${suite}: unexplained skip ${test.id}`);
+      if (knownSkips.some((entry) => skipMatches(entry, test, gate))) continue;
+      // A benchmark is skipped in the main run by design; it counts once it passed in its own pass.
+      if (benchmarkPassed.has(test.id)) continue;
+      refusals.push(`${suite}: unexplained skip ${test.id}`);
     }
     for (const test of tests.filter((entry) => entry.status === "flaky" || (entry.status === "passed" && entry.retries > 0))) {
       warnings.push(`${suite}: ${test.id} passed only on retry ${test.retries}; record why the first attempt failed`);
@@ -258,6 +278,20 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     for (const test of bySuite[suite]?.flatMap((report) => report.tests) ?? []) {
       if ((test.status === "failed" || test.status === "flaky") && !selected.has(test.file)) omissions.push(test.id);
     }
+  }
+
+  if (benchmarkReports.length > 0) {
+    summary.benchmarks = {
+      passed: benchmarkPassed.size,
+      failed: benchmarkFailed.length,
+      skipped: benchmarkTests.filter((test) => test.status === "skipped").length,
+      flaky: benchmarkTests.filter((test) => test.status === "flaky").length,
+      retries: benchmarkTests.reduce((total, test) => total + test.retries, 0),
+      total: benchmarkTests.length,
+      durationMs: benchmarkReports.reduce((total, report) => total + (report.durationMs ?? 0), 0) || null,
+      assertions: null,
+      passes: benchmarkReports.map((report) => report.source),
+    };
   }
 
   return {

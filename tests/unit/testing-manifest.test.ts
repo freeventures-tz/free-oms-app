@@ -55,6 +55,19 @@ describe("the reviewed test manifest", () => {
     expect(manifest.minimums.responsiveProjects).toEqual(["mobile", "tablet", "desktop"]);
   });
 
+  it("lists every benchmark, so a Release Gate cannot skip one nobody runs", () => {
+    // A file that reads FV_BENCHMARK holds an opt-in benchmark; each must have an isolated pass.
+    const readsFlag = files.filter(
+      (file) => (matchesAny(file, manifest.suites.e2e) || matchesAny(file, manifest.suites.integration)) && readFileSync(join(root, file), "utf8").includes("FV_BENCHMARK"),
+    );
+    const listed = [...manifest.benchmarks.e2e, ...manifest.benchmarks.integration].map((entry: { file: string }) => entry.file);
+    expect([...listed].sort()).toEqual(readsFlag.sort());
+    for (const entry of manifest.benchmarks.e2e) {
+      // The grep must match the benchmark block's title in that file.
+      expect(readFileSync(join(root, entry.file), "utf8"), entry.file).toContain(entry.grep);
+    }
+  });
+
   it("keeps selective enforcement off until the Owner activates it", () => {
     expect(manifest.activation.selectiveEnforcement).toBe(false);
   });
