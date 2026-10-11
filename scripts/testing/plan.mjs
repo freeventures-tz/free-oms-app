@@ -17,7 +17,7 @@ import { PLAN_SCHEMA_VERSION, canonicalJson, gitRunner, parseArgs, readJson, sel
 import { evaluateGate, renderSummary } from "./gate.mjs";
 import { readResults } from "./reports.mjs";
 import { buildSteps, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs";
-import { collectIdentity, planDigest } from "./select.mjs";
+import { baselinePlan, collectIdentity, planDigest } from "./select.mjs";
 
 /** Every reason this checkout may not run this plan. Empty means it may. */
 /** @param {any} plan @param {{ head: string, digest: string, worktreeDigest: string | null, dirty?: boolean }} context @returns {string[]} */
@@ -65,6 +65,17 @@ export function runPlanCli(argv, root = process.cwd()) {
   const { steps, skipped } = buildSteps(plan, args.tier, { benchmarks: args.benchmarks === true });
   if (args["dry-run"] === true) return { dryRun: true, steps, skipped };
 
+  // The development tier is gated against the plan's base, planned over the base's own tree. A plan
+  // whose base cannot be planned is refused before anything runs.
+  let basePlan = null;
+  if (args.tier === "development") {
+    try {
+      basePlan = baselinePlan({ root, git, base: plan.identity?.base, head: plan.identity?.head, manifest: readJson(resolve(root, "scripts/testing/manifest.json")) });
+    } catch (error) {
+      throw new Error(`no baseline: ${error.message}`);
+    }
+  }
+
   const resultsDir = resolve(root, typeof args.results === "string" ? args.results : "oms-test/results");
   const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true });
   const timing = timingReport(outcomes, skipped);
@@ -75,6 +86,7 @@ export function runPlanCli(argv, root = process.cwd()) {
     const { reports, listings, artifact, problems } = readResults(resultsDir, root);
     decision = evaluateGate({
       plan,
+      basePlan,
       // The plan was validated above, which is the local planner job.
       jobs: { plan: { result: "success" }, ...jobsFromOutcomes(outcomes, plan.expectedJobs) },
       reports,

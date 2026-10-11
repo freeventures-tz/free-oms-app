@@ -162,6 +162,17 @@ function quote(arg) {
 }
 
 /**
+ * A step's environment. FV_BENCHMARK is dropped from what the shell and the .env files hand down,
+ * so only a benchmark pass (benchmarks.mjs), which sets it on its own step, ever runs the benchmarks.
+ */
+/** @param {Record<string, string | undefined>} inherited @param {string} resultsDir @param {Record<string, string> | undefined} own @returns {Record<string, string | undefined>} */
+export function stepEnvironment(inherited, resultsDir, own) {
+  const env = { ...inherited, OMS_TEST_RESULTS_DIR: resultsDir };
+  delete env.FV_BENCHMARK;
+  return { ...env, ...own };
+}
+
+/**
  * Runs the steps in order. Each step's time is measured, and steps with a `log` keep their output in
  * the results directory for the gate to count.
  *
@@ -196,7 +207,7 @@ export function runSteps(steps, { root, resultsDir, keepGoing = false, guard = a
       cwd: root,
       shell,
       // The step's own variables win, so a listing step can switch off the results reporter.
-      env: { ...testEnvironment(root), OMS_TEST_RESULTS_DIR: resultsDir, ...step.env },
+      env: stepEnvironment(testEnvironment(root), resultsDir, step.env),
       stdio: captured ? ["ignore", "pipe", "pipe"] : "inherit",
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,

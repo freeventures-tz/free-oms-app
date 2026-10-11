@@ -14,9 +14,11 @@
  * missing base, a shallow clone, a path no rule names, a rename or deletion, an unexpected test
  * inventory, a stale or malformed manifest, or any error inside the selector itself.
  */
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -286,9 +288,73 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
     inventory,
     minimums: manifest.minimums ?? {},
     retiredTests: manifest.retiredTests ?? [],
+    benchmarks: benchmarkEntries(manifest),
     expectedJobs: EXPECTED_JOBS,
   };
   return { ...plan, digest: planDigest(plan) };
+}
+
+/** The manifest's benchmark files, so the gate can tell when one ran inside a main suite. */
+/** @param {any} manifest */
+function benchmarkEntries(manifest) {
+  return {
+    e2e: (manifest?.benchmarks?.e2e ?? []).map((entry) => ({ file: entry.file, grep: entry.grep ?? "" })),
+    integration: (manifest?.benchmarks?.integration ?? []).map((entry) => ({ file: entry.file })),
+  };
+}
+
+/**
+ * The approved base's minimum for a change, planned over the base's own tree.
+ *
+ * A base that holds a selector plans itself, with its own selector and manifest. A base that holds
+ * none (the change that introduces this selector merges into one) is planned in full by this
+ * selector over the base's tree: every test the base holds is required, and since the base declared
+ * no numeric floors, the plan carries none. A base that is not a full SHA in this clone's history has
+ * no baseline, so this throws; the gate then refuses rather than measure the head against itself.
+ */
+/** @param {{ root: string, git: (args: string[]) => string, base: string, head: string, manifest: any, run?: typeof spawnSync }} options @returns {any} */
+export function baselinePlan({ root, git, base, head, manifest, run = spawnSync }) {
+  if (!FULL_SHA.test(base ?? "")) throw new Error(`the base ${base || "(none)"} is not a full commit SHA`);
+  try {
+    git(["cat-file", "-e", `${base}^{commit}`]);
+  } catch {
+    throw new Error(`the base ${base} is not in this clone's history`);
+  }
+
+  const policy = git(["ls-tree", "-r", "--name-only", "-z", base, "scripts/testing"]).split("\0").filter(Boolean);
+  if (!policy.includes("scripts/testing/select.mjs")) {
+    const planned = selectTests({
+      manifest,
+      files: revisionFiles(git, base),
+      edges: new Map(),
+      changes: [],
+      mode: "full",
+      identity: { base, head, inventoryRev: base, problems: [] },
+      selector: {},
+    });
+    const plan = { ...planned, minimums: {}, retiredTests: [], baseline: "the base has no selector: every test in its tree is required, and it declared no numeric floors" };
+    delete plan.digest;
+    return { ...plan, digest: planDigest(plan) };
+  }
+
+  // The base's own selector runs from a copy of its scripts/testing, over the base's tree.
+  const dir = mkdtempSync(join(tmpdir(), "oms-base-policy-"));
+  try {
+    for (const path of policy) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), `${git(["show", `${base}:${path}`])}\n`);
+    }
+    const output = join(dir, "base-plan.json");
+    const result = run(
+      process.execPath,
+      [join(dir, "scripts/testing/select.mjs"), "--base", base, "--head", head, "--mode", "full", "--inventory-rev", base, "--manifest", join(dir, "scripts/testing/manifest.json"), "--output", output],
+      { cwd: root, encoding: "utf8", shell: false },
+    );
+    if (result.error || result.status !== 0) throw new Error(`the base's selector failed: ${(result.stderr ?? result.error?.message ?? "").trim()}`);
+    return readJson(output);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Every file in a commit's tree, without needing it checked out. */
@@ -446,6 +512,7 @@ export function fallbackPlan({ manifest, files, reason, identity = {} }) {
     inventory,
     minimums: manifest.minimums ?? {},
     retiredTests: manifest.retiredTests ?? [],
+    benchmarks: benchmarkEntries(manifest),
     expectedJobs: EXPECTED_JOBS,
   };
   return { ...plan, digest: planDigest(plan) };
@@ -454,13 +521,22 @@ export function fallbackPlan({ manifest, files, reason, identity = {} }) {
 /** @param {string[]} argv @returns {any} */
 export function runSelectCli(argv, root = process.cwd()) {
   const args = parseArgs(argv);
-  const known = new Set(["base", "head", "mode", "output", "worktree", "manifest", "inventory-rev"]);
+  const known = new Set(["base", "head", "mode", "output", "worktree", "manifest", "inventory-rev", "baseline"]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
   if (!args.output || args.output === true) throw new Error("--output <plan.json> is required");
 
   const manifestPath = typeof args.manifest === "string" ? args.manifest : resolve(root, "scripts/testing/manifest.json");
   const manifest = readJson(manifestPath);
   const git = gitRunner(root);
+
+  // --baseline writes the approved base's plan (baselinePlan) instead of the head's. It never falls
+  // back: a base it cannot plan is an error, and the gate refuses a run without a baseline.
+  if (args.baseline === true) {
+    const plan = baselinePlan({ root, git, base: String(args.base ?? ""), head: String(args.head ?? ""), manifest });
+    mkdirSync(dirname(resolve(args.output)), { recursive: true });
+    writeFileSync(args.output, `${canonicalJson(plan)}\n`);
+    return plan;
+  }
 
   // --inventory-rev plans over another commit's tree, unchecked out: CI uses it to take the approved
   // base's own test inventory, so tests a pull request deletes still count against it. Only a full
@@ -479,6 +555,8 @@ export function runSelectCli(argv, root = process.cwd()) {
       worktree: args.worktree === true,
       readFile: (path) => readFileSync(resolve(root, path)),
     });
+    // The gate checks that a base plan was made over the base it holds the change to.
+    if (inventoryRev) identity.inventoryRev = inventoryRev;
     const { edges, unresolved } = inventoryRev ? { edges: new Map(), unresolved: [] } : buildGraph(files, readText);
     plan = selectTests({
       manifest,
@@ -496,7 +574,12 @@ export function runSelectCli(argv, root = process.cwd()) {
     });
   } catch (error) {
     if (/selective enforcement is not activated|unknown mode/.test(error.message)) throw error;
-    plan = fallbackPlan({ manifest, files, reason: `selector error: ${error.message}` });
+    plan = fallbackPlan({
+      manifest,
+      files,
+      reason: `selector error: ${error.message}`,
+      identity: inventoryRev ? { base: args.base, head: args.head, inventoryRev } : {},
+    });
   }
 
   mkdirSync(dirname(resolve(args.output)), { recursive: true });

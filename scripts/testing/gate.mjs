@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `npm run test:gate -- --plan <plan.json> --results <dir> [--jobs <needs.json>] [--base-plan <plan.json>]
+ * `npm run test:gate -- --plan <plan.json> --base-plan <plan.json> --results <dir> [--jobs <needs.json>]
  *                       [--head <sha>] [--gate "Development Gate"] [--summary <file>] [--report <file>]`
  *
  * The one decision behind both required checks, Development Gate and Release Gate. It passes only
@@ -15,8 +15,9 @@
  *   - the migration chain still runs every counterexample, and pgTAP every file.
  *
  * Coverage the approved base requires is required here too, whatever the head's own plan says: a
- * pull request cannot shrink its own gate by shipping a smaller plan. While the base has no selector
- * (this transition), that minimum is the full inventory.
+ * pull request cannot shrink its own gate by shipping a smaller plan. The base plan is required
+ * evidence: while the base has no selector (this transition), it is the base's full inventory
+ * (select.mjs --baseline), and a run without one is refused.
  *
  * Retries that rescued a test are not failures, but each one is listed: a green retry is a
  * reliability finding until someone explains the first failure.
@@ -25,7 +26,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PLAN_SCHEMA_VERSION, RESPONSIVE_PROJECTS, canonicalJson, parseArgs, readJson, selectorDigest } from "./common.mjs";
+import { FULL_SHA, PLAN_SCHEMA_VERSION, RESPONSIVE_PROJECTS, canonicalJson, parseArgs, readJson, selectorDigest } from "./common.mjs";
 import { readResults } from "./reports.mjs";
 import { EXPECTED_JOBS, SUITES, planDigest } from "./select.mjs";
 
@@ -51,6 +52,20 @@ export function skipMatches(entry, test, gate = "Development Gate") {
   if (entry.suite !== test.suite || !textMatches(entry.file, test.file)) return false;
   if (entry.projects && entry.projects !== "*" && !entry.projects.includes(test.project)) return false;
   return textMatches(entry.title, test.title);
+}
+
+/** Why a base plan cannot stand as the change's baseline. Empty means it can. */
+/** @param {any} plan @param {any} basePlan @returns {string[]} */
+export function baselineRefusals(plan, basePlan) {
+  const base = plan.identity?.base;
+  if (!basePlan) return ["no baseline: the approved base's plan is missing, so deleted tests and lowered floors cannot be checked"];
+  if (basePlan.digest !== planDigest(basePlan)) return ["baseline digest does not match its contents: the base plan was altered or is malformed"];
+  if (!FULL_SHA.test(base ?? "")) return [`no baseline: the plan names no base commit (${base ?? "none"})`];
+  if (basePlan.identity?.inventoryRev !== base) {
+    return [`baseline was planned over ${basePlan.identity?.inventoryRev ?? "the head's tree"}, not the base ${base}`];
+  }
+  const missing = SUITES.filter((suite) => !Array.isArray(basePlan.execution?.[suite]?.files));
+  return missing.length > 0 ? [`baseline has no file list for ${missing.join(", ")}`] : [];
 }
 
 /**
@@ -90,15 +105,20 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
   }
   if (gate === "Release Gate" && plan.mode !== "full") refusals.push("a Release Gate requires a full plan");
 
-  // The minimum is whatever the base requires, or everything when the base has no selector yet.
-  // The base plan is made from the base's own file tree, so a test the change deletes is still
-  // required here. It stops being required only when the change's manifest retires it by name,
-  // which is itself a manifest change and so forces full coverage and review.
+  // The minimum is whatever the approved base requires, planned over the base's own file tree
+  // (select.mjs baselinePlan), so a test the change deletes is still required here. It stops being
+  // required only when the change's manifest retires it by name, which is itself a manifest change
+  // and so forces full coverage and review. Without usable baseline evidence the gate cannot see what
+  // the change dropped or lowered, so it refuses instead of holding the head to its own rules.
+  const baseRefusals = baselineRefusals(plan, basePlan);
+  refusals.push(...baseRefusals);
+  const baseline = baseRefusals.length === 0 ? basePlan : null;
+  if (baseline?.baseline) warnings.push(`baseline: ${baseline.baseline}`);
   const retired = new Map((plan.retiredTests ?? []).map((entry) => [entry.file, entry]));
   const required = {};
   for (const suite of SUITES) {
     const own = plan.execution[suite]?.files ?? [];
-    const minimum = basePlan ? (basePlan.execution?.[suite]?.files ?? plan.inventory[suite]) : plan.inventory[suite];
+    const minimum = baseline ? baseline.execution[suite].files : plan.inventory[suite];
     const wanted = [...new Set([...own, ...minimum])].sort();
     required[suite] = [];
     for (const file of wanted) {
@@ -119,11 +139,10 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
 
   // Numeric floors are the higher of the head's and the base's, so a change cannot lower them.
   const minimums = { ...(plan.minimums ?? {}) };
-  for (const [key, value] of Object.entries(basePlan?.minimums ?? {})) {
+  for (const [key, value] of Object.entries(baseline?.minimums ?? {})) {
     if (typeof value === "number") minimums[key] = Math.max(value, typeof minimums[key] === "number" ? minimums[key] : 0);
     else if (Array.isArray(value)) minimums[key] = [...new Set([...(minimums[key] ?? []), ...value])];
   }
-  if (!basePlan) warnings.push("no base plan: the full inventory is required and the head's floors apply");
 
   // The planner is a required job like any other: a gate without it has nothing to stand on.
   for (const job of [...new Set(["plan", ...EXPECTED_JOBS, ...(plan.expectedJobs ?? [])])]) {
@@ -156,6 +175,11 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
       refusals.push(`benchmarks: ${report.source} reported failure outside any single test`);
     }
   }
+
+  // A benchmark runs only in its own pass. One that ran inside a main suite means FV_BENCHMARK=1 was
+  // inherited there, and its samples sit in the database the suite's later tests read.
+  const isBenchmark = (test) =>
+    (plan.benchmarks?.[test.suite] ?? []).some((entry) => entry.file === test.file && (!entry.grep || test.title.includes(entry.grep)));
 
   const bySuite = Object.fromEntries(
     REPORTED_SUITES.map((suite) => [suite, reports.filter((report) => report.suite === suite && !report.benchmark)]),
@@ -203,6 +227,12 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     }
     if (suiteReports.some((report) => report.runnerSuccess === false) && counts.failed === 0) {
       refusals.push(`${suite}: the runner reported failure (a setup or load error outside any single test)`);
+    }
+    const inSuite = tests.filter((entry) => entry.status !== "skipped" && isBenchmark(entry));
+    if (inSuite.length > 0) {
+      refusals.push(
+        `${suite}: ${inSuite.length} benchmark test(s) ran inside the main suite, so FV_BENCHMARK was on there: ${inSuite.slice(0, 3).map((test) => test.id).join("; ")}${inSuite.length > 3 ? "; …" : ""}`,
+      );
     }
     for (const test of tests.filter((entry) => entry.status === "skipped")) {
       if (knownSkips.some((entry) => skipMatches(entry, test, gate))) continue;

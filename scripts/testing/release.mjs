@@ -31,7 +31,7 @@ import { canonicalJson, FULL_SHA, gitRunner, listFiles, parseArgs, readJson, rep
 import { evaluateGate, renderSummary } from "./gate.mjs";
 import { readResults } from "./reports.mjs";
 import { buildSteps, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs";
-import { selectTests } from "./select.mjs";
+import { baselinePlan, selectTests } from "./select.mjs";
 import { buildGraph } from "./graph.mjs";
 import { testEnvironment } from "./target-guard.mjs";
 
@@ -391,6 +391,15 @@ export function runReleaseCli(argv, root = process.cwd()) {
     selector: { selectorDigest: selectorDigest(root) },
   });
 
+  // The approved base's minimum, planned over its own tree. A candidate without a production base
+  // has none, and is refused before anything runs rather than gated against its own rules.
+  let basePlan;
+  try {
+    basePlan = baselinePlan({ root, git, base: manifest.production.base, head: manifest.identity.candidate.commit, manifest: readJson(join(root, "scripts/testing/manifest.json")) });
+  } catch (error) {
+    throw new Error(`candidate refused: no baseline: ${error.message}`);
+  }
+
   const resultsDir = resolve(root, option(args, "results") ?? "oms-test/release");
   const { steps } = buildSteps(plan, "release");
   const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true });
@@ -399,6 +408,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
   const { reports, listings, artifact, problems } = readResults(resultsDir, root);
   const decision = evaluateGate({
     plan,
+    basePlan,
     jobs: { plan: { result: "success" }, ...jobsFromOutcomes(outcomes, plan.expectedJobs) },
     reports,
     listings,

@@ -106,21 +106,13 @@ jobs:
       - name: Plan with the approved base's rules
         # The minimum a change must run comes from the base it merges into, never from the change
         # alone: the base's own selector and manifest, over the base's own file tree, so a test the
-        # change deletes is still required and the base's numeric floors still hold. While the base
-        # has no selector, the gate requires the full inventory.
+        # change deletes is still required and the base's numeric floors still hold. A base with no
+        # selector is planned in full over its own tree. A base that cannot be planned fails this
+        # step, and the gate refuses a run without a base plan; neither falls back to the head.
         env:
           BASE: ${{ steps.identity.outputs.base }}
           HEAD_SHA: ${{ steps.identity.outputs.head }}
-        run: |
-          if [[ "$BASE" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$BASE:scripts/testing/select.mjs" 2>/dev/null; then
-            mkdir -p .base-policy
-            git archive "$BASE" scripts/testing | tar -x -C .base-policy
-            node .base-policy/scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode full \
-              --inventory-rev "$BASE" \
-              --manifest .base-policy/scripts/testing/manifest.json --output oms-test/plan/base-plan.json
-          else
-            echo "The approved base has no selector; the gate requires the full inventory."
-          fi
+        run: node scripts/testing/select.mjs --baseline --base "$BASE" --head "$HEAD_SHA" --output oms-test/plan/base-plan.json
       - uses: actions/upload-artifact@v4
         with:
           name: plan

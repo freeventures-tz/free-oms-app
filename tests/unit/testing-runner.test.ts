@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { benchmarkSteps } from "@/scripts/testing/benchmarks.mjs";
 import { planRefusals } from "@/scripts/testing/plan.mjs";
-import { buildSteps, jobsFromOutcomes, runSteps } from "@/scripts/testing/run.mjs";
+import { buildSteps, jobsFromOutcomes, runSteps, stepEnvironment } from "@/scripts/testing/run.mjs";
 import { selectTests } from "@/scripts/testing/select.mjs";
 
 /**
@@ -190,6 +190,36 @@ describe("plan runner", () => {
     // Nothing after the refused check ran, and the refused step itself never started.
     expect(spawned.some((line) => line.includes("integration"))).toBe(false);
     expect(result.outcomes.at(-1)).toMatchObject({ name: "list integration", ok: false });
+  });
+
+  it("R2: an ambient FV_BENCHMARK=1 never reaches a main-suite step; only a benchmark pass sets it", () => {
+    expect(stepEnvironment({ FV_BENCHMARK: "1", PATH: "/bin" }, "/results", undefined)).toEqual({ PATH: "/bin", OMS_TEST_RESULTS_DIR: "/results" });
+    expect(stepEnvironment({ FV_BENCHMARK: "1" }, "/results", { FV_BENCHMARK: "1", OMS_TEST_SUITE: "integration-benchmark" }).FV_BENCHMARK).toBe("1");
+
+    // Through runSteps, with the flag set in the shell that started the run.
+    const seen: Record<string, string | undefined> = {};
+    const previous = process.env.FV_BENCHMARK;
+    process.env.FV_BENCHMARK = "1";
+    try {
+      const release = buildSteps(plan("README.md"), "release").steps.filter((step: { name: string }) => ["integration", "e2e"].includes(step.name));
+      const [benchmark] = benchmarkSteps({ benchmarks: { integration: [{ file: "tests/integration/stock-benchmark.test.ts" }] } }, "integration").slice(1);
+      runSteps([...release, benchmark], {
+        root: mkdtempSync(join(tmpdir(), "oms-ambient-")),
+        resultsDir: mkdtempSync(join(tmpdir(), "oms-ambient-results-")),
+        guard: () => {},
+        spawn: (_command: string, args: string[], options: { env: Record<string, string> }) => {
+          seen[args.join(" ")] = options.env.FV_BENCHMARK;
+          return { status: 0, stdout: "", stderr: "" };
+        },
+        print: () => {},
+      });
+    } finally {
+      if (previous === undefined) delete process.env.FV_BENCHMARK;
+      else process.env.FV_BENCHMARK = previous;
+    }
+    expect(seen["vitest run --project integration"]).toBeUndefined();
+    expect(seen["playwright test"]).toBeUndefined();
+    expect(seen["vitest run --project integration tests/integration/stock-benchmark.test.ts"]).toBe("1");
   });
 
   it("fills in the results directory and keeps a listing's stdout apart from its stderr", () => {

@@ -225,9 +225,11 @@ describe("CI routing", () => {
   it("R4: plans the base's minimum from the base's own tree, on every event with a base selector", () => {
     const step = ci.jobs.plan.steps.find((entry: { name?: string }) => entry.name === "Plan with the approved base's rules");
     expect(step.if).toBeUndefined();
-    expect(step.run).toContain('--inventory-rev "$BASE"');
-    expect(step.run).toContain("--mode full");
-    expect(step.run).toContain("--manifest .base-policy/scripts/testing/manifest.json");
+    // One command, which plans the base with its own selector or, without one, in full over its own
+    // tree (select.mjs baselinePlan), and fails rather than fall back to the head.
+    expect(step.run).toBe('node scripts/testing/select.mjs --baseline --base "$BASE" --head "$HEAD_SHA" --output oms-test/plan/base-plan.json');
+    expect(step["continue-on-error"]).toBeUndefined();
+    expect(ci.jobs.gate.steps.find((entry: { name?: string }) => entry.name === "Decide").run).toContain("--base-plan oms-test/plan/base-plan.json");
   });
 
   it("R1: records the tested build after the E2E build, and binds it with the Release Gate decision", () => {

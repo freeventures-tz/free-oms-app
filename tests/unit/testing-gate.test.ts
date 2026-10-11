@@ -1,16 +1,16 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { evaluateGate, renderSummary, skipMatches } from "@/scripts/testing/gate.mjs";
+import { baselineRefusals, evaluateGate, renderSummary, skipMatches } from "@/scripts/testing/gate.mjs";
 import {
   normaliseMigrationChain,
   normalisePgTap,
   normalisePlaywright,
   normaliseVitest,
 } from "@/scripts/testing/reports.mjs";
-import { selectTests } from "@/scripts/testing/select.mjs";
+import { baselinePlan, planDigest, selectTests } from "@/scripts/testing/select.mjs";
 
 /**
  * The aggregate gate, fed the same report formats the runners write.
@@ -65,6 +65,32 @@ function makePlan(overrides: Record<string, unknown> = {}) {
     selector: { selectorDigest: SELECTOR },
     ...overrides,
   });
+}
+
+/** The approved base's plan over the base's own tree, as select.mjs --baseline writes it for a base with a selector. */
+function makeBasePlan(overrides: Record<string, unknown> = {}) {
+  return selectTests({
+    manifest,
+    files,
+    edges: new Map(),
+    changes: [],
+    mode: "full",
+    identity: { ...identity, inventoryRev: identity.base },
+    selector: { selectorDigest: SELECTOR },
+    ...overrides,
+  });
+}
+
+/** A git that knows one commit, the base, holding `tree` and no selector. */
+function gitWithBase(tree: string[]) {
+  return (args: string[]) => {
+    if (args[0] === "cat-file" && args[2] === `${identity.base}^{commit}`) return "";
+    if (args[0] === "ls-tree" && args.includes(identity.base!)) {
+      const scoped = args.at(-1) === "scripts/testing" ? tree.filter((path) => path.startsWith("scripts/testing/")) : tree;
+      return scoped.join("\0");
+    }
+    throw new Error(`git ${args.join(" ")} exited 128: unknown revision`);
+  };
 }
 
 function vitestJson(entries: Array<[string, string, string?]>) {
@@ -150,6 +176,7 @@ function decide(overrides: Partial<Parameters<typeof evaluateGate>[0]> = {}) {
     jobs: goodJobs,
     reports,
     listings: listingsOf(reports),
+    basePlan: makeBasePlan(),
     knownSkips: [],
     expect: { head: HEAD, selectorDigest: SELECTOR },
     ...overrides,
@@ -321,8 +348,9 @@ describe("the aggregate gate", () => {
   it("requires the full inventory when the base has no selector", () => {
     const activated = { ...manifest, activation: { selectiveEnforcement: true } };
     const head = selectTests({ manifest: activated, files, edges: new Map(), changes: [{ status: "M", path: "tests/unit/money.test.ts" }], identity, mode: "enforce", selector: { selectorDigest: SELECTOR } });
+    const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, manifest });
     const onlyMoney = normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
-    expect(decide({ plan: head, basePlan: null, reports: replace("unit", onlyMoney) }).pass).toBe(false);
+    expect(decide({ plan: head, basePlan, reports: replace("unit", onlyMoney) }).refusals).toContain("unit: required file tests/unit/report.test.ts did not run");
   });
 
   it("refuses a Release Gate on anything but a full plan", () => {
@@ -384,15 +412,13 @@ describe("the aggregate gate", () => {
       const head = makePlan({ manifest: lowered });
       const one = normaliseMigrationChain("--- counterexample: one ---\nmigration-chain: PASS");
       const reports = replace("migrationChain", one);
-      expect(decide({ plan: head, basePlan: null, reports }).pass).toBe(true);
-      expect(decide({ plan: head, basePlan: makePlan(), reports }).refusals).toContain(
+      expect(decide({ plan: head, basePlan: makeBasePlan(), reports }).refusals).toContain(
         "migrationChain: 1 counterexamples ran; at least 3 are required",
       );
     });
 
     it("R4: refuses a change that deletes a test the base requires, unless the manifest retires it", () => {
-      const baseFiles = [...files, "tests/unit/old.test.ts"];
-      const base = selectTests({ manifest, files: baseFiles, edges: new Map(), changes: [], identity, mode: "full", selector: { selectorDigest: SELECTOR } });
+      const base = makeBasePlan({ files: [...files, "tests/unit/old.test.ts"] });
       expect(decide({ basePlan: base }).refusals).toContain(
         "unit: the base requires tests/unit/old.test.ts, which this change deletes; retire it in the manifest's retiredTests for review, or keep it",
       );
@@ -463,6 +489,134 @@ describe("the aggregate gate", () => {
       expect(decide({ gate: "Release Gate", plan: full, artifact: { ...ARTIFACT, clean: false } }).refusals).toContain(
         "the recorded build was made from a working tree with changes",
       );
+    });
+  });
+
+  describe("second review: the R4 baseline fallback and the R2 inherited benchmark flag", () => {
+    const deleting = files.filter((file) => file !== "tests/unit/report.test.ts");
+    const withoutReport = () => normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
+    const headDeleting = (overrides: Record<string, unknown> = {}) => makePlan({ files: deleting, ...overrides });
+
+    it("R4: a base without a selector is planned in full over its own tree, with no floors of its own", () => {
+      const basePlan = baselinePlan({ root: ROOT, git: gitWithBase([...files, "lib/money.ts"]), base: identity.base!, head: HEAD, manifest });
+      expect(basePlan.identity.inventoryRev).toBe(identity.base);
+      expect(basePlan.mode).toBe("full");
+      expect(basePlan.execution.unit.files).toEqual(["tests/unit/money.test.ts", "tests/unit/report.test.ts"]);
+      expect(basePlan.minimums).toEqual({});
+      expect(basePlan.digest).toBe(planDigest(basePlan));
+      expect(baselineRefusals(makePlan(), basePlan)).toEqual([]);
+
+      const decision = decide({ basePlan });
+      expect(decision.pass).toBe(true);
+      expect(decision.warnings).toContain(`baseline: ${basePlan.baseline}`);
+    });
+
+    it("R4: a base without a selector still refuses a test the change deletes without retiring it", () => {
+      const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, manifest });
+      const decision = decide({ plan: headDeleting(), basePlan, reports: replace("unit", withoutReport()) });
+      expect(decision.pass).toBe(false);
+      expect(decision.refusals).toContain(
+        "unit: the base requires tests/unit/report.test.ts, which this change deletes; retire it in the manifest's retiredTests for review, or keep it",
+      );
+
+      const retiring = { ...manifest, retiredTests: [{ file: "tests/unit/report.test.ts", reason: "folded into money.test.ts" }] };
+      expect(decide({ plan: headDeleting({ manifest: retiring }), basePlan, reports: replace("unit", withoutReport()) }).pass).toBe(true);
+    });
+
+    it("R4: a base with a selector is planned by its own selector, over its own tree", () => {
+      const tree = [...files, "scripts/testing/select.mjs", "scripts/testing/manifest.json"];
+      const calls: string[][] = [];
+      const own = makeBasePlan();
+      const basePlan = baselinePlan({
+        root: ROOT,
+        git: (args: string[]) => (args[0] === "show" ? `// ${args[1]}` : gitWithBase(tree)(args)),
+        base: identity.base!,
+        head: HEAD,
+        manifest,
+        run: ((command: string, args: string[]) => {
+          calls.push([command, ...args]);
+          writeFileSync(args[args.indexOf("--output") + 1], JSON.stringify(own));
+          return { status: 0, stdout: "", stderr: "" };
+        }) as never,
+      });
+      expect(basePlan).toEqual(own);
+      const argv = calls[0];
+      expect(argv[1]).toMatch(/oms-base-policy-.*[\\/]scripts[\\/]testing[\\/]select\.mjs$/);
+      expect(argv.slice(argv.indexOf("--inventory-rev"), argv.indexOf("--inventory-rev") + 2)).toEqual(["--inventory-rev", identity.base]);
+      expect(argv[argv.indexOf("--manifest") + 1]).toMatch(/oms-base-policy-.*manifest\.json$/);
+    });
+
+    it("R4: unavailable baseline evidence refuses the gate instead of falling back to the head", () => {
+      // Missing (the old fallback held the head to its own inventory and floors, and passed).
+      const missing = decide({ basePlan: null });
+      expect(missing.pass).toBe(false);
+      expect(missing.refusals).toContain("no baseline: the approved base's plan is missing, so deleted tests and lowered floors cannot be checked");
+      // Missing, while the head deletes a base test: still refused, never judged on the head's tree alone.
+      expect(decide({ plan: headDeleting(), basePlan: null, reports: replace("unit", withoutReport()) }).pass).toBe(false);
+
+      // Altered after it was made.
+      const altered = { ...makeBasePlan(), minimums: {} };
+      expect(decide({ basePlan: altered }).refusals).toContain("baseline digest does not match its contents: the base plan was altered or is malformed");
+      // Planned over the head's tree, or another commit's.
+      expect(decide({ basePlan: makePlan({ mode: "full" }) }).refusals).toContain(`baseline was planned over the head's tree, not the base ${identity.base}`);
+      const elsewhere = makeBasePlan({ identity: { ...identity, inventoryRev: "c".repeat(40) } });
+      expect(decide({ basePlan: elsewhere }).refusals).toContain(`baseline was planned over ${"c".repeat(40)}, not the base ${identity.base}`);
+      // A suite list missing from the base plan.
+      const partial = { ...makeBasePlan(), execution: { ...makeBasePlan().execution, e2e: {} } };
+      delete (partial as { digest?: string }).digest;
+      expect(decide({ basePlan: { ...partial, digest: planDigest(partial) } }).refusals).toContain("baseline has no file list for e2e");
+      // A plan that names no base at all.
+      expect(decide({ plan: makePlan({ identity: { ...identity, base: null } }) }).refusals).toContain("no baseline: the plan names no base commit (none)");
+
+      // And baselinePlan never invents one.
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: "", head: HEAD, manifest })).toThrow("the base (none) is not a full commit SHA");
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: "0".repeat(40), head: HEAD, manifest })).toThrow(
+        `the base ${"0".repeat(40)} is not in this clone's history`,
+      );
+    });
+
+    it("R4: a head that lowers its floors is held to the base's, and refused when the base's are unknown", () => {
+      const lowered = { ...manifest, minimums: { pgtapFiles: 1, migrationChainCounterexamples: 1 } };
+      const reports = [
+        ...goodReports().filter((report) => !["pgtap", "migrationChain"].includes(report.suite)),
+        normalisePgTap(["supabase/tests/database/001_auth.sql .. ok", "Files=1, Tests=20", "Result: PASS"].join("\n")),
+        normaliseMigrationChain("--- counterexample: one ---\nmigration-chain: PASS"),
+      ];
+      const held = decide({ plan: makePlan({ manifest: lowered }), reports });
+      expect(held.refusals).toContain("migrationChain: 1 counterexamples ran; at least 3 are required");
+      expect(held.refusals).toContain("pgtap: 1 files ran; at least 2 are required");
+      expect(held.minimums).toMatchObject({ pgtapFiles: 2, migrationChainCounterexamples: 3 });
+
+      // Before this fix, no base plan meant the head's lowered floors applied and the gate passed.
+      const unknown = decide({ plan: makePlan({ manifest: lowered }), basePlan: null, reports });
+      expect(unknown.pass).toBe(false);
+      expect(unknown.refusals[0]).toMatch(/^no baseline:/);
+    });
+
+    it("R2: refuses a main run in which an inherited FV_BENCHMARK=1 ran the benchmarks", () => {
+      const benchmarks = { ...manifest, benchmarks: { e2e: [{ file: "e2e/shell.spec.ts", grep: "mobile benchmark" }], integration: [{ file: "tests/integration/authority.test.ts" }] } };
+      const plan = makePlan({ manifest: benchmarks });
+      expect(plan.benchmarks).toEqual({ e2e: [{ file: "e2e/shell.spec.ts", grep: "mobile benchmark" }], integration: [{ file: "tests/integration/authority.test.ts" }] });
+
+      // Flag off: the benchmark is skipped in the main run and the reviewed skip covers it.
+      const knownSkips = [{ suite: "e2e", file: "e2e/shell.spec.ts", title: "/mobile benchmark > /", projects: "*", reason: "opt-in" }];
+      const skipped = normalisePlaywright(playwrightJson([...allE2e, ["shell.spec.ts", "mobile", "shell mobile benchmark > times it", "skipped"]]));
+      const integrationOff = normaliseVitest("integration", vitestJson([["tests/integration/other.test.ts", "refuses"]]), ROOT);
+      const clean = [...goodReports().filter((report) => !["e2e", "integration"].includes(report.suite)), skipped, integrationOff];
+      expect(decide({ plan, reports: clean, knownSkips }).refusals.filter((line: string) => line.includes("benchmark"))).toEqual([]);
+
+      // Flag inherited: the benchmark ran (and passed) inside the main E2E and integration runs.
+      const ran = normalisePlaywright(playwrightJson([...allE2e, ["shell.spec.ts", "mobile", "shell mobile benchmark > times it"]]));
+      const decision = decide({ plan, reports: replace("e2e", ran), knownSkips });
+      expect(decision.pass).toBe(false);
+      expect(decision.refusals).toContain(
+        "e2e: 1 benchmark test(s) ran inside the main suite, so FV_BENCHMARK was on there: e2e:e2e/shell.spec.ts:mobile:shell mobile benchmark > times it",
+      );
+      expect(decision.refusals).toContain(
+        "integration: 1 benchmark test(s) ran inside the main suite, so FV_BENCHMARK was on there: integration:tests/integration/authority.test.ts:suite > refuses",
+      );
+      // Ordinary tests in a benchmark spec, outside the benchmark block, are not benchmarks.
+      expect(decision.refusals.some((line: string) => line.includes("shell.spec.ts:mobile:works"))).toBe(false);
     });
   });
 
