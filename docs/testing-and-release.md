@@ -182,9 +182,10 @@ after them. Instead, `scripts/testing/benchmarks.mjs` runs each benchmark file l
 manifest's `benchmarks` alone, after its own reset, the way each spec documents
 (`FV_BENCHMARK=1`, mobile project only, filtered to the benchmark block). The Release Gate accepts
 a benchmark skipped in the main run only when the same test passed in its own pass; a failed or
-missing pass refuses it. The runner drops an `FV_BENCHMARK` inherited from the shell or the `.env`
-files, so only a benchmark pass sets it, and any gate refuses a main run in which a benchmark test
-ran rather than skipped. A Development Gate accepts the reviewed opt-in skips, and `test:plan
+missing pass refuses it. The runner sets `FV_BENCHMARK=0` on every main step, over any value from
+the shell or the `.env` files. Removing the variable would not be enough, because the test setups
+load `.env.test.local` and `.env.local` again and dotenv fills in anything unset. Only a benchmark
+pass sets `1`, and any gate refuses a main run in which a benchmark test ran rather than skipped. A Development Gate accepts the reviewed opt-in skips, and `test:plan
 --benchmarks` adds the same passes to a local run.
 
 Evidence is bound to the build it tested. The E2E step records that build: commit, tree, whether

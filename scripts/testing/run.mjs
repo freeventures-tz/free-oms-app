@@ -162,14 +162,14 @@ function quote(arg) {
 }
 
 /**
- * A step's environment. FV_BENCHMARK is dropped from what the shell and the .env files hand down,
- * so only a benchmark pass (benchmarks.mjs), which sets it on its own step, ever runs the benchmarks.
+ * A step's environment. FV_BENCHMARK is set to "0" over whatever the shell and the .env files hand
+ * down, so only a benchmark pass (benchmarks.mjs), which sets "1" on its own step, ever runs the
+ * benchmarks. Deleting it is not enough: the test setups load .env.test.local and .env.local again
+ * with dotenv, which fills in any variable that is unset, so an explicit value has to be there.
  */
 /** @param {Record<string, string | undefined>} inherited @param {string} resultsDir @param {Record<string, string> | undefined} own @returns {Record<string, string | undefined>} */
 export function stepEnvironment(inherited, resultsDir, own) {
-  const env = { ...inherited, OMS_TEST_RESULTS_DIR: resultsDir };
-  delete env.FV_BENCHMARK;
-  return { ...env, ...own };
+  return { ...inherited, OMS_TEST_RESULTS_DIR: resultsDir, FV_BENCHMARK: "0", ...own };
 }
 
 /**

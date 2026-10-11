@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -193,7 +194,7 @@ describe("plan runner", () => {
   });
 
   it("R2: an ambient FV_BENCHMARK=1 never reaches a main-suite step; only a benchmark pass sets it", () => {
-    expect(stepEnvironment({ FV_BENCHMARK: "1", PATH: "/bin" }, "/results", undefined)).toEqual({ PATH: "/bin", OMS_TEST_RESULTS_DIR: "/results" });
+    expect(stepEnvironment({ FV_BENCHMARK: "1", PATH: "/bin" }, "/results", undefined)).toEqual({ PATH: "/bin", OMS_TEST_RESULTS_DIR: "/results", FV_BENCHMARK: "0" });
     expect(stepEnvironment({ FV_BENCHMARK: "1" }, "/results", { FV_BENCHMARK: "1", OMS_TEST_SUITE: "integration-benchmark" }).FV_BENCHMARK).toBe("1");
 
     // Through runSteps, with the flag set in the shell that started the run.
@@ -217,9 +218,57 @@ describe("plan runner", () => {
       if (previous === undefined) delete process.env.FV_BENCHMARK;
       else process.env.FV_BENCHMARK = previous;
     }
-    expect(seen["vitest run --project integration"]).toBeUndefined();
-    expect(seen["playwright test"]).toBeUndefined();
+    expect(seen["vitest run --project integration"]).toBe("0");
+    expect(seen["playwright test"]).toBe("0");
     expect(seen["vitest run --project integration tests/integration/stock-benchmark.test.ts"]).toBe("1");
+  });
+
+  describe("R2 through a real child that loads the .env files itself", () => {
+    // The test setups load .env.test.local and .env.local with dotenv, which fills in only what is
+    // unset. A variable the runner deletes comes back from those files, so the child runs exactly
+    // the setups' own dotenv calls and reports what the specs would read.
+    const setupFiles = ["tests/setup/integration-global.ts", "tests/setup/integration.ts", "e2e/global-setup.ts"];
+    const dotenvCalls = setupFiles.map((file) => readFileSync(join(process.cwd(), file), "utf8").match(/^config\(\{ path: "[^"]+", quiet: true \}\);$/gm) ?? []);
+    const dotenvPath = createRequire(join(process.cwd(), "package.json")).resolve("dotenv");
+
+    function childSees(input: "shell" | ".env.local" | ".env.test.local", own?: Record<string, string>) {
+      const root = mkdtempSync(join(tmpdir(), "oms-child-env-"));
+      const resultsDir = mkdtempSync(join(tmpdir(), "oms-child-env-results-"));
+      if (input !== "shell") writeFileSync(join(root, input), "FV_BENCHMARK=1\n");
+      const script = [`const { config } = require(${JSON.stringify(dotenvPath)});`, ...dotenvCalls[0], "process.stdout.write(String(process.env.FV_BENCHMARK));"].join("\n");
+      const previous = process.env.FV_BENCHMARK;
+      if (input === "shell") process.env.FV_BENCHMARK = "1";
+      else delete process.env.FV_BENCHMARK;
+      try {
+        const result = runSteps([{ name: "integration", job: "integration", command: process.execPath, args: ["-e", script], stdoutTo: "seen.txt", env: own }], {
+          root,
+          resultsDir,
+          guard: () => {},
+          print: () => {},
+        });
+        expect(result.ok).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env.FV_BENCHMARK;
+        else process.env.FV_BENCHMARK = previous;
+      }
+      return readFileSync(join(resultsDir, "seen.txt"), "utf8");
+    }
+
+    it("runs the same dotenv calls the integration and E2E setups make", () => {
+      for (const calls of dotenvCalls) {
+        expect(calls).toEqual(['config({ path: ".env.test.local", quiet: true });', 'config({ path: ".env.local", quiet: true });']);
+      }
+    });
+
+    for (const input of ["shell", ".env.local", ".env.test.local"] as const) {
+      it(`keeps FV_BENCHMARK disabled in a main step when ${input} sets it to 1`, () => {
+        expect(childSees(input)).toBe("0");
+      });
+
+      it(`keeps FV_BENCHMARK=1 in a benchmark pass when ${input} sets it`, () => {
+        expect(childSees(input, { FV_BENCHMARK: "1", OMS_TEST_SUITE: "integration-benchmark" })).toBe("1");
+      });
+    }
   });
 
   it("fills in the results directory and keeps a listing's stdout apart from its stderr", () => {
