@@ -32,8 +32,9 @@ All four commands live in `scripts/testing/`, need only Node, and never touch a 
 
 ```text
 npm run test:select -- --base <full-sha> --head <full-sha> [--mode shadow|full] [--worktree] [--inventory-rev <sha>] --output <plan.json>
+npm run test:select -- --baseline --base <full-sha> --head <full-sha> --output <base-plan.json>
 npm run test:plan   -- --plan <plan.json> --tier local|development [--results <dir>] [--benchmarks] [--keep-going] [--dry-run]
-npm run test:gate   -- --plan <plan.json> --results <dir> [--jobs <needs.json>] [--base-plan <plan.json>] [--head <sha>]
+npm run test:gate   -- --plan <plan.json> --base-plan <base-plan.json> --results <dir> [--jobs <needs.json>] [--head <sha>]
 npm run test:release -- --prepare --output <candidate.json> [--production-base <sha>]
 npm run test:release -- --manifest <candidate.json> [--check-only] [--keep-going]
 npm run test:release -- --describe-artifact --output <artifact.json>
@@ -128,13 +129,17 @@ hold:
   assertions (five pgTAP files declare no plan count, so the total is the floor);
 - for a Release Gate, the E2E job recorded a clean build of this exact commit.
 
-The minimum coverage comes from the **base** the change merges into, not from the change: CI runs
-the base's own selector and manifest over the base's own file tree (`--inventory-rev`). Every test
+The minimum coverage comes from the **base** the change merges into, not from the change:
+`test:select --baseline` runs the base's own selector and manifest over the base's own file tree
+(`--inventory-rev`). CI, the release run and the development tier all plan the base this way. Every test
 the base has stays required, even one the change deletes, unless the change's manifest retires it
 by name in `retiredTests` with a reason. That is a manifest change, so it forces full coverage and
 shows up in review. Numeric floors are the higher of the base's and the change's. While the base
-has no selector, as for this transition, the minimum is the full inventory. A pull request cannot
-shrink its own gate.
+has no selector, as for this transition, the base plan is every test in the base's tree, with no
+floors because the base declared none. The base plan is required evidence: a run whose base plan is
+missing, altered, made over another tree or short of a suite is refused, and so is a plan or
+candidate that names no base. Nothing falls back to the change's own inventory and floors. A pull
+request cannot shrink its own gate.
 
 A test that passed only on retry is accepted but listed. A green retry is still a reliability
 finding until someone records why the first attempt failed.
@@ -177,7 +182,9 @@ after them. Instead, `scripts/testing/benchmarks.mjs` runs each benchmark file l
 manifest's `benchmarks` alone, after its own reset, the way each spec documents
 (`FV_BENCHMARK=1`, mobile project only, filtered to the benchmark block). The Release Gate accepts
 a benchmark skipped in the main run only when the same test passed in its own pass; a failed or
-missing pass refuses it. A Development Gate accepts the reviewed opt-in skips, and `test:plan
+missing pass refuses it. The runner drops an `FV_BENCHMARK` inherited from the shell or the `.env`
+files, so only a benchmark pass sets it, and any gate refuses a main run in which a benchmark test
+ran rather than skipped. A Development Gate accepts the reviewed opt-in skips, and `test:plan
 --benchmarks` adds the same passes to a local run.
 
 Evidence is bound to the build it tested. The E2E step records that build: commit, tree, whether
