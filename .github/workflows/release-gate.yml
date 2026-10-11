@@ -18,10 +18,11 @@ on:
         type: string
         required: true
       production_base:
-        description: Full commit production runs today, if known
+        # Required: the Release Gate holds the candidate to this commit's tests and floors, and
+        # refuses a run without it (scripts/testing/select.mjs --baseline).
+        description: Full commit production runs today
         type: string
-        required: false
-        default: ""
+        required: true
 
 permissions:
   contents: read
@@ -41,7 +42,7 @@ jobs:
           PRODUCTION_BASE: ${{ inputs.production_base }}
         run: |
           [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::candidate must be a full commit"; exit 1; }
-          [[ -z "$PRODUCTION_BASE" || "$PRODUCTION_BASE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::production_base must be a full commit"; exit 1; }
+          [[ "$PRODUCTION_BASE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::production_base is required and must be a full commit"; exit 1; }
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.candidate }}
@@ -58,9 +59,7 @@ jobs:
         run: |
           [ "$(git rev-parse HEAD)" = "$CANDIDATE" ] || { echo "::error::checkout is not the candidate"; exit 1; }
           mkdir -p oms-test
-          args=(--prepare --output oms-test/candidate.json)
-          [ -n "$PRODUCTION_BASE" ] && args+=(--production-base "$PRODUCTION_BASE")
-          node scripts/testing/release.mjs "${args[@]}"
+          node scripts/testing/release.mjs --prepare --output oms-test/candidate.json --production-base "$PRODUCTION_BASE"
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate

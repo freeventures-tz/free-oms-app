@@ -106,7 +106,7 @@ reviewed group, so the map cannot quietly fall behind the code.
 | --- | --- | --- |
 | Pull request opened, updated, reopened or marked ready (drafts included) | All suites on the merge commit, then **Development Gate** | A newer update to the same pull request only |
 | Push to `main` (after a merge) | All suites on what landed, then **Development Gate** | Nothing |
-| Called by `release-gate.yml` | All suites on the exact candidate, then **Release Gate** | Nothing |
+| Called by `release-gate.yml` (needs `candidate` and `production_base`, both full commits) | All suites on the exact candidate, then **Release Gate** | Nothing |
 
 Feature-branch pushes no longer start a second run. The four suite jobs and their names are
 unchanged: `Lint · Types · Unit · Build`, `Migrations · pgTAP · Advisors`,

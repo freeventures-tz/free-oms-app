@@ -232,6 +232,20 @@ describe("CI routing", () => {
     expect(ci.jobs.gate.steps.find((entry: { name?: string }) => entry.name === "Decide").run).toContain("--base-plan oms-test/plan/base-plan.json");
   });
 
+  it("R4: a Release Gate run cannot start without the production base it is held to", () => {
+    const input = release.on.workflow_dispatch.inputs.production_base;
+    expect(input.required).toBe(true);
+    expect(input.default).toBeUndefined();
+    const steps = release.jobs.identity.steps;
+    const check = steps.find((step: { name?: string }) => step.name === "Refuse anything but a full commit name").run;
+    expect(check).toContain('[[ "$PRODUCTION_BASE" =~ ^[0-9a-f]{40}$ ]] || {');
+    expect(check).not.toContain('-z "$PRODUCTION_BASE"');
+    const record = steps.find((step: { name?: string }) => step.name === "Record the candidate").run;
+    expect(record).toContain('--production-base "$PRODUCTION_BASE"');
+    expect(record).not.toContain('[ -n "$PRODUCTION_BASE" ]');
+    expect(release.jobs.suites.with.base).toBe("${{ inputs.production_base }}");
+  });
+
   it("R1: records the tested build after the E2E build, and binds it with the Release Gate decision", () => {
     const e2e = ci.jobs.e2e.steps;
     const build = e2e.findIndex((step: { run?: string }) => step.run === "npm run build");
