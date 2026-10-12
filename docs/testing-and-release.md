@@ -195,7 +195,11 @@ pass sets `1`, and any gate refuses a main run in which a benchmark test ran rat
 
 Evidence is bound to the build it tested. The E2E step records that build: commit, tree, whether
 the tree was clean, a digest of `.next/server` and `.next/static`, and digests of the public build
-values. When the Release Gate passes on it, the run writes `candidate-final.json`: the manifest
+values. The digest also covers the build id and `.next/prerender-manifest.json`, and leaves out only
+the incremental-cache entries of the routes that manifest lists (`.html`, `.rsc`, `.meta`, `.body`,
+`.segments/`). `next start` rewrites those after a revalidation, so with them in, the build was a
+different artifact once E2E had served it. `test:release` describes the build again after every
+step has run and refuses the run if it no longer matches the recorded one. When the Release Gate passes on it, the run writes `candidate-final.json`: the manifest
 plus that build and the decision. Run `--check-only` against the final manifest and it refuses any
 other build, including a fresh build of the same commit, because Next.js builds differ. An
 approval recorded in a manifest stands only while nothing has drifted and only with passing

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  artifactDigest,
+  artifactDrift,
   bindEvidence,
   candidateRefusals,
   changelogVersion,
@@ -189,6 +191,101 @@ describe("R1: evidence is bound to the build it tested", () => {
     writeFileSync(join(root, ".next/static/chunk.js"), "changed");
     expect(describeArtifact(root, fakeGit(), {}).digest).not.toBe(first.digest);
     expect(describeArtifact(root, fakeGit(" M lib/money.ts"), {}).clean).toBe(false);
+  });
+});
+
+/**
+ * Review HOLD on `972d4f3`: the build recorded before E2E (`bce31c60…`) was described as `bad0e845…`
+ * after E2E had served it, though nothing was rebuilt. `next start` had rewritten two files of its
+ * incremental cache, `favicon.ico.meta` and `manifest.webmanifest.meta`, after a revalidation: same
+ * bodies, the `.meta` re-serialised. Putting the build-time bytes back gave `bce31c60…` exactly. The
+ * bytes below are the ones observed.
+ */
+describe("a build that has been served", () => {
+  const BUILT_META =
+    '{"status":200,"headers":{"cache-control":"public, max-age=0, must-revalidate","content-type":"image/x-icon","x-next-cache-tags":"_N_T_/layout,_N_T_/favicon.ico/layout,_N_T_/favicon.ico/route,_N_T_/favicon.ico"}}';
+  const SERVED_META = `{
+  "headers": {
+    "cache-control": "public, max-age=0, must-revalidate",
+    "content-type": "image/x-icon",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/favicon.ico/layout,_N_T_/favicon.ico/route,_N_T_/favicon.ico"
+  },
+  "status": 200
+}`;
+
+  function built(routes: string[] = ["/_global-error", "/favicon.ico", "/manifest.webmanifest"]) {
+    const root = mkdtempSync(join(tmpdir(), "oms-served-"));
+    const write = (path: string, body: string) => {
+      mkdirSync(join(root, path, ".."), { recursive: true });
+      writeFileSync(join(root, path), body);
+    };
+    write(".next/BUILD_ID", "mW0btgZ6EkvkqP7VI2Cjb");
+    write(".next/prerender-manifest.json", JSON.stringify({ version: 4, routes: Object.fromEntries(routes.map((r) => [r, {}])), dynamicRoutes: {} }));
+    write(".next/server/app/favicon.ico/route.js", "compiled favicon route");
+    write(".next/server/app/favicon.ico.body", "icon bytes");
+    write(".next/server/app/favicon.ico.meta", BUILT_META);
+    write(".next/server/app/manifest.webmanifest.body", '{"name":"Free Ventures OMS"}');
+    write(".next/server/app/manifest.webmanifest.meta", '{"status":200}');
+    write(".next/server/app/_global-error.html", "<html>error</html>");
+    write(".next/server/app/_global-error.rsc", "rsc");
+    write(".next/server/app/_global-error.segments/_full.segment.rsc", "segment");
+    write(".next/server/app/orders/page.js", "compiled orders page");
+    write(".next/server/pages/500.html", "<html>500</html>");
+    write(".next/static/chunks/main.js", "client chunk");
+    return { root, write };
+  }
+
+  it("is the same artifact after the server rewrites its incremental cache", () => {
+    const { root, write } = built();
+    const before = artifactDigest(root)!;
+    expect(before).toMatchObject({ files: 4, cacheFiles: 7 });
+
+    write(".next/server/app/favicon.ico.meta", SERVED_META);
+    write(".next/server/app/manifest.webmanifest.meta", '{\n  "status": 200\n}');
+    write(".next/server/app/_global-error.segments/_full.segment.rsc", "regenerated segment");
+    write(".next/server/app/_global-error.html", "<html>regenerated</html>");
+    expect(artifactDigest(root)).toEqual(before);
+
+    const recorded = describeArtifact(root, fakeGit(), {});
+    expect(artifactDrift(recorded, describeArtifact(root, fakeGit(), {}))).toEqual([]);
+  });
+
+  it("is a different artifact when compiled code, the build id or an unlisted page changes", () => {
+    for (const [path, body] of [
+      [".next/server/app/favicon.ico/route.js", "tampered favicon route"],
+      [".next/server/app/orders/page.js", "tampered orders page"],
+      [".next/server/pages/500.html", "<html>tampered</html>"],
+      [".next/static/chunks/main.js", "tampered chunk"],
+      [".next/BUILD_ID", "another build"],
+      // Named like a cache entry, but for a route the build did not prerender: it is the build's.
+      [".next/server/app/orders.html", "<html>not prerendered</html>"],
+    ]) {
+      const { root, write } = built();
+      const before = artifactDigest(root)!;
+      write(path, body);
+      expect(artifactDigest(root)!.digest, path).not.toBe(before.digest);
+    }
+  });
+
+  it("is a different artifact when the prerender manifest names another route to leave out", () => {
+    const { root } = built();
+    const widened = built(["/_global-error", "/favicon.ico", "/manifest.webmanifest", "/orders"]);
+    widened.write(".next/server/app/orders.html", "<html>hidden?</html>");
+    // The same files, the manifest aside: listing a route moves its files out of the digest, and the
+    // manifest that does it is itself in the digest, so the build is not the recorded one.
+    expect(artifactDigest(widened.root)!.digest).not.toBe(artifactDigest(root)!.digest);
+  });
+
+  it("names how the build in .next differs from the one recorded", () => {
+    const { root, write } = built();
+    const recorded = describeArtifact(root, fakeGit(), {});
+    write(".next/server/app/orders/page.js", "rebuilt");
+    const drift = artifactDrift(recorded, describeArtifact(root, fakeGit(), {}));
+    expect(drift).toEqual([expect.stringMatching(/^artifact\.digest: recorded "[0-9a-f]{64}", found "[0-9a-f]{64}"$/)]);
+    expect(artifactDrift(recorded, null)).toEqual(["the tested build is gone from .next"]);
+    expect(artifactDrift(recorded, { ...recorded, commit: "d".repeat(40) })).toEqual([
+      `artifact.commit: recorded "${COMMIT}", found "${"d".repeat(40)}"`,
+    ]);
   });
 });
 

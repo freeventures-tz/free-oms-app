@@ -86,20 +86,29 @@ export function useGuardedAction<TName extends string, TResult extends ActionRes
     setAttempt({ name, action, data });
 
     startTransition(async () => {
+      // React leaves state set after an `await` out of the transition, so it would commit at once
+      // while `pending` is still true: the verdict would show beside a control still disabled and
+      // still saying it is working, and a tap on Try again or Go back in that moment would be lost.
+      // Setting it inside its own transition commits the verdict, whatever `onSettled` changes, and
+      // the end of pending together.
+      let outcome: TResult;
+      let thrown = false;
       try {
-        const outcome = await action({} as TResult, data);
-        setResult(outcome);
-        // Nothing to retry once it worked; the next interaction is a new command, not a replay.
-        if (!outcome.error) setAttempt(null);
-        options?.onSettled?.(outcome);
+        outcome = await action({} as TResult, data);
       } catch {
         // Thrown, not returned: no verdict was reached. `attempt` is kept on purpose so the retry
         // carries the same request — and therefore the same idempotency key.
-        setResult({ error: failureKey } as TResult);
-      } finally {
+        thrown = true;
+        outcome = { error: failureKey } as TResult;
+      }
+      startTransition(() => {
         inFlight.current = false;
         setRunning(null);
-      }
+        setResult(outcome);
+        // Nothing to retry once it worked; the next interaction is a new command, not a replay.
+        if (!outcome.error) setAttempt(null);
+        if (!thrown) options?.onSettled?.(outcome);
+      });
     });
   }
 

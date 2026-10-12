@@ -72,14 +72,54 @@ export function metadataProblems({ pkg, lock, changelog }) {
   return problems;
 }
 
-/** Digest of the built app, from every file under .next/server and .next/static, path by path. */
+/** The files Next's incremental cache writes for one prerendered route, beside its compiled code. */
+const CACHE_ENTRY_SUFFIXES = {
+  ".next/server/app": [".html", ".rsc", ".prefetch.rsc", ".meta", ".body"],
+  ".next/server/pages": [".html", ".json"],
+};
+
+/**
+ * The files under `.next/server` that a running server rewrites: the incremental cache's entry for
+ * each route the build prerendered, as `.next/prerender-manifest.json` lists them. `next start`
+ * writes these back after a revalidation (a server action's `revalidatePath` is enough), with the
+ * same body and a re-serialised `.meta`, so they belong to the server's cache, not to the build. The
+ * compiled code that produces them, and the manifest that names them, stay in the digest.
+ */
+/** @param {string} root @returns {(path: string) => boolean} */
+export function runtimeCacheFiles(root) {
+  const manifestPath = join(root, ".next", "prerender-manifest.json");
+  if (!existsSync(manifestPath)) return () => false;
+  const stems = Object.keys(readJson(manifestPath).routes ?? {}).map((route) => (route === "/" ? "index" : route.replace(/^\//, "")));
+  const exact = new Set();
+  const segmentDirs = [];
+  for (const [dir, suffixes] of Object.entries(CACHE_ENTRY_SUFFIXES)) {
+    for (const stem of stems) {
+      for (const suffix of suffixes) exact.add(`${dir}/${stem}${suffix}`);
+    }
+  }
+  for (const stem of stems) segmentDirs.push(`.next/server/app/${stem}.segments/`);
+  return (path) => exact.has(path) || segmentDirs.some((prefix) => path.startsWith(prefix));
+}
+
+/**
+ * Digest of the built app: every file under .next/server and .next/static, path by path, the build
+ * id and the prerender manifest, leaving out only the incremental cache a running server rewrites
+ * (`runtimeCacheFiles`). Without that exclusion the build recorded before E2E was a different
+ * artifact once E2E had served it, so no later check could match the build that was tested.
+ */
 export function artifactDigest(root) {
   const hash = createHash("sha256");
+  const isCache = runtimeCacheFiles(root);
   let count = 0;
+  let cacheFiles = 0;
   for (const dir of [".next/server", ".next/static"]) {
     const full = join(root, dir);
     if (!existsSync(full)) return null;
     for (const file of listFiles(full)) {
+      if (isCache(`${dir}/${file}`)) {
+        cacheFiles++;
+        continue;
+      }
       hash.update(`${dir}/${file}\0`);
       hash.update(readFileSync(join(full, file)));
       count++;
@@ -87,7 +127,9 @@ export function artifactDigest(root) {
   }
   const buildId = join(root, ".next", "BUILD_ID");
   if (existsSync(buildId)) hash.update(`BUILD_ID\0${readFileSync(buildId)}`);
-  return { digest: hash.digest("hex"), files: count };
+  const prerender = join(root, ".next", "prerender-manifest.json");
+  if (existsSync(prerender)) hash.update(`prerender-manifest.json\0${readFileSync(prerender)}`);
+  return { digest: hash.digest("hex"), files: count, cacheFiles };
 }
 
 /** Every `uses:` line in the workflows, which pins the actions a CI run executes. */
@@ -188,6 +230,7 @@ export function describeArtifact(root, git, env = process.env) {
     clean: git(["status", "--porcelain=v1", "--untracked-files=all"]) === "",
     digest: built.digest,
     files: built.files,
+    cacheFiles: built.cacheFiles,
     buildEnvironment: Object.fromEntries(
       Object.keys(env)
         .filter((name) => name.startsWith("NEXT_PUBLIC_"))
@@ -238,6 +281,18 @@ export function candidateRefusals(manifest, described, { artifact = null } = {})
   }
   if (manifest?.identity?.migrations?.count < (manifest?.minimums?.migrations ?? 0)) refusals.push("fewer migrations than the released history requires");
   return refusals;
+}
+
+/**
+ * How the build in `.next` now differs from the one recorded before E2E served it. Empty when it is
+ * the same build, which is what lets a later check, or a deployment, name the build that was tested.
+ */
+/** @param {any} recorded @param {any} current @returns {string[]} */
+export function artifactDrift(recorded, current) {
+  if (!current) return ["the tested build is gone from .next"];
+  return ["commit", "digest", "files"]
+    .filter((key) => current[key] !== recorded[key])
+    .map((key) => `artifact.${key}: recorded ${JSON.stringify(recorded[key])}, found ${JSON.stringify(current[key])}`);
 }
 
 /** @param {any} described @param {any} [extra] @returns {any} */
@@ -406,6 +461,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
 
   const after = candidateRefusals(manifest, describeCandidate(root, git, testEnvironment(root)));
   const { reports, listings, artifact, problems } = readResults(resultsDir, root);
+  const served = artifact ? artifactDrift(artifact, describeArtifact(root, git, env)) : [];
   const decision = evaluateGate({
     plan,
     basePlan,
@@ -413,7 +469,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
     reports,
     listings,
     artifact,
-    reportProblems: [...problems, ...after.map((line) => `identity changed during the run: ${line}`)],
+    reportProblems: [...problems, ...[...after, ...served].map((line) => `identity changed during the run: ${line}`)],
     knownSkips: readJson(join(root, "scripts/testing/known-skips.json")).skips,
     expect: { head: manifest.identity.candidate.commit, selectorDigest: selectorDigest(root) },
     gate: "Release Gate",

@@ -4,8 +4,8 @@ What each release of Free Ventures OMS adds, in plain language.
 
 ## [0.12.4] — 2026-10-15
 
-A change to how the app is tested before a release. Nothing changes in the app itself, and every
-test that ran before still runs.
+Mostly a change to how the app is tested before a release, with one small fix to the app itself.
+Every test that ran before still runs.
 
 ### IMPROVED
 
@@ -19,6 +19,12 @@ test that ran before still runs.
   names the exact build that was tested. It deploys nothing.
 - Before a test creates accounts or resets a database, it now checks that the database is the
   local test copy for that checkout, and stops if it is anything else.
+
+### FIXED
+
+- When a save fails or is refused, the Try again and Go back buttons now work the moment the message
+  appears. For an instant they used to stay disabled and still say Loading, so a quick tap did
+  nothing.
 
 ## [0.12.3] — 2026-10-14
 
