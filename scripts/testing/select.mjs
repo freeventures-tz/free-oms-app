@@ -304,16 +304,53 @@ function benchmarkEntries(manifest) {
 }
 
 /**
+ * Approved minimums for bases that predate this selector, keyed by the base's full SHA.
+ *
+ * Such a base has no manifest of its own, and the change's manifest is the change's to edit, so
+ * neither can say what the base requires. Each record here says it instead: which files count as
+ * tests (the base's own runner configuration, not the manifest's globs), how many of each the base
+ * holds, and the numeric floors. The floors were measured on runs of the change that introduced this
+ * selector, whose pgTAP files, migrations and migration-chain source are identical to the base's.
+ * Every count that can be read off the base's tree is checked against it before the record is used.
+ */
+export const BOOTSTRAP_BASELINES = {
+  // v0.12.2 on main, the base of issue #99.
+  "2938b3cbaf367069d3b23ff1dbbb793412f8b3af": {
+    tree: "8d35ee599f654df75a1ce2fc2e8dbb5ec07802cf",
+    suites: {
+      // vitest.config.mts, project unit
+      unit: ["tests/unit/**/*.test.{ts,tsx}"],
+      // vitest.config.mts, project integration
+      integration: ["tests/integration/**/*.test.ts"],
+      // playwright.config.ts: testDir ./e2e with Playwright's default testMatch
+      e2e: ["e2e/**/*.{spec,test}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"],
+      // supabase test db
+      pgtap: ["supabase/tests/**/*.sql"],
+    },
+    counts: { unit: 57, integration: 33, e2e: 25, pgtap: 28 },
+    migrations: ["supabase/migrations/*.sql"],
+    minimums: {
+      migrations: 55,
+      pgtapFiles: 28,
+      pgtapAssertions: 1926,
+      migrationChainCounterexamples: 155,
+      responsiveProjects: ["mobile", "tablet", "desktop"],
+    },
+  },
+};
+
+/**
  * The approved base's minimum for a change, planned over the base's own tree.
  *
  * A base that holds a selector plans itself, with its own selector and manifest. A base that holds
- * none (the change that introduces this selector merges into one) is planned in full by this
- * selector over the base's tree: every test the base holds is required, and since the base declared
- * no numeric floors, the plan carries none. A base that is not a full SHA in this clone's history has
- * no baseline, so this throws; the gate then refuses rather than measure the head against itself.
+ * none (the change that introduces this selector merges into one) is planned from its record in
+ * `bootstrap`, never from the change's manifest: every test the record's patterns find in the base's
+ * tree is required, and the record's floors hold. A base with no record, or whose tree disagrees with
+ * its record, has no baseline. So does a base that is not a full SHA in this clone's history. Each
+ * throws, and the gate then refuses rather than measure the head against itself.
  */
-/** @param {{ root: string, git: (args: string[]) => string, base: string, head: string, manifest: any, run?: typeof spawnSync }} options @returns {any} */
-export function baselinePlan({ root, git, base, head, manifest, run = spawnSync }) {
+/** @param {{ root: string, git: (args: string[]) => string, base: string, head: string, run?: typeof spawnSync, bootstrap?: Record<string, any> }} options @returns {any} */
+export function baselinePlan({ root, git, base, head, run = spawnSync, bootstrap = BOOTSTRAP_BASELINES }) {
   if (!FULL_SHA.test(base ?? "")) throw new Error(`the base ${base || "(none)"} is not a full commit SHA`);
   try {
     git(["cat-file", "-e", `${base}^{commit}`]);
@@ -322,20 +359,7 @@ export function baselinePlan({ root, git, base, head, manifest, run = spawnSync 
   }
 
   const policy = git(["ls-tree", "-r", "--name-only", "-z", base, "scripts/testing"]).split("\0").filter(Boolean);
-  if (!policy.includes("scripts/testing/select.mjs")) {
-    const planned = selectTests({
-      manifest,
-      files: revisionFiles(git, base),
-      edges: new Map(),
-      changes: [],
-      mode: "full",
-      identity: { base, head, inventoryRev: base, problems: [] },
-      selector: {},
-    });
-    const plan = { ...planned, minimums: {}, retiredTests: [], baseline: "the base has no selector: every test in its tree is required, and it declared no numeric floors" };
-    delete plan.digest;
-    return { ...plan, digest: planDigest(plan) };
-  }
+  if (!policy.includes("scripts/testing/select.mjs")) return bootstrapPlan({ git, base, head, record: bootstrap[base] });
 
   // The base's own selector runs from a copy of its scripts/testing, over the base's tree.
   const dir = mkdtempSync(join(tmpdir(), "oms-base-policy-"));
@@ -355,6 +379,60 @@ export function baselinePlan({ root, git, base, head, manifest, run = spawnSync 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * The base plan for a base with no selector, from its approved record. Throws when there is no
+ * record, or when the base's tree no longer matches what the record was approved against.
+ */
+/** @param {{ git: (args: string[]) => string, base: string, head: string, record: any }} options @returns {any} */
+function bootstrapPlan({ git, base, head, record }) {
+  if (!record) throw new Error(`the base ${base} has no selector and no approved bootstrap record, so its minimum is unknown`);
+  const tree = git(["rev-parse", `${base}^{tree}`]);
+  if (tree !== record.tree) throw new Error(`the base ${base} has tree ${tree}, not the approved ${record.tree}`);
+
+  const files = revisionFiles(git, base);
+  const inventory = Object.fromEntries(SUITES.map((suite) => [suite, files.filter((file) => matchesAny(file, record.suites[suite])).sort()]));
+  const migrations = files.filter((file) => matchesAny(file, record.migrations)).length;
+  const disagreements = [
+    ...SUITES.filter((suite) => inventory[suite].length !== record.counts[suite]).map(
+      (suite) => `${suite} holds ${inventory[suite].length} files, the record ${record.counts[suite]}`,
+    ),
+    ...(migrations !== record.minimums.migrations ? [`the tree holds ${migrations} migrations, the record ${record.minimums.migrations}`] : []),
+    ...(inventory.pgtap.length !== record.minimums.pgtapFiles ? [`the tree holds ${inventory.pgtap.length} pgTAP files, the record's floor is ${record.minimums.pgtapFiles}`] : []),
+  ];
+  if (disagreements.length > 0) throw new Error(`the base ${base} disagrees with its approved record: ${disagreements.join("; ")}`);
+
+  const reason = "the base has no selector: its approved bootstrap record names the tests and floors";
+  const plan = {
+    schemaVersion: PLAN_SCHEMA_VERSION,
+    mode: "full",
+    executionPolicy: "full execution; the base's approved bootstrap record",
+    identity: { base, head, inventoryRev: base, baseTree: tree, problems: [] },
+    selector: { bootstrapRecord: sha256(canonicalJson(record)) },
+    changes: [],
+    risk: "high",
+    domains: [],
+    fullReasons: [reason],
+    selection: {
+      ...Object.fromEntries(SUITES.map((suite) => [suite, { mode: "full", files: inventory[suite], excluded: [], fullReasons: [reason], reasons: {} }])),
+      migrationChain: { mode: "full" },
+      advisors: { mode: "full" },
+    },
+    execution: {
+      ...Object.fromEntries(SUITES.map((suite) => [suite, { mode: "full", files: inventory[suite] }])),
+      migrationChain: { mode: "full" },
+      advisors: { mode: "full" },
+      projects: RESPONSIVE_PROJECTS,
+    },
+    inventory,
+    minimums: record.minimums,
+    retiredTests: [],
+    benchmarks: { e2e: [], integration: [] },
+    expectedJobs: EXPECTED_JOBS,
+    baseline: `${reason}, checked against the base's tree`,
+  };
+  return { ...plan, digest: planDigest(plan) };
 }
 
 /** Every file in a commit's tree, without needing it checked out. */
@@ -532,7 +610,7 @@ export function runSelectCli(argv, root = process.cwd()) {
   // --baseline writes the approved base's plan (baselinePlan) instead of the head's. It never falls
   // back: a base it cannot plan is an error, and the gate refuses a run without a baseline.
   if (args.baseline === true) {
-    const plan = baselinePlan({ root, git, base: String(args.base ?? ""), head: String(args.head ?? ""), manifest });
+    const plan = baselinePlan({ root, git, base: String(args.base ?? ""), head: String(args.head ?? "") });
     mkdirSync(dirname(resolve(args.output)), { recursive: true });
     writeFileSync(args.output, `${canonicalJson(plan)}\n`);
     return plan;

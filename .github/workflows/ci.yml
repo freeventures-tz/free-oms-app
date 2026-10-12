@@ -25,7 +25,7 @@ on:
         type: string
         required: true
       base:
-        description: The production commit the candidate is compared with, if known
+        description: The production commit a release candidate is held to; a release gate refuses a run without it
         type: string
         required: false
         default: ""
@@ -107,7 +107,8 @@ jobs:
         # The minimum a change must run comes from the base it merges into, never from the change
         # alone: the base's own selector and manifest, over the base's own file tree, so a test the
         # change deletes is still required and the base's numeric floors still hold. A base with no
-        # selector is planned in full over its own tree. A base that cannot be planned fails this
+        # selector is planned from its approved bootstrap record, checked against its own tree,
+        # never from the change's manifest. A base that cannot be planned fails this
         # step, and the gate refuses a run without a base plan; neither falls back to the head.
         env:
           BASE: ${{ steps.identity.outputs.base }}

@@ -134,9 +134,14 @@ The minimum coverage comes from the **base** the change merges into, not from th
 (`--inventory-rev`). CI, the release run and the development tier all plan the base this way. Every test
 the base has stays required, even one the change deletes, unless the change's manifest retires it
 by name in `retiredTests` with a reason. That is a manifest change, so it forces full coverage and
-shows up in review. Numeric floors are the higher of the base's and the change's. While the base
-has no selector, as for this transition, the base plan is every test in the base's tree, with no
-floors because the base declared none. The base plan is required evidence: a run whose base plan is
+shows up in review. Numeric floors are the higher of the base's and the change's. A base with no
+selector, as for this transition, has no manifest, and the change's manifest cannot speak for it.
+Its minimum comes from an approved record in `BOOTSTRAP_BASELINES` (`scripts/testing/select.mjs`),
+keyed by the base's full commit: the base's tree, which files count as tests (the base's own runner
+configuration, not the manifest's globs), how many of each it holds, and its floors. Before the
+record is used it is checked against the base's tree: the tree, the test counts, the migration
+count and the pgTAP file count must all match, or there is no baseline. A base with neither a
+selector nor a record has no baseline either. The base plan is required evidence: a run whose base plan is
 missing, altered, made over another tree or short of a suite is refused, and so is a plan or
 candidate that names no base. Nothing falls back to the change's own inventory and floors. A pull
 request cannot shrink its own gate.
@@ -196,8 +201,9 @@ other build, including a fresh build of the same commit, because Next.js builds 
 approval recorded in a manifest stands only while nothing has drifted and only with passing
 Release Gate evidence for exactly that commit and build.
 
-To run it on GitHub: **Actions → Release Gate → Run workflow**, with the full candidate commit and,
-if known, the production commit. Its last job, *Release candidate evidence*, binds the decision and
+To run it on GitHub: **Actions → Release Gate → Run workflow**, with the full candidate commit and
+the full commit production runs today. Both are required: the gate holds the candidate to the
+production commit's tests and floors, and refuses a run without it. Its last job, *Release candidate evidence*, binds the decision and
 the E2E job's build into `candidate-final.json`, and refuses unless the Release Gate passed.
 
 ## 7. Production promotion (proposed, not activated)

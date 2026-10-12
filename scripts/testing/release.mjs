@@ -395,7 +395,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
   // has none, and is refused before anything runs rather than gated against its own rules.
   let basePlan;
   try {
-    basePlan = baselinePlan({ root, git, base: manifest.production.base, head: manifest.identity.candidate.commit, manifest: readJson(join(root, "scripts/testing/manifest.json")) });
+    basePlan = baselinePlan({ root, git, base: manifest.production.base, head: manifest.identity.candidate.commit });
   } catch (error) {
     throw new Error(`candidate refused: no baseline: ${error.message}`);
   }

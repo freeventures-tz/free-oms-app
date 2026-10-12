@@ -10,7 +10,7 @@ import {
   normalisePlaywright,
   normaliseVitest,
 } from "@/scripts/testing/reports.mjs";
-import { baselinePlan, planDigest, selectTests } from "@/scripts/testing/select.mjs";
+import { BOOTSTRAP_BASELINES, baselinePlan, planDigest, selectTests, validateManifest } from "@/scripts/testing/select.mjs";
 
 /**
  * The aggregate gate, fed the same report formats the runners write.
@@ -54,6 +54,26 @@ const files = [
 ];
 const identity = { base: "a".repeat(40), head: HEAD, executedCommit: HEAD, proven: true, problems: [] };
 const SELECTOR = "f".repeat(64);
+const BASE_TREE = "e".repeat(40);
+
+/**
+ * The approved record for the fixture's base, which has no selector. Its patterns are the base's
+ * runner configuration, deliberately broader than the manifest's, and its floors are its own.
+ */
+const BOOTSTRAP = {
+  [identity.base]: {
+    tree: BASE_TREE,
+    suites: {
+      unit: ["tests/unit/**/*.test.{ts,tsx}"],
+      integration: ["tests/integration/**/*.test.ts"],
+      e2e: ["e2e/**/*.{spec,test}.{ts,tsx}"],
+      pgtap: ["supabase/tests/**/*.sql"],
+    },
+    counts: { unit: 2, integration: 1, e2e: 2, pgtap: 2 },
+    migrations: ["supabase/migrations/*.sql"],
+    minimums: { migrations: 0, pgtapFiles: 2, pgtapAssertions: 40, migrationChainCounterexamples: 3, responsiveProjects: ["mobile", "tablet", "desktop"] },
+  },
+};
 
 function makePlan(overrides: Record<string, unknown> = {}) {
   return selectTests({
@@ -82,9 +102,10 @@ function makeBasePlan(overrides: Record<string, unknown> = {}) {
 }
 
 /** A git that knows one commit, the base, holding `tree` and no selector. */
-function gitWithBase(tree: string[]) {
+function gitWithBase(tree: string[], treeId = BASE_TREE) {
   return (args: string[]) => {
     if (args[0] === "cat-file" && args[2] === `${identity.base}^{commit}`) return "";
+    if (args[0] === "rev-parse" && args[1] === `${identity.base}^{tree}`) return treeId;
     if (args[0] === "ls-tree" && args.includes(identity.base!)) {
       const scoped = args.at(-1) === "scripts/testing" ? tree.filter((path) => path.startsWith("scripts/testing/")) : tree;
       return scoped.join("\0");
@@ -348,7 +369,7 @@ describe("the aggregate gate", () => {
   it("requires the full inventory when the base has no selector", () => {
     const activated = { ...manifest, activation: { selectiveEnforcement: true } };
     const head = selectTests({ manifest: activated, files, edges: new Map(), changes: [{ status: "M", path: "tests/unit/money.test.ts" }], identity, mode: "enforce", selector: { selectorDigest: SELECTOR } });
-    const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, manifest });
+    const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, bootstrap: BOOTSTRAP });
     const onlyMoney = normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
     expect(decide({ plan: head, basePlan, reports: replace("unit", onlyMoney) }).refusals).toContain("unit: required file tests/unit/report.test.ts did not run");
   });
@@ -497,12 +518,12 @@ describe("the aggregate gate", () => {
     const withoutReport = () => normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
     const headDeleting = (overrides: Record<string, unknown> = {}) => makePlan({ files: deleting, ...overrides });
 
-    it("R4: a base without a selector is planned in full over its own tree, with no floors of its own", () => {
-      const basePlan = baselinePlan({ root: ROOT, git: gitWithBase([...files, "lib/money.ts"]), base: identity.base!, head: HEAD, manifest });
+    it("R4: a base without a selector is planned in full over its own tree, with its approved record's floors", () => {
+      const basePlan = baselinePlan({ root: ROOT, git: gitWithBase([...files, "lib/money.ts"]), base: identity.base!, head: HEAD, bootstrap: BOOTSTRAP });
       expect(basePlan.identity.inventoryRev).toBe(identity.base);
       expect(basePlan.mode).toBe("full");
       expect(basePlan.execution.unit.files).toEqual(["tests/unit/money.test.ts", "tests/unit/report.test.ts"]);
-      expect(basePlan.minimums).toEqual({});
+      expect(basePlan.minimums).toEqual(BOOTSTRAP[identity.base!].minimums);
       expect(basePlan.digest).toBe(planDigest(basePlan));
       expect(baselineRefusals(makePlan(), basePlan)).toEqual([]);
 
@@ -512,7 +533,7 @@ describe("the aggregate gate", () => {
     });
 
     it("R4: a base without a selector still refuses a test the change deletes without retiring it", () => {
-      const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, manifest });
+      const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, bootstrap: BOOTSTRAP });
       const decision = decide({ plan: headDeleting(), basePlan, reports: replace("unit", withoutReport()) });
       expect(decision.pass).toBe(false);
       expect(decision.refusals).toContain(
@@ -532,7 +553,6 @@ describe("the aggregate gate", () => {
         git: (args: string[]) => (args[0] === "show" ? `// ${args[1]}` : gitWithBase(tree)(args)),
         base: identity.base!,
         head: HEAD,
-        manifest,
         run: ((command: string, args: string[]) => {
           calls.push([command, ...args]);
           writeFileSync(args[args.indexOf("--output") + 1], JSON.stringify(own));
@@ -569,8 +589,8 @@ describe("the aggregate gate", () => {
       expect(decide({ plan: makePlan({ identity: { ...identity, base: null } }) }).refusals).toContain("no baseline: the plan names no base commit (none)");
 
       // And baselinePlan never invents one.
-      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: "", head: HEAD, manifest })).toThrow("the base (none) is not a full commit SHA");
-      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: "0".repeat(40), head: HEAD, manifest })).toThrow(
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: "", head: HEAD, bootstrap: BOOTSTRAP })).toThrow("the base (none) is not a full commit SHA");
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: "0".repeat(40), head: HEAD, bootstrap: BOOTSTRAP })).toThrow(
         `the base ${"0".repeat(40)} is not in this clone's history`,
       );
     });
@@ -617,6 +637,87 @@ describe("the aggregate gate", () => {
       );
       // Ordinary tests in a benchmark spec, outside the benchmark block, are not benchmarks.
       expect(decision.refusals.some((line: string) => line.includes("shell.spec.ts:mobile:works"))).toBe(false);
+    });
+  });
+
+  describe("third review: the bootstrap baseline is independent of the change", () => {
+    const deleting = files.filter((file) => file !== "tests/unit/report.test.ts");
+    const withoutReport = () => normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
+    const bootstrapBase = (tree = files) => baselinePlan({ root: ROOT, git: gitWithBase(tree), base: identity.base!, head: HEAD, bootstrap: BOOTSTRAP });
+
+    it("R4: narrowed suite globs and an unretired deletion still refuse the gate", () => {
+      // The review's probe: the head narrows its unit globs so the base's report test falls outside
+      // them, then deletes that test without retiring it. Manifest validation has nothing to object to.
+      const narrowed = { ...manifest, suites: { ...manifest.suites, unit: ["tests/unit/money*.test.ts"] } };
+      const head = makePlan({ manifest: narrowed, files: deleting });
+      expect(validateManifest(narrowed, head.inventory)).toEqual([]);
+      expect(head.inventory.unit).toEqual(["tests/unit/money.test.ts"]);
+
+      // The base's minimum comes from its record's patterns over its own tree, not the head's globs.
+      const basePlan = bootstrapBase();
+      expect(basePlan.execution.unit.files).toEqual(["tests/unit/money.test.ts", "tests/unit/report.test.ts"]);
+      const decision = decide({ plan: head, basePlan, reports: replace("unit", withoutReport()) });
+      expect(decision.pass).toBe(false);
+      expect(decision.refusals).toContain(
+        "unit: the base requires tests/unit/report.test.ts, which this change deletes; retire it in the manifest's retiredTests for review, or keep it",
+      );
+
+      // Narrowed globs alone, with the file left in place, are refused too.
+      const kept = makePlan({ manifest: narrowed });
+      expect(decide({ plan: kept, basePlan, reports: replace("unit", withoutReport()) }).pass).toBe(false);
+    });
+
+    it("R4: lowered floors are held to the bootstrap record's floors", () => {
+      // The review's second probe: a valid no-selector baseline, and a head that lowers the chain
+      // floor to one counterexample and the pgTAP floor to one assertion.
+      const lowered = { ...manifest, minimums: { pgtapFiles: 1, pgtapAssertions: 1, migrationChainCounterexamples: 1 } };
+      const reports = [
+        ...goodReports().filter((report) => !["pgtap", "migrationChain"].includes(report.suite)),
+        normalisePgTap(["supabase/tests/database/001_auth.sql .. ok", "supabase/tests/database/002_stock.sql .. ok", "Files=2, Tests=1", "Result: PASS"].join("\n")),
+        normaliseMigrationChain("--- counterexample: one ---\nmigration-chain: PASS"),
+      ];
+      const basePlan = bootstrapBase();
+      expect(baselineRefusals(makePlan({ manifest: lowered }), basePlan)).toEqual([]);
+      const decision = decide({ plan: makePlan({ manifest: lowered }), basePlan, reports });
+      expect(decision.pass).toBe(false);
+      expect(decision.refusals).toContain("migrationChain: 1 counterexamples ran; at least 3 are required");
+      expect(decision.refusals).toContain("pgtap: 1 assertions ran; at least 40 are required");
+      expect(decision.minimums).toMatchObject({ pgtapFiles: 2, pgtapAssertions: 40, migrationChainCounterexamples: 3 });
+    });
+
+    it("R4: a base with no approved record, or one its tree contradicts, has no baseline", () => {
+      // No record: refused, never planned from the head's manifest.
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, bootstrap: {} })).toThrow(
+        `the base ${identity.base} has no selector and no approved bootstrap record, so its minimum is unknown`,
+      );
+      // The record names another tree.
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files, "d".repeat(40)), base: identity.base!, head: HEAD, bootstrap: BOOTSTRAP })).toThrow(
+        `the base ${identity.base} has tree ${"d".repeat(40)}, not the approved ${BASE_TREE}`,
+      );
+      // The tree holds a test the record's count leaves out, or the record's count is lowered.
+      expect(() => bootstrapBase([...files, "tests/unit/extra.test.tsx"])).toThrow("unit holds 3 files, the record 2");
+      const record = BOOTSTRAP[identity.base!];
+      const shrunk = { [identity.base!]: { ...record, counts: { ...record.counts, pgtap: 1 } } };
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, bootstrap: shrunk })).toThrow("pgtap holds 2 files, the record 1");
+      // Floors the tree can confirm must match it.
+      const fewerFiles = { [identity.base!]: { ...record, minimums: { ...record.minimums, pgtapFiles: 1 } } };
+      expect(() => baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, bootstrap: fewerFiles })).toThrow(
+        "the tree holds 2 pgTAP files, the record's floor is 1",
+      );
+      expect(() => bootstrapBase([...files, "supabase/migrations/001_init.sql"])).toThrow("the tree holds 1 migrations, the record 0");
+    });
+
+    it("R4: the record for the real base pins its tree, its test counts and the measured floors", () => {
+      const record = BOOTSTRAP_BASELINES["2938b3cbaf367069d3b23ff1dbbb793412f8b3af"];
+      expect(record.tree).toBe("8d35ee599f654df75a1ce2fc2e8dbb5ec07802cf");
+      expect(record.counts).toEqual({ unit: 57, integration: 33, e2e: 25, pgtap: 28 });
+      expect(record.minimums).toEqual({
+        migrations: 55,
+        pgtapFiles: 28,
+        pgtapAssertions: 1926,
+        migrationChainCounterexamples: 155,
+        responsiveProjects: ["mobile", "tablet", "desktop"],
+      });
     });
   });
 

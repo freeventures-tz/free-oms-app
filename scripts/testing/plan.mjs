@@ -70,7 +70,7 @@ export function runPlanCli(argv, root = process.cwd()) {
   let basePlan = null;
   if (args.tier === "development") {
     try {
-      basePlan = baselinePlan({ root, git, base: plan.identity?.base, head: plan.identity?.head, manifest: readJson(resolve(root, "scripts/testing/manifest.json")) });
+      basePlan = baselinePlan({ root, git, base: plan.identity?.base, head: plan.identity?.head });
     } catch (error) {
       throw new Error(`no baseline: ${error.message}`);
     }
