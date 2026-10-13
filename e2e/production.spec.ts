@@ -390,7 +390,15 @@ test("only the bricks a Manager accepts become sellable", async ({ page }) => {
   await test.step("the inspection is proved by its record, not by a card disappearing", async () => {
     const lot = page.getByRole("article", { name: `${batchNo} ${BRICK_6}`, exact: true });
 
+    // Navigate only once the server has answered. A `goto` fired straight after the click races the
+    // command: the new page can read the batch before the inspection commits, or replace this page
+    // before the request has left it, and either way the record below is missing.
+    const answered = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && Boolean(response.request().headers()["next-action"]),
+    );
     await lot.getByRole("button", { name: /record the inspection/i }).click();
+    await answered;
 
     // THE SERVER-CONFIRMED RESULT. A control that vanished proves only that something removed a
     // card: it could have been a failed read, a stale render, or a lot somebody else inspected.
