@@ -25,7 +25,7 @@ export default async function SuppliersLoading() {
               <Skeleton className="h-5 w-[200px] rounded-sm" />
               <Skeleton className="h-5 w-[70px] rounded-full" />
             </div>
-            <Skeleton className="h-11 w-[120px] rounded-md md:h-10 xl:h-8" />
+            <Skeleton className="h-11 w-[120px] rounded-md xl:h-8" />
           </div>
         ))}
       </div>

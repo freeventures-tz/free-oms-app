@@ -1,4 +1,4 @@
-import { TriangleAlert } from "lucide-react";
+import { CircleCheck, Clock, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 
@@ -385,6 +385,10 @@ export async function OpenCountDays({
  * AC-113): days Not counted or waiting for the Manager, oldest first. It says how many there are in
  * all and links to the imprest screen, where every one is listed. Nothing here dismisses an alert:
  * it goes when the day has a confirmed count.
+ *
+ * A labelled section, not `role="alert"`: it is rendered with the page and can stand for days, and
+ * an assertive announcement on every visit would interrupt a screen-reader user to repeat what the
+ * heading already says in its place (§11.6 keeps assertive announcements for errors as they occur).
  */
 export async function CountAlerts({ days }: { days: Page<OpenDay> }) {
   if (days.total === 0) return null;
@@ -393,7 +397,6 @@ export async function CountAlerts({ days }: { days: Page<OpenDay> }) {
   const waited = await Promise.all(days.rows.map((day) => waitedText(day.waitingSince)));
   return (
     <section
-      role="alert"
       aria-labelledby="count-alerts-heading"
       data-testid="count-alerts"
       className="flex flex-col gap-3 rounded-lg border border-danger/40 bg-danger/10 p-4 md:p-5 xl:p-6"
@@ -421,9 +424,11 @@ export async function CountAlerts({ days }: { days: Page<OpenDay> }) {
           </li>
         ))}
       </ul>
+      {/* Deep Twilight and always underlined: bronze text measures 4.2:1 on this tint, under the
+          4.5:1 body text needs, and the underline keeps it plainly a link without the bronze. */}
       <Link
         href="/imprest#count-open-days"
-        className="inline-flex min-h-11 items-center self-start font-medium text-bronze-text underline-offset-4 hover:underline xl:min-h-8"
+        className="inline-flex min-h-11 items-center self-start font-medium text-foreground underline underline-offset-4 hover:decoration-2 xl:min-h-8"
       >
         {t(days.total > days.rows.length ? "seeAll" : "open", { count: days.total })}
       </Link>
@@ -512,7 +517,18 @@ export async function CountFlags({ flags }: { flags: CountFlag[] }) {
                   })}
                 </span>
                 <span className="flex flex-col items-start gap-1 md:items-end">
-                  <StatusChip tone={f.kind === "count_shortage" ? "danger" : "attention"}>
+                  {/* Icon + label + colour (§10.6, §11.5): a clock where a Director still has to
+                      decide, a tick where the excess is posted and nothing waits. */}
+                  <StatusChip
+                    tone={f.kind === "count_shortage" ? "danger" : "attention"}
+                    icon={
+                      f.kind === "count_shortage" ? (
+                        <Clock aria-hidden className="size-3.5 shrink-0" />
+                      ) : (
+                        <CircleCheck aria-hidden className="size-3.5 shrink-0" />
+                      )
+                    }
+                  >
                     {t(f.kind === "count_shortage" ? "waitingDecision" : "recorded")}
                   </StatusChip>
                   <span className="text-xs text-muted-foreground">

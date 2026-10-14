@@ -76,11 +76,12 @@ async function nextStep(page: Page) {
  * The shell carries a switcher in the phone header AND in the tablet-and-up bar; both are in the
  * DOM on every tier and exactly one is on screen, so the visible one is the one to press. The
  * English option is labelled in whichever language is current — "English" or "Kiingereza" — which
- * is why this matches either.
+ * is why this matches either. Below `lg` the compact switcher leads its name with the code it shows
+ * ("EN English"), so the code is optional here.
  */
 async function useLanguage(page: Page, language: "en" | "sw") {
   const option = page
-    .getByRole("button", { name: language === "en" ? /^(English|Kiingereza)$/ : /^Kiswahili$/ })
+    .getByRole("button", { name: language === "en" ? /^(EN )?(English|Kiingereza)$/ : /^(SW )?Kiswahili$/ })
     .filter({ visible: true });
 
   await option.click();
@@ -288,7 +289,7 @@ test.describe.serial("an order becomes an invoice", () => {
     // every invoice; that is the defect this assertion used to encode.
     await expect(page.getByText(/payment status not shown/i)).toBeVisible();
     await expect(page.getByText(/^unpaid$/i)).toHaveCount(0);
-    await expect(page.getByText(/units held for this order/i)).toBeVisible();
+    await expect(page.getByText(/units? held for this order/i)).toBeVisible();
 
     // Exactly one — the invoice heading appears once on the page.
     await expect(page.getByRole("heading", { name: /^invoice$/i })).toHaveCount(1);
@@ -339,7 +340,7 @@ test.describe.serial("an order becomes an invoice", () => {
     await expect(page.getByText(/payment status not shown/i)).toHaveCount(0);
 
     // The reservation is released, so the card that reported it is gone (§4.3).
-    await expect(page.getByText(/units held for this order/i)).toHaveCount(0);
+    await expect(page.getByText(/units? held for this order/i)).toHaveCount(0);
 
     // A cancelled order is decided. Nothing on it can be acted on again.
     await expect(page.locator("#cancelOrder")).toHaveCount(0);
@@ -392,7 +393,7 @@ test.describe.serial("a quotation is cancelled before anyone confirms it", () =>
     // Nothing was ever owed, so nothing is kept: a quotation that was never accepted leaves no
     // invoice and no reservation (§12.1 point 3).
     await expect(page.getByText(/FV-INV-/)).toHaveCount(0);
-    await expect(page.getByText(/units held for this order/i)).toHaveCount(0);
+    await expect(page.getByText(/units? held for this order/i)).toHaveCount(0);
   });
 });
 
@@ -514,7 +515,7 @@ test.describe.serial("a Cash Customer sale", () => {
     await page.reload();
     // AC-86 and AC-87, in the browser: no invoice, no reservation.
     await expect(page.getByText(/FV-INV-/)).toHaveCount(0);
-    await expect(page.getByText(/units held for this order/i)).toHaveCount(0);
+    await expect(page.getByText(/units? held for this order/i)).toHaveCount(0);
   });
 });
 
@@ -574,7 +575,7 @@ test.describe.serial("a confirmation the server refuses", () => {
     await sheet.getByRole("button", { name: /go back/i }).click();
     await page.reload();
     await expect(page.getByText(/FV-INV-/)).toHaveCount(0);
-    await expect(page.getByText(/units held for this order/i)).toHaveCount(0);
+    await expect(page.getByText(/units? held for this order/i)).toHaveCount(0);
   });
 });
 

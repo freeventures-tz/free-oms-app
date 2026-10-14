@@ -9,15 +9,27 @@ import { cn } from "@/lib/utils";
 /**
  * Available on the sign-in screen and in the account menu (design.md §8.1). Two languages, so a
  * segmented pair rather than a dropdown: one tap, and both options are always visible.
+ *
+ * `compact` is for the phone and portrait-tablet top bar, which also holds the menu button and the
+ * app name and must fit a 320px screen. The buttons show the two-letter code and keep the 44px
+ * target (design.md §9.9). The full language name follows the code for a screen reader, so the
+ * accessible name STARTS with what is on screen ("EN English"): a voice-control user who says what
+ * they see still reaches the button (WCAG 2.5.3).
  */
-export function LanguageSwitcher({ className }: { className?: string }) {
+export function LanguageSwitcher({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const locale = useLocale();
   const t = useTranslations("common");
   const [pending, startTransition] = useTransition();
 
   const options = [
-    { value: "en", label: t("english") },
-    { value: "sw", label: t("swahili") },
+    { value: "en", code: "EN", label: t("english") },
+    { value: "sw", code: "SW", label: t("swahili") },
   ];
 
   return (
@@ -37,12 +49,20 @@ export function LanguageSwitcher({ className }: { className?: string }) {
             onClick={() => startTransition(() => setLocale(option.value))}
             className={cn(
               "min-h-11 rounded-full px-4 text-[13px] font-medium transition-colors xl:min-h-8",
+              compact && "min-w-11 px-2",
               active
                 ? "bg-primary text-primary-foreground"
                 : "text-foreground hover:bg-[color-mix(in_srgb,var(--fv-periwinkle)_25%,transparent)]",
             )}
           >
-            {option.label}
+            {compact ? (
+              <>
+                {option.code}{" "}
+                <span className="sr-only">{option.label}</span>
+              </>
+            ) : (
+              option.label
+            )}
           </button>
         );
       })}

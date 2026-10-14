@@ -15,11 +15,13 @@
     "signedInAs": "Signed in as {name}",
     "pager": {
       "showing": "Showing {first}–{last} of {total}",
-      "none": "Nothing to show",
       "previous": "Previous",
       "next": "Next"
     },
-    "actionFailed": "That did not work. Try again."
+    "actionFailed": "That did not work. Try again.",
+    "shell": {
+      "skipToContent": "Skip to main content"
+    }
   },
   "auth": {
     "signIn": {
@@ -127,9 +129,11 @@
     "dashboard": {
       "title": "Dashboard",
       "description": "Today's operations and anything waiting for approval.",
-      "empty": "Nothing to review."
-    },
-    "comingSoon": "This part of the system is not built yet."
+      "clear": {
+        "manager": "No imprest day is missing its count or waiting for the Manager's confirmation.",
+        "director": "No imprest day is missing its count or waiting for the Manager's confirmation, and no count has been flagged for a shortage or excess."
+      }
+    }
   },
   "admin": {
     "accounts": {
@@ -203,7 +207,7 @@
     "noPrice": "No price set",
     "noPriceHelp": "This product cannot be sold until a Director sets its price.",
     "empty": "No products yet.",
-    "productCount": "{count} products",
+    "productCount": "{count, plural, one {# product} other {# products}}",
     "add": {
       "heading": "Add a product",
       "name": "Product name",
@@ -303,10 +307,10 @@
         "yard": "Yard"
       },
       "physicalOnly": "Physical stock",
-      "totalUnits": "{count} units in total",
+      "totalUnits": "{count, plural, one {# unit in total} other {# units in total}}",
       "quantityWithUnit": "{count} {unit}",
       "notCounted": "Not counted yet",
-      "movements": "{count} movements",
+      "movements": "{count, plural, one {# movement} other {# movements}}",
       "movementBy": "Recorded by {actor}, approved by {approver}",
       "curingWithUnit": "{count} {unit} curing, not yet for sale"
     },
@@ -346,7 +350,7 @@
       "submit": "Add supplier",
       "added": "Supplier added.",
       "empty": "No suppliers yet.",
-      "count": "{count} suppliers",
+      "count": "{count, plural, one {# supplier} other {# suppliers}}",
       "active": "In use",
       "inactive": "Switched off",
       "deactivate": "Switch off",
@@ -548,7 +552,7 @@
       "detailTitle": "Order {no}",
       "create": "Create new order",
       "empty": "No orders yet.",
-      "count": "{count} orders",
+      "count": "{count, plural, one {# order} other {# orders}}",
       "noneInFilter": "Nothing in this list.",
       "filterLabel": "Filter by state",
       "filters": {
@@ -567,7 +571,7 @@
       "createdBy": "Created by {who} ({role})",
       "cancelledBecause": "Cancelled: {reason}",
       "proformaIsNotABill": "This is a quotation, not a bill. Nothing is owed and no stock is held until the customer confirms.",
-      "reserved": "{count} units held for this order",
+      "reserved": "{count, plural, one {# unit held for this order} other {# units held for this order}}",
       "reservedHelp": "The goods are still in the yard. They are held for this customer and cannot be sold to anyone else.",
       "confirm": "Record customer confirmation",
       "confirmConsequence": "Confirming holds the stock and creates the invoice. It cannot be undone; a mistake is cancelled and re-entered.",
@@ -829,7 +833,7 @@
       "paidUnreleasedHeading": "Paid and not yet collected ({count})",
       "nothingUnreleased": "Nothing is waiting to be collected.",
       "paidNotReleased": "Paid — not released",
-      "outstandingQuantity": "{count} waiting, {days} days",
+      "outstandingQuantity": "{count, plural, one {# waiting} other {# waiting}}, {days, plural, one {# day} other {# days}}",
       "awaitingAssignmentHeading": "Waiting for a storekeeper ({count})",
       "nothingAwaitingAssignment": "Nothing is waiting for a storekeeper.",
       "assignedHeading": "Storekeeper assigned ({count})",
@@ -858,7 +862,7 @@
       "releaseConsequence": "Confirming means the customer has signed for the goods. The stock leaves the yard now, and this cannot be undone.",
       "released": "Released. The stock has left the yard.",
       "releaseTitle": "Confirm the customer signed?",
-      "releaseConfirmConsequence": "This releases {count} units to {who} from {location}. The stock leaves the yard now, and this cannot be undone.",
+      "releaseConfirmConsequence": "This releases {count, plural, one {# unit} other {# units}} to {who} from {location}. The stock leaves the yard now, and this cannot be undone.",
       "confirmReleaseYes": "Yes, the customer signed",
       "status": {
         "assigned": "Storekeeper assigned",
@@ -882,7 +886,7 @@
       "submit": "Register storekeeper",
       "added": "Storekeeper registered.",
       "empty": "No storekeepers yet.",
-      "count": "{count} storekeepers",
+      "count": "{count, plural, one {# storekeeper} other {# storekeepers}}",
       "since": "Since {date}",
       "active": "Working",
       "inactive": "Switched off",
@@ -1948,7 +1952,7 @@
     "title": "Daily reports",
     "description": "Each night the system writes up the day that has just closed. A report cannot be edited afterwards.",
     "empty": "No report has been written yet. The first one is produced at one minute past midnight, for the day before.",
-    "count": "{count} reports",
+    "count": "{count, plural, one {# report} other {# reports}}",
     "open": "Open",
     "opening": "Opening…",
     "deliveredTo": "Delivered to {count}",

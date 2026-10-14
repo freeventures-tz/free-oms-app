@@ -63,8 +63,8 @@ test("signing out returns to sign-in and ends the session", async ({ page }, tes
   await signIn(page, salesRep.phone, salesRep.password);
   await expectLandsOn(page, "/orders");
 
-  // Sign-out lives with the identity: in the drawer on a phone, in the shell everywhere else.
-  if (testInfo.project.name === "mobile") {
+  // Sign-out lives with the identity: in the drawer below `lg`, in the shell from `lg` up.
+  if (testInfo.project.name !== "desktop") {
     await page.getByRole("button", { name: /^menu$/i }).click();
     await page.locator("#fv-drawer").getByRole("button", { name: /^sign out$/i }).click();
   } else {

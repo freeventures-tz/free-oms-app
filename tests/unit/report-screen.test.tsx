@@ -499,13 +499,14 @@ describe("touch targets on a phone", () => {
   it("gives every section toggle a 44px minimum height", () => {
     inEnglish(<ReportView report={detail()} />);
 
-    // design.md §11.3. `min-h-11` is 44px on Tailwind's 4px scale; the floor lifts from `md`, where
-    // the sections start open and the row is a heading rather than a control anyone taps.
+    // design.md §11.3. `min-h-11` is 44px on Tailwind's 4px scale. The sections start open from
+    // `md`, but a tablet is still tapped, so the floor holds through it and lifts only at `xl`.
     const toggles = screen.getAllByTestId(/^report-toggle-/);
     expect(toggles).toHaveLength(REPORT_SECTION_COUNT);
     for (const toggle of toggles) {
       expect(toggle.className).toContain("min-h-11");
-      expect(toggle.className).toContain("md:min-h-0");
+      expect(toggle.className).toContain("xl:min-h-0");
+      expect(toggle.className).not.toContain("md:min-h-0");
     }
   });
 

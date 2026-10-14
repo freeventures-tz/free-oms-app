@@ -2,6 +2,36 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.12.3] — 2026-10-14
+
+The menu and the dashboard work on every screen size and from the keyboard, and a few screens read
+more clearly.
+
+### FIXED
+
+- On a tablet, the menu names no longer spill out of the narrow side bar. A tablet held upright now
+  opens the menu from the button at the top, like a phone. On a screen 1024 to 1279 pixels wide, the
+  side bar shows icons, and each one shows its name when you point at it or reach it with the
+  keyboard.
+- The phone menu now behaves like a proper window: it opens on the page you are on, Esc or a tap
+  outside closes it, and the page behind it stays still.
+- Only one menu item is highlighted at a time. On Supplier receiving, Internal transfers or Stock
+  corrections, Stock is no longer highlighted as well.
+- The dashboard no longer says "Nothing to review" under a red alert, or that it is not built yet.
+  When nothing is waiting, it says which checks came back clear.
+- The keyboard focus outline is now dark blue with a gold edge, so it is easy to see on light pages.
+- The link in the count alert and the Open link on daily reports are now dark enough to read.
+- Counts read correctly when there is one: "1 report", "1 supplier", "1 unit held for this order".
+
+### IMPROVED
+
+- The side bar stays in place while a long page scrolls, and Sign out fits on a laptop screen.
+- A "Skip to main content" link is the first thing the Tab key reaches on every page.
+- The top bar fits the smallest phones, with EN and SW for the language buttons.
+- On a tablet, small buttons and report section headings are big enough to tap.
+- An empty list shows its own message once, not "Nothing to show" as well.
+- Imprest count flags carry an icon next to their label.
+
 ## [0.12.2] — 2026-10-02
 
 The daily report now tells the truth about imprest. It used to say imprest spending was not in the

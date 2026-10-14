@@ -100,7 +100,8 @@
 
   --border: color-mix(in srgb, var(--fv-twilight) 12%, transparent);
   --input: color-mix(in srgb, var(--fv-twilight) 20%, transparent);
-  --ring: var(--fv-bronze);
+  /* `outline-ring` utilities sit on light surfaces, so they take the light-surface ring (§11.2). */
+  --ring: var(--fv-twilight);
 
   --sidebar: var(--fv-twilight);
   --sidebar-foreground: #ffffff;
@@ -133,10 +134,28 @@
     font-weight: 600;
   }
 
-  /* Focus is never removed: 2px bronze ring, 2px offset (design.md §11.2). */
+  /* Focus is never removed (design.md §11.2). Bronze alone measures 2.7:1 on the page and 2.8:1 on
+     white, under the 3:1 a focus indicator needs, so on light surfaces the ring itself is Deep
+     Twilight (19.6:1 on white) and bronze is a halo outside it, keeping the brand without carrying
+     the contrast. The box-shadow paints under the outline: a White band fills the 2px gap so the
+     page never shows bronze against the control, the outline covers 2–4px, and bronze shows from
+     4px to 6px. Forced-colours mode drops the shadow and keeps the outline. A component that sets
+     its own box-shadow outside a layer replaces the halo and keeps the Twilight ring. */
   :focus-visible {
-    outline: 2px solid var(--fv-bronze);
+    outline: 2px solid var(--fv-twilight);
     outline-offset: 2px;
+    box-shadow:
+      0 0 0 2px var(--card),
+      0 0 0 6px var(--fv-bronze);
+  }
+
+  /* On Deep Twilight (the shell's `bg-sidebar` surfaces, and the entry screens' canvas) bronze is
+     7.0:1, so the ring stays bronze and needs no halo. A light surface inside a dark one, such as
+     the language switcher's pill or the sign-in card, takes the light ring above. */
+  :where(.bg-sidebar, .bg-twilight, .bg-\[var\(--fv-twilight\)\])
+    :focus-visible:not(:where(.bg-card, .bg-white) *) {
+    outline-color: var(--fv-bronze);
+    box-shadow: none;
   }
 }
 
@@ -194,6 +213,13 @@
 
 .fv-entry-action {
   box-shadow: 0 6px 16px -8px rgb(0 0 64 / 0.45);
+}
+/* Its own shadow would replace the global halo, so the halo is restated with it (§11.2). */
+.fv-entry-action:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 6px var(--fv-bronze),
+    0 6px 16px -8px rgb(0 0 64 / 0.45);
 }
 
 /* One step replacing another: the new step arrives from the direction of travel. */

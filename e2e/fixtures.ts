@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { expect, type Page, type TestInfo } from "@playwright/test";
+import { expect, type Page, type Request, type TestInfo } from "@playwright/test";
 
 import { randomUUID } from "node:crypto";
 
@@ -56,12 +56,60 @@ export async function expectLandsOn(page: Page, path: string): Promise<void> {
 }
 
 /**
- * The region that carries navigation on this device tier: a drawer on a phone, the rail or sidebar
- * everywhere else. Scoping to it keeps "is this destination offered?" separate from "does this word
+ * Slows the real navigation to a destination and lets its prefetches through untouched.
+ *
+ * A skeleton test needs two things in a fixed order: the destination's loading boundary prefetched,
+ * then a navigation slow enough to see that boundary stand in for the page (design.md §12.7 rule 3).
+ * Counting requests ("the first is the prefetch, delay the rest") got that order by luck. Whether
+ * the tap or the prefetch reaches the network first depends on how soon the link mounts and scrolls
+ * into view, and on a drawer that is a frame or two after the menu opens. When the tap won, the
+ * navigation went through at full speed and the prefetch was the one held back.
+ *
+ * So requests are told apart by what they ARE: the router marks a prefetch with
+ * `next-router-prefetch`, and anything without it is the navigation. Install this BEFORE signing in,
+ * because a sidebar prefetches its destinations as soon as the first page paints, and call `warm()`
+ * before the tap, as a person whose finger arrives a moment after their eyes would.
+ */
+export async function slowNavigationTo(page: Page, pattern: RegExp, delayMs: number) {
+  let warmed = false;
+  const settle = (request: Request) => {
+    const headers = request.headers();
+    // The route tree arrives first and carries no skeleton; the boundary is any later prefetch.
+    if (
+      pattern.test(request.url()) &&
+      headers["next-router-prefetch"] &&
+      headers["next-router-segment-prefetch"] !== "/_tree"
+    ) {
+      warmed = true;
+    }
+  };
+  // The router reads a prefetch only as far as it needs and then aborts the rest of the stream, so
+  // a prefetch that did its job usually ends as a failed request rather than a finished one. A
+  // failure only counts when the server had already answered with success: a connection that
+  // dropped before any response is a prefetch that never happened.
+  page.on("requestfinished", settle);
+  page.on("requestfailed", async (request) => {
+    const response = await request.response().catch(() => null);
+    if (response?.ok()) settle(request);
+  });
+  await page.route(pattern, async (route) => {
+    if (!route.request().headers()["next-router-prefetch"]) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    await route.continue();
+  });
+  return {
+    warm: () => expect.poll(() => warmed, { timeout: 10_000 }).toBe(true),
+  };
+}
+
+/**
+ * The region that carries navigation on this device tier: a drawer below `lg` (phones and portrait
+ * tablets, design.md §3.4), the rail or sidebar from `lg` up. Scoping to it keeps "is this destination offered?" separate from "does this word
  * appear somewhere on the page?".
  */
 export async function openNavigation(page: Page, testInfo: TestInfo) {
-  if (testInfo.project.name === "mobile") {
+  if (testInfo.project.name !== "desktop") {
     await page.getByRole("button", { name: /^menu$/i }).click();
     return page.locator("#fv-drawer");
   }

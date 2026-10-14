@@ -19,9 +19,9 @@ import { Button } from "@/components/ui/button";
  * needs client state, so nothing here can get stuck pending, and nothing here moves — which is
  * what `prefers-reduced-motion` asks of it (§12.7 rule 6).
  *
- * `min-h-11` on the two links is the 44×44 touch floor of design.md §9.9, restored at the tablet
- * tier: `size="small"` steps down to 40px there, and a tablet has a touch screen. Desktop keeps
- * the compact control it was measured for.
+ * An empty queue gets no pager at all. Every section that pages already says, in its own words,
+ * that it has nothing ("Nothing is waiting."), and a second generic "Nothing to show" under it
+ * says the same thing twice.
  */
 export function Pager({
   page,
@@ -45,9 +45,11 @@ export function Pager({
 }) {
   const t = useTranslations("common.pager");
 
+  if (total === 0) return null;
+
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), pages);
-  const first = total === 0 ? 0 : (current - 1) * pageSize + 1;
+  const first = (current - 1) * pageSize + 1;
   const last = Math.min(current * pageSize, total);
 
   function href(target: number): string {
@@ -65,20 +67,20 @@ export function Pager({
   return (
     <nav aria-label={label} className="flex flex-wrap items-center justify-between gap-3">
       <p className="fv-numeric text-xs text-muted-foreground" data-testid={`pager-count-${param}`}>
-        {total === 0 ? t("none") : t("showing", { first, last, total })}
+        {t("showing", { first, last, total })}
       </p>
 
       {pages > 1 ? (
         <span className="flex items-center gap-2">
           {current > 1 ? (
-            <Button asChild variant="secondary" size="small" className="min-h-11 md:min-h-11 xl:min-h-0">
+            <Button asChild variant="secondary" size="small">
               <Link href={href(current - 1)} data-testid={`pager-previous-${param}`}>
                 {t("previous")}
               </Link>
             </Button>
           ) : null}
           {current < pages ? (
-            <Button asChild variant="secondary" size="small" className="min-h-11 md:min-h-11 xl:min-h-0">
+            <Button asChild variant="secondary" size="small">
               <Link href={href(current + 1)} data-testid={`pager-next-${param}`}>
                 {t("next")}
               </Link>

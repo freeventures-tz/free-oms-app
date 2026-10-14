@@ -15,11 +15,13 @@
     "signedInAs": "Umeingia kama {name}",
     "pager": {
       "showing": "Inaonyesha {first}–{last} kati ya {total}",
-      "none": "Hakuna cha kuonyesha",
       "previous": "Iliyotangulia",
       "next": "Ifuatayo"
     },
-    "actionFailed": "Haikufanikiwa. Jaribu tena."
+    "actionFailed": "Haikufanikiwa. Jaribu tena.",
+    "shell": {
+      "skipToContent": "Ruka hadi maudhui makuu"
+    }
   },
   "auth": {
     "signIn": {
@@ -127,9 +129,11 @@
     "dashboard": {
       "title": "Dashibodi",
       "description": "Kazi za leo na vitu vinavyosubiri idhini.",
-      "empty": "Hakuna cha kupitia."
-    },
-    "comingSoon": "Sehemu hii ya mfumo bado haijajengwa."
+      "clear": {
+        "manager": "Hakuna siku ya imprest isiyo na hesabu wala inayosubiri uthibitisho wa Meneja.",
+        "director": "Hakuna siku ya imprest isiyo na hesabu wala inayosubiri uthibitisho wa Meneja, na hakuna hesabu iliyotolewa tahadhari ya upungufu au ziada."
+      }
+    }
   },
   "admin": {
     "accounts": {
@@ -203,7 +207,7 @@
     "noPrice": "Bei haijawekwa",
     "noPriceHelp": "Bidhaa hii haiwezi kuuzwa mpaka Mkurugenzi aweke bei yake.",
     "empty": "Bado hakuna bidhaa.",
-    "productCount": "Bidhaa {count}",
+    "productCount": "{count, plural, one {Bidhaa #} other {Bidhaa #}}",
     "add": {
       "heading": "Ongeza bidhaa",
       "name": "Jina la bidhaa",
@@ -303,10 +307,10 @@
         "yard": "Uwanja"
       },
       "physicalOnly": "Bidhaa zilizopo",
-      "totalUnits": "Jumla ya vipimo {count}",
+      "totalUnits": "{count, plural, one {Jumla ya kipimo #} other {Jumla ya vipimo #}}",
       "quantityWithUnit": "{unit} {count}",
       "notCounted": "Bado hazijahesabiwa",
-      "movements": "Mienendo {count}",
+      "movements": "{count, plural, one {Mwenendo #} other {Mienendo #}}",
       "movementBy": "Imeandikwa na {actor}, imeidhinishwa na {approver}",
       "curingWithUnit": "{unit} {count} zinakomaa, bado haziuzwi"
     },
@@ -346,7 +350,7 @@
       "submit": "Ongeza muuzaji",
       "added": "Muuzaji ameongezwa.",
       "empty": "Bado hakuna wauzaji.",
-      "count": "Wauzaji {count}",
+      "count": "{count, plural, one {Muuzaji #} other {Wauzaji #}}",
       "active": "Anatumika",
       "inactive": "Amezimwa",
       "deactivate": "Zima",
@@ -548,7 +552,7 @@
       "detailTitle": "Oda {no}",
       "create": "Tengeneza oda mpya",
       "empty": "Bado hakuna oda.",
-      "count": "Oda {count}",
+      "count": "{count, plural, one {Oda #} other {Oda #}}",
       "noneInFilter": "Hakuna chochote kwenye orodha hii.",
       "filterLabel": "Chuja kwa hali",
       "filters": {
@@ -567,7 +571,7 @@
       "createdBy": "Imetengenezwa na {who} ({role})",
       "cancelledBecause": "Imeghairiwa: {reason}",
       "proformaIsNotABill": "Hii ni nukuu, si ankara. Hakuna deni na hakuna bidhaa zinazohifadhiwa hadi mteja athibitishe.",
-      "reserved": "Vipimo {count} vimehifadhiwa kwa oda hii",
+      "reserved": "{count, plural, one {Kipimo # kimehifadhiwa kwa oda hii} other {Vipimo # vimehifadhiwa kwa oda hii}}",
       "reservedHelp": "Bidhaa bado zipo uwanjani. Zimehifadhiwa kwa mteja huyu na haziwezi kuuzwa kwa mtu mwingine.",
       "confirm": "Andika uthibitisho wa mteja",
       "confirmConsequence": "Kuthibitisha kunahifadhi bidhaa na kunatengeneza ankara. Hili haliwezi kutenguliwa; kosa linaghairiwa na kuandikwa upya.",
@@ -829,7 +833,7 @@
       "paidUnreleasedHeading": "Zimelipiwa na hazijachukuliwa ({count})",
       "nothingUnreleased": "Hakuna kinachosubiri kuchukuliwa.",
       "paidNotReleased": "Imelipiwa — haijatolewa",
-      "outstandingQuantity": "{count} zinasubiri, siku {days}",
+      "outstandingQuantity": "{count, plural, one {# inasubiri} other {# zinasubiri}}, {days, plural, one {siku #} other {siku #}}",
       "awaitingAssignmentHeading": "Zinasubiri mhifadhi ({count})",
       "nothingAwaitingAssignment": "Hakuna kinachosubiri mhifadhi.",
       "assignedHeading": "Mhifadhi amepangiwa ({count})",
@@ -858,7 +862,7 @@
       "releaseConsequence": "Kuthibitisha kunamaanisha mteja amesaini kupokea bidhaa. Bidhaa zinatoka uwanjani sasa hivi, na hili haliwezi kutenguliwa.",
       "released": "Zimetolewa. Bidhaa zimetoka uwanjani.",
       "releaseTitle": "Uthibitishe mteja amesaini?",
-      "releaseConfirmConsequence": "Hii inatoa vipande {count} kwa {who} kutoka {location}. Bidhaa zinaondoka eneo sasa, na hili haliwezi kutenguliwa.",
+      "releaseConfirmConsequence": "Hii inatoa {count, plural, one {kipande #} other {vipande #}} kwa {who} kutoka {location}. Bidhaa zinaondoka eneo sasa, na hili haliwezi kutenguliwa.",
       "confirmReleaseYes": "Ndiyo, mteja amesaini",
       "status": {
         "assigned": "Mhifadhi amepangiwa",
@@ -882,7 +886,7 @@
       "submit": "Sajili mhifadhi",
       "added": "Mhifadhi amesajiliwa.",
       "empty": "Bado hakuna wahifadhi.",
-      "count": "Wahifadhi {count}",
+      "count": "{count, plural, one {Mhifadhi #} other {Wahifadhi #}}",
       "since": "Tangu {date}",
       "active": "Anafanya kazi",
       "inactive": "Amezimwa",
@@ -1948,7 +1952,7 @@
     "title": "Ripoti za kila siku",
     "description": "Kila usiku mfumo unaandika siku iliyokwisha. Ripoti haiwezi kubadilishwa baada ya kuandikwa.",
     "empty": "Bado hakuna ripoti iliyoandikwa. Ya kwanza inatengenezwa dakika moja baada ya saa sita usiku, kwa siku iliyotangulia.",
-    "count": "Ripoti {count}",
+    "count": "{count, plural, one {Ripoti #} other {Ripoti #}}",
     "open": "Fungua",
     "opening": "Inafunguliwa…",
     "deliveredTo": "Imefikishwa kwa {count}",

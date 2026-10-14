@@ -38,7 +38,7 @@ function OpenLabel() {
       data-pending-link={pending || undefined}
       aria-busy={pending || undefined}
       className={cn(
-        "text-sm font-medium text-primary",
+        "text-sm font-medium text-bronze-text",
         pending && "rounded-sm bg-accent px-1 text-accent-foreground",
       )}
     >

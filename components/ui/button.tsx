@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 /**
  * Heights are mobile-first and step DOWN with viewport, because the touch target is the binding
  * constraint: 48px mobile · 44px tablet · 40px desktop (design.md §9.9). 44×44 is a floor on touch
- * devices, icon-only buttons included.
+ * devices, icon-only buttons included, so `small` holds 44px through the tablet tier and only
+ * steps down at xl, where a pointer is assumed.
  *
  * Text on Golden Bronze is always Deep Twilight. White on bronze measures 2.8:1 and is never used.
  */
@@ -26,7 +27,7 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-12 px-5 md:h-11 xl:h-10",
-        small: "h-11 px-4 text-[0.8rem] md:h-10 xl:h-8",
+        small: "h-11 px-4 text-[0.8rem] xl:h-8",
         icon: "size-11 md:size-11 xl:size-8",
         block: "h-12 w-full px-5 md:h-11 xl:h-10",
       },
