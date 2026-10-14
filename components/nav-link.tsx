@@ -123,8 +123,10 @@ function NavSurface({
       data-pending-nav={pending ? href : undefined}
       className={cn(
         "relative flex min-h-11 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors",
-        // Icon-only below `xl`: a 44px circle, centred in the rail (design.md §9.9).
-        variant === "rail" && "max-xl:size-11 max-xl:justify-center max-xl:px-0",
+        // Icon-only below `xl`: a 44px circle, centred in the rail (design.md §9.9). From `xl` the
+        // desktop row is 40px, the desktop button height in §9.9: fifteen 44px rows pushed Sign out
+        // below the fold of a 900px laptop screen.
+        variant === "rail" && "max-xl:size-11 max-xl:justify-center max-xl:px-0 xl:min-h-10",
         selected
           ? "bg-sidebar-primary text-sidebar-primary-foreground"
           : "text-sidebar-foreground hover:bg-sidebar-accent",
