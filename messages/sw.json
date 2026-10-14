@@ -127,9 +127,11 @@
     "dashboard": {
       "title": "Dashibodi",
       "description": "Kazi za leo na vitu vinavyosubiri idhini.",
-      "empty": "Hakuna cha kupitia."
-    },
-    "comingSoon": "Sehemu hii ya mfumo bado haijajengwa."
+      "clear": {
+        "manager": "Hakuna siku ya imprest isiyo na hesabu wala inayosubiri uthibitisho wa Meneja.",
+        "director": "Hakuna siku ya imprest isiyo na hesabu wala inayosubiri uthibitisho wa Meneja, na hakuna hesabu iliyotolewa tahadhari ya upungufu au ziada."
+      }
+    }
   },
   "admin": {
     "accounts": {

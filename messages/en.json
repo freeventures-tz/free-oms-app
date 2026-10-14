@@ -127,9 +127,11 @@
     "dashboard": {
       "title": "Dashboard",
       "description": "Today's operations and anything waiting for approval.",
-      "empty": "Nothing to review."
-    },
-    "comingSoon": "This part of the system is not built yet."
+      "clear": {
+        "manager": "No imprest day is missing its count or waiting for the Manager's confirmation.",
+        "director": "No imprest day is missing its count or waiting for the Manager's confirmation, and no count has been flagged for a shortage or excess."
+      }
+    }
   },
   "admin": {
     "accounts": {

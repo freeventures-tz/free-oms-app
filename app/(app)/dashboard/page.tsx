@@ -1,3 +1,4 @@
+import { CircleCheck } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
@@ -20,6 +21,11 @@ export default async function DashboardPage() {
     viewer.role === "director" ? loadCountFlags(5) : null,
     viewer.role === "director" || viewer.role === "manager" ? loadOpenDays(1) : null,
   ]);
+  // The page says one thing about the imprest count, never two. When nothing above is raised, a
+  // single line names what was checked and found clear, in place of the alert and the flags list
+  // (whose own empty line would repeat it). When anything is raised, that line is absent, so a
+  // reassurance never sits under an alert.
+  const clear = (openDays?.total ?? 0) === 0 && (flags?.length ?? 0) === 0;
 
   return (
     <>
@@ -28,14 +34,19 @@ export default async function DashboardPage() {
         description={t("landing.dashboard.description")}
       />
 
-      {openDays ? <CountAlerts days={openDays} /> : null}
-
-      <Card>
-        <p className="text-sm text-muted-foreground">{t("landing.dashboard.empty")}</p>
-        <p className="mt-2 text-sm">{t("landing.comingSoon")}</p>
-      </Card>
-
-      {flags ? <CountFlags flags={flags} /> : null}
+      {clear ? (
+        <Card className="flex items-start gap-3" data-testid="dashboard-clear">
+          <CircleCheck aria-hidden className="mt-0.5 size-5 shrink-0 text-success" />
+          <p className="text-sm">
+            {t(`landing.dashboard.clear.${viewer.role === "director" ? "director" : "manager"}`)}
+          </p>
+        </Card>
+      ) : (
+        <>
+          {openDays ? <CountAlerts days={openDays} /> : null}
+          {flags ? <CountFlags flags={flags} /> : null}
+        </>
+      )}
 
       {viewer.role === "director" ? (
         <Card>
