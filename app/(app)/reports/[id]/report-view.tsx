@@ -330,7 +330,7 @@ export function ReportView({ report }: { report: ReportDetail }) {
       <Link
         href="/reports"
         data-testid="report-back"
-        className="inline-flex min-h-11 items-center self-start text-sm font-medium text-primary md:min-h-0"
+        className="inline-flex min-h-11 items-center self-start text-sm font-medium text-bronze-text underline-offset-4 hover:underline xl:min-h-8"
       >
         {t("backToList")}
       </Link>

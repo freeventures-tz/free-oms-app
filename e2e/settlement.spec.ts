@@ -569,7 +569,7 @@ test("a walk-in sale is completed in one action at the till", async ({ page }) =
     await page.reload();
     await expect(page.getByText(/^confirmed$/i)).toBeVisible();
     await expect(page.getByRole("heading", { name: /^invoice$/i })).toHaveCount(0);
-    await expect(page.getByText(/units held for this order/i)).toHaveCount(0);
+    await expect(page.getByText(/units? held for this order/i)).toHaveCount(0);
   });
 
   await test.step("the Cashier completes it in one action", async () => {
@@ -1005,22 +1005,26 @@ test.describe("what the settlement screens offer", () => {
 
     // A queue that shows the first twenty-five and says nothing is a queue that loses the oldest
     // unsettled invoice in the business. The count is always stated (design.md §12.3 in spirit:
-    // an empty result and a truncated one are different answers).
+    // an empty result and a truncated one are different answers). An empty queue has no pager at
+    // all and says so in its own words instead, so each queue shows one answer or the other.
+    const counted = (param: string, empty: string) =>
+      page.getByTestId(`pager-count-${param}`).or(page.getByText(empty, { exact: true }));
+
     await page.goto(PAYMENTS_HREF);
-    await expect(page.getByTestId("pager-count-awaiting")).toBeVisible();
-    await expect(page.getByTestId("pager-count-settled")).toBeVisible();
+    await expect(counted("awaiting", "Nothing is waiting.")).toBeVisible();
+    await expect(counted("settled", "Nothing has been settled yet.")).toBeVisible();
 
     await page.goto(DISPATCH_HREF);
-    await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
-    await expect(page.getByTestId("pager-count-released")).toBeVisible();
+    await expect(counted("unreleased", "Nothing is waiting to be collected.")).toBeVisible();
+    await expect(counted("released", "Nothing has been collected yet.")).toBeVisible();
 
     // Every queue parameter is normalised, not only the ones on /payments — and the assignment
     // stage is a queue of its own now, with its own parameter and its own total.
     await page.goto(`${DISPATCH_HREF}?unreleased=999&released=999&assignment=999`);
     await expect(page.getByText(/this page could not be loaded/i)).toHaveCount(0);
-    await expect(page.getByTestId("pager-count-unreleased")).toBeVisible();
-    await expect(page.getByTestId("pager-count-released")).toBeVisible();
-    await expect(page.getByTestId("pager-count-assignment")).toBeVisible();
+    await expect(counted("unreleased", "Nothing is waiting to be collected.")).toBeVisible();
+    await expect(counted("released", "Nothing has been collected yet.")).toBeVisible();
+    await expect(counted("assignment", "Nothing is waiting for a storekeeper.")).toBeVisible();
   });
 
   test("neither payments nor dispatch scrolls the page sideways", async ({ page }) => {

@@ -43,7 +43,7 @@ export default async function AccountsLoading() {
                 <Skeleton className="h-6 w-[70px] rounded-full" />
               </div>
             </div>
-            <Skeleton className="h-11 w-[104px] rounded-md md:h-10 xl:h-8" />
+            <Skeleton className="h-11 w-[104px] rounded-md xl:h-8" />
           </div>
         ))}
       </div>
