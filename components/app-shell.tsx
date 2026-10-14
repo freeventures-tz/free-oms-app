@@ -173,12 +173,9 @@ export function AppShell({
             aria-modal="true"
             // The title names the dialog; there is no separate description to point at.
             aria-describedby={undefined}
-            // Radix hands focus back to its own `Dialog.Trigger`. The menu button is not one, because
-            // a trigger's `aria-controls` would point at Radix's generated id instead of `fv-drawer`,
-            // so the hand-back is done here (design.md §11.1).
             // Radix would focus the first tabbable control, which measured as Sign out: one stray Enter
             // from leaving. Focus starts on where you are instead, so the drawer opens on the answer
-            // to "which page is this?" and the arrow-free Tab order runs down from there.
+            // to "which page is this?" and Tab runs down the list from there.
             onOpenAutoFocus={(event) => {
               event.preventDefault();
               const drawer = event.currentTarget as HTMLElement;
@@ -187,6 +184,9 @@ export function AppShell({
                 drawer.querySelector<HTMLElement>("nav a");
               here?.focus();
             }}
+            // Radix hands focus back to its own `Dialog.Trigger`. The menu button is not one, because
+            // a trigger's `aria-controls` would point at Radix's generated id instead of `fv-drawer`,
+            // so the hand-back is done here (design.md §11.1).
             onCloseAutoFocus={(event) => {
               event.preventDefault();
               menuButton.current?.focus();
