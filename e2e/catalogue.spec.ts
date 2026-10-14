@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
+import { expectLandsOn, fixtures, openNavigation, signIn, slowNavigationTo } from "./fixtures";
 
 /**
  * Products & prices, on every device tier.
@@ -397,16 +397,11 @@ test.describe("the interaction contract on this screen", () => {
   });
 
   test("a loading catalogue shows a skeleton shaped like it", async ({ page }, testInfo) => {
+    const destination = await slowNavigationTo(page, /\/settings\/products/, SERVER_DELAY_MS);
     await signInAs(page, "director");
 
-    let seen = 0;
-    await page.route(/\/settings\/products/, async (route) => {
-      seen += 1;
-      if (seen > 1) await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
-      await route.continue();
-    });
-
     const navigation = await openNavigation(page, testInfo);
+    await destination.warm();
     await navigation.getByRole("link", { name: /products/i }).click({ noWaitAfter: true });
 
     const skeleton = page.getByRole("status");

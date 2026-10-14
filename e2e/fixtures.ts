@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { expect, type Page, type TestInfo } from "@playwright/test";
+import { expect, type Page, type Request, type TestInfo } from "@playwright/test";
 
 import { randomUUID } from "node:crypto";
 
@@ -53,6 +53,49 @@ export async function submitPassword(page: Page, password: string): Promise<void
 
 export async function expectLandsOn(page: Page, path: string): Promise<void> {
   await expect(page).toHaveURL(new RegExp(`${path}(\\?|$)`));
+}
+
+/**
+ * Slows the real navigation to a destination and lets its prefetches through untouched.
+ *
+ * A skeleton test needs two things in a fixed order: the destination's loading boundary prefetched,
+ * then a navigation slow enough to see that boundary stand in for the page (design.md §12.7 rule 3).
+ * Counting requests ("the first is the prefetch, delay the rest") got that order by luck. Whether
+ * the tap or the prefetch reaches the network first depends on how soon the link mounts and scrolls
+ * into view, and on a drawer that is a frame or two after the menu opens. When the tap won, the
+ * navigation went through at full speed and the prefetch was the one held back.
+ *
+ * So requests are told apart by what they ARE: the router marks a prefetch with
+ * `next-router-prefetch`, and anything without it is the navigation. Install this BEFORE signing in,
+ * because a sidebar prefetches its destinations as soon as the first page paints, and call `warm()`
+ * before the tap, as a person whose finger arrives a moment after their eyes would.
+ */
+export async function slowNavigationTo(page: Page, pattern: RegExp, delayMs: number) {
+  let warmed = false;
+  const settle = (request: Request) => {
+    const headers = request.headers();
+    // The route tree arrives first and carries no skeleton; the boundary is any later prefetch.
+    if (
+      pattern.test(request.url()) &&
+      headers["next-router-prefetch"] &&
+      headers["next-router-segment-prefetch"] !== "/_tree"
+    ) {
+      warmed = true;
+    }
+  };
+  // The router reads a prefetch only as far as it needs and then aborts the rest of the stream, so
+  // a prefetch that did its job usually ends as a failed request rather than a finished one.
+  page.on("requestfinished", settle);
+  page.on("requestfailed", settle);
+  await page.route(pattern, async (route) => {
+    if (!route.request().headers()["next-router-prefetch"]) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    await route.continue();
+  });
+  return {
+    warm: () => expect.poll(() => warmed, { timeout: 10_000 }).toBe(true),
+  };
 }
 
 /**

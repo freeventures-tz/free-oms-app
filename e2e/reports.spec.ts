@@ -9,7 +9,7 @@ import {
   seedTerminalReportFailure,
 } from "@/tests/support/scheduled-report";
 import { runSql } from "@/tests/support/database";
-import { expectLandsOn, fixtures, openNavigation, signIn } from "./fixtures";
+import { expectLandsOn, fixtures, openNavigation, signIn, slowNavigationTo } from "./fixtures";
 
 /**
  * Reading yesterday's report, on a phone, a tablet and a desktop (product.md §18, design.md §3.5).
@@ -209,20 +209,15 @@ test("the archive shows a skeleton shaped like it before the reports arrive", as
   page,
 }, testInfo) => {
   const { director } = fixtures();
-  await signIn(page, director.phone, director.password);
-  await expectLandsOn(page, "/dashboard");
-
   // The prefetch is let through and the real navigation is slowed. Delaying everything would slow
   // the prefetch instead, and the click would then be served from a cache that arrived late — which
   // proves nothing about what a person sees while they wait.
-  let seen = 0;
-  await page.route(/\/reports/, async (route) => {
-    seen += 1;
-    if (seen > 1) await new Promise((resolve) => setTimeout(resolve, 3000));
-    await route.continue();
-  });
+  const destination = await slowNavigationTo(page, /\/reports/, 3000);
+  await signIn(page, director.phone, director.password);
+  await expectLandsOn(page, "/dashboard");
 
   const navigation = await openNavigation(page, testInfo);
+  await destination.warm();
   // `noWaitAfter`, because the click otherwise returns only once the navigation has settled — and
   // by then the skeleton this test exists to see has already been replaced by the page.
   await navigation.getByRole("link", { name: REPORTS_HEADING }).click({ noWaitAfter: true });

@@ -1,6 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { expectLandsOn, fixtures, freshPhone, openNavigation, signIn } from "./fixtures";
+import {
+  expectLandsOn,
+  fixtures,
+  freshPhone,
+  openNavigation,
+  signIn,
+  slowNavigationTo,
+} from "./fixtures";
 
 /**
  * The interaction feedback contract (design.md §12.7), proved under DELIBERATE delay.
@@ -159,19 +166,13 @@ test.describe("navigation feedback", () => {
   });
 
   test("a route still loading shows a skeleton in place of the page", async ({ page }, testInfo) => {
+    // The warm case: the static loading boundary is prefetched, the route commits at once, and the
+    // skeleton is what stands in until the page's own data lands.
+    const destination = await slowNavigationTo(page, /\/admin\/accounts/, SERVER_DELAY_MS);
     await signInAsDirector(page);
 
-    // The first request through is the prefetch of the static loading boundary; everything after it
-    // is the page's own data. This is the warm case, where the route commits at once and the
-    // skeleton is what stands in until the data lands.
-    let seen = 0;
-    await page.route(/\/admin\/accounts/, async (route) => {
-      seen += 1;
-      if (seen > 1) await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY_MS));
-      await route.continue();
-    });
-
     const navigation = await openNavigation(page, testInfo);
+    await destination.warm();
     await navigation.getByRole("link", { name: /user accounts/i }).click({ noWaitAfter: true });
 
     const skeleton = page.getByRole("status");
