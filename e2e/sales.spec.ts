@@ -76,11 +76,12 @@ async function nextStep(page: Page) {
  * The shell carries a switcher in the phone header AND in the tablet-and-up bar; both are in the
  * DOM on every tier and exactly one is on screen, so the visible one is the one to press. The
  * English option is labelled in whichever language is current — "English" or "Kiingereza" — which
- * is why this matches either.
+ * is why this matches either. Below `lg` the compact switcher leads its name with the code it shows
+ * ("EN English"), so the code is optional here.
  */
 async function useLanguage(page: Page, language: "en" | "sw") {
   const option = page
-    .getByRole("button", { name: language === "en" ? /^(English|Kiingereza)$/ : /^Kiswahili$/ })
+    .getByRole("button", { name: language === "en" ? /^(EN )?(English|Kiingereza)$/ : /^(SW )?Kiswahili$/ })
     .filter({ visible: true });
 
   await option.click();

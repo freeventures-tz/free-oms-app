@@ -91,7 +91,8 @@ test("the icon rail fits its items and names them on focus", async ({ page }, te
   await expect(page.getByRole("tooltip")).toHaveText(/storekeepers/i);
 
   // Who is signed in is still on screen at this tier.
-  await expect(page.getByText(/signed in as/i)).toBeVisible();
+  // The sidebar carries the same line from `xl` up; at this width only the top bar's copy shows.
+  await expect(page.getByText(/signed in as/i).filter({ visible: true })).toHaveCount(1);
 });
 
 test("the sidebar stays in reach at the bottom of a long page", async ({ page }, testInfo) => {

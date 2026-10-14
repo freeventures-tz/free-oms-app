@@ -162,6 +162,10 @@ export function AppShell({
       <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-foreground/40 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 motion-reduce:animate-none lg:hidden" />
+          {/* The panel FADES in where it sits rather than sliding in from off screen. Its links prefetch
+              their page's loading skeleton once they are in view; a panel that starts outside the
+              viewport puts them in view only when the slide ends, so a quick tap got the generic
+              skeleton instead of the page-shaped one (design.md §12.7 rule 3). */}
           <Dialog.Content
             id="fv-drawer"
             // Radix makes everything outside inert by hiding it; this says the same thing to the
@@ -176,7 +180,7 @@ export function AppShell({
               event.preventDefault();
               menuButton.current?.focus();
             }}
-            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85%] flex-col gap-6 overflow-y-auto bg-sidebar p-4 duration-200 data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left motion-reduce:animate-none lg:hidden"
+            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85%] flex-col gap-6 overflow-y-auto bg-sidebar p-4 duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 motion-reduce:animate-none lg:hidden"
           >
             <Dialog.Title className="sr-only">{t("common.menu")}</Dialog.Title>
             <span className="text-base font-semibold text-sidebar-foreground">
