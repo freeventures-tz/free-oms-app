@@ -118,7 +118,7 @@ test("the phone top bar fits a 320px screen", async ({ page }, testInfo) => {
   expect(await header.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
 
   // The compact switcher keeps both languages, their full names, and the 44px floor.
-  for (const name of [/^english$/i, /^kiswahili$/i]) {
+  for (const name of [/^en english$/i, /^sw kiswahili$/i]) {
     const box = await header.getByRole("button", { name }).boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);

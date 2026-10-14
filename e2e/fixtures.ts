@@ -56,12 +56,12 @@ export async function expectLandsOn(page: Page, path: string): Promise<void> {
 }
 
 /**
- * The region that carries navigation on this device tier: a drawer on a phone, the rail or sidebar
- * everywhere else. Scoping to it keeps "is this destination offered?" separate from "does this word
+ * The region that carries navigation on this device tier: a drawer below `lg` (phones and portrait
+ * tablets, design.md §3.4), the rail or sidebar from `lg` up. Scoping to it keeps "is this destination offered?" separate from "does this word
  * appear somewhere on the page?".
  */
 export async function openNavigation(page: Page, testInfo: TestInfo) {
-  if (testInfo.project.name === "mobile") {
+  if (testInfo.project.name !== "desktop") {
     await page.getByRole("button", { name: /^menu$/i }).click();
     return page.locator("#fv-drawer");
   }

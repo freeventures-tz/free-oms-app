@@ -230,12 +230,13 @@ describe("the skip link", () => {
 });
 
 describe("the compact language switcher", () => {
-  it("shows the code and keeps the language's full name and state", () => {
+  it("shows the code, names the button code-first, and keeps its state", () => {
     render(shell());
     const header = screen.getByRole("banner");
 
-    const english = within(header).getByRole("button", { name: en.common.english });
-    const swahili = within(header).getByRole("button", { name: en.common.swahili });
+    // Label in name (WCAG 2.5.3): the visible code leads the accessible name.
+    const english = within(header).getByRole("button", { name: `EN ${en.common.english}` });
+    const swahili = within(header).getByRole("button", { name: `SW ${en.common.swahili}` });
 
     expect(english).toHaveTextContent("EN");
     expect(swahili).toHaveTextContent("SW");
