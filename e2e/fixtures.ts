@@ -84,9 +84,14 @@ export async function slowNavigationTo(page: Page, pattern: RegExp, delayMs: num
     }
   };
   // The router reads a prefetch only as far as it needs and then aborts the rest of the stream, so
-  // a prefetch that did its job usually ends as a failed request rather than a finished one.
+  // a prefetch that did its job usually ends as a failed request rather than a finished one. A
+  // failure only counts when the server had already answered with success: a connection that
+  // dropped before any response is a prefetch that never happened.
   page.on("requestfinished", settle);
-  page.on("requestfailed", settle);
+  page.on("requestfailed", async (request) => {
+    const response = await request.response().catch(() => null);
+    if (response?.ok()) settle(request);
+  });
   await page.route(pattern, async (route) => {
     if (!route.request().headers()["next-router-prefetch"]) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));

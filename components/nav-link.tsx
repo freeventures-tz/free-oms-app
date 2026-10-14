@@ -3,7 +3,7 @@
 import Link, { useLinkStatus } from "next/link";
 import { useTranslations } from "next-intl";
 import { Tooltip } from "radix-ui";
-import { createElement, useState } from "react";
+import { createElement, useEffect, useState } from "react";
 
 import { navIconFor } from "@/components/nav-icons";
 import { cn } from "@/lib/utils";
@@ -70,11 +70,23 @@ export function NavLink({
  * wrong: it opens on keyboard focus as well as hover, closes on `Esc`, stays open while the pointer
  * crosses onto it, and is portalled, so the rail's own scroll container cannot clip it.
  *
- * It only ever opens while the rail is icon-only. The `matchMedia` check is read at the moment of
- * opening rather than subscribed to, because that is the only moment the answer matters.
+ * It only ever opens while the rail is icon-only: the `matchMedia` check runs at the moment of
+ * opening, and an open tooltip watches it until it closes.
  */
 function RailTooltip({ label, children }: { label: string; children: React.ReactElement }) {
   const [open, setOpen] = useState(false);
+
+  // While it is open, a window widened past `xl` puts the label on screen beside it, so it closes.
+  // Only an open tooltip listens; the rest of the rail costs nothing.
+  useEffect(() => {
+    if (!open) return;
+    const query = window.matchMedia(ICON_ONLY_QUERY);
+    const close = () => {
+      if (!query.matches) setOpen(false);
+    };
+    query.addEventListener("change", close);
+    return () => query.removeEventListener("change", close);
+  }, [open]);
 
   return (
     <Tooltip.Root

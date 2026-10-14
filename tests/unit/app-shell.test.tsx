@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -151,6 +151,34 @@ describe("the icon rail", () => {
       act(() => link.focus());
 
       expect(await screen.findByRole("tooltip")).toHaveTextContent(en.nav.storekeepers);
+    });
+
+    it("closes an open label when the window widens past the icon-only rail", async () => {
+      // One shared answer for the icon-only query, and every listener the tooltip registers on it.
+      let iconOnly = true;
+      const listeners = new Set<() => void>();
+      window.matchMedia = ((query: string) => ({
+        ...realMatchMedia(query),
+        get matches() {
+          return query.includes("max-width") ? iconOnly : false;
+        },
+        addEventListener: (_: string, listener: () => void) => {
+          listeners.add(listener);
+        },
+        removeEventListener: (_: string, listener: () => void) => {
+          listeners.delete(listener);
+        },
+      })) as unknown as typeof window.matchMedia;
+
+      render(shell());
+      act(() => screen.getByRole("link", { name: en.nav.storekeepers }).focus());
+      expect(await screen.findByRole("tooltip")).toBeInTheDocument();
+
+      // Focus has not moved; only the window has. The label is now on screen beside the icon.
+      iconOnly = false;
+      act(() => listeners.forEach((listener) => listener()));
+
+      await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
     });
   });
 });
