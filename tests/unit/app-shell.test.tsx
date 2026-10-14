@@ -167,6 +167,8 @@ describe("the drawer", () => {
     expect(drawer).toHaveAttribute("aria-modal", "true");
     expect(drawer).toHaveAttribute("id", "fv-drawer");
     expect(drawer).toContainElement(document.activeElement as HTMLElement);
+    // It opens on where you are, never on Sign out, which a stray Enter would then press.
+    expect(within(drawer).getByRole("link", { current: "page" })).toHaveFocus();
     expect(menu).toHaveAttribute("aria-expanded", "true");
 
     await user.keyboard("{Escape}");

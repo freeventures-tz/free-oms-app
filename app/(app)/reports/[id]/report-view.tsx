@@ -168,11 +168,10 @@ function Section({ section }: { section: ReportSection }) {
             aria-controls={bodyId}
             onClick={() => setPressed((current) => !(current ?? wide))}
             data-testid={`report-toggle-${section.key}`}
-            // design.md §11.3: 44px minimum on a phone, where this is the control that opens a
-            // section and a thumb has to find it among sixteen others. From `md` the sections start
-            // open and the row goes back to being a heading, so the floor is lifted rather than
-            // padding out seventeen cards that nobody is tapping.
-            className="flex min-h-11 w-full items-start justify-between gap-3 text-start md:min-h-0"
+            // design.md §11.3: 44px minimum on every touch tier, where this is the control that opens
+            // a section and a thumb has to find it among sixteen others. From `md` the sections
+            // start open, but a tablet is still tapped, so the floor holds until the desktop tier.
+            className="flex min-h-11 w-full items-start justify-between gap-3 text-start xl:min-h-0"
           >
             <span className="flex flex-wrap items-center gap-2">
               {t(`sections.${section.key}`)}
