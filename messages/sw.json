@@ -19,7 +19,10 @@
       "previous": "Iliyotangulia",
       "next": "Ifuatayo"
     },
-    "actionFailed": "Haikufanikiwa. Jaribu tena."
+    "actionFailed": "Haikufanikiwa. Jaribu tena.",
+    "shell": {
+      "skipToContent": "Ruka hadi maudhui makuu"
+    }
   },
   "auth": {
     "signIn": {

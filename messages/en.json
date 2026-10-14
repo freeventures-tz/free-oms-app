@@ -19,7 +19,10 @@
       "previous": "Previous",
       "next": "Next"
     },
-    "actionFailed": "That did not work. Try again."
+    "actionFailed": "That did not work. Try again.",
+    "shell": {
+      "skipToContent": "Skip to main content"
+    }
   },
   "auth": {
     "signIn": {
