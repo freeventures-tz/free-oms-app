@@ -721,6 +721,79 @@ describe("the aggregate gate", () => {
     });
   });
 
+  describe("the record for the rebased base, v0.12.3 (#100)", () => {
+    const OLD_BASE = "2938b3cbaf367069d3b23ff1dbbb793412f8b3af";
+    const NEW_BASE = "61664cfdfde469955c35a862234c857db7246cfe";
+    const NEW_TREE = "b2a6e667f27f82073d3e1493d25034746984941e";
+    const numbered = (count: number, path: (n: number) => string) => Array.from({ length: count }, (_, n) => path(n + 1));
+    // A tree shaped like the new base: 59 unit, 33 integration, 25 E2E and 28 pgTAP files, 55 migrations.
+    const newBaseTree = [
+      "README.md",
+      ...numbered(57, (n) => `tests/unit/u${n}.test.ts`),
+      "tests/unit/app-shell.test.tsx",
+      "tests/unit/pager.test.tsx",
+      ...numbered(33, (n) => `tests/integration/i${n}.test.ts`),
+      ...numbered(25, (n) => `e2e/e${n}.spec.ts`),
+      ...numbered(28, (n) => `supabase/tests/database/${n}.sql`),
+      ...numbered(55, (n) => `supabase/migrations/${n}.sql`),
+    ];
+    /** A git that knows one commit, `base`, holding `tree` with tree id `treeId` and no selector. */
+    const gitAt = (base: string, tree: string[], treeId: string) => (args: string[]) => {
+      if (args[0] === "cat-file" && args[2] === `${base}^{commit}`) return "";
+      if (args[0] === "rev-parse" && args[1] === `${base}^{tree}`) return treeId;
+      if (args[0] === "ls-tree" && args.includes(base)) return (args.at(-1) === "scripts/testing" ? [] : tree).join("\0");
+      throw new Error(`git ${args.join(" ")} exited 128: unknown revision`);
+    };
+    const plan = (tree = newBaseTree, treeId = NEW_TREE, base = NEW_BASE, bootstrap: Record<string, unknown> = BOOTSTRAP_BASELINES) =>
+      baselinePlan({ root: ROOT, git: gitAt(base, tree, treeId), base, head: HEAD, bootstrap });
+
+    it("pins the new base's tree and counts, and keeps the floors measured for the old base", () => {
+      const record = BOOTSTRAP_BASELINES[NEW_BASE];
+      expect(record.tree).toBe(NEW_TREE);
+      expect(record.counts).toEqual({ unit: 59, integration: 33, e2e: 25, pgtap: 28 });
+      expect(record.minimums).toEqual(BOOTSTRAP_BASELINES[OLD_BASE].minimums);
+      // The same runner configuration decides which files count as tests on both bases.
+      expect(record.suites).toEqual(BOOTSTRAP_BASELINES[OLD_BASE].suites);
+      expect(record.migrations).toEqual(BOOTSTRAP_BASELINES[OLD_BASE].migrations);
+      // The old base's record is still there, unchanged, and nothing else is approved.
+      expect(Object.keys(BOOTSTRAP_BASELINES).sort()).toEqual([OLD_BASE, NEW_BASE]);
+      expect(BOOTSTRAP_BASELINES[OLD_BASE].tree).toBe("8d35ee599f654df75a1ce2fc2e8dbb5ec07802cf");
+      expect(BOOTSTRAP_BASELINES[OLD_BASE].counts).toEqual({ unit: 57, integration: 33, e2e: 25, pgtap: 28 });
+    });
+
+    it("plans a matching tree in full with every test required and the record's floors", () => {
+      const basePlan = plan();
+      expect(basePlan.mode).toBe("full");
+      expect(basePlan.identity).toMatchObject({ base: NEW_BASE, inventoryRev: NEW_BASE, baseTree: NEW_TREE });
+      expect(basePlan.execution.unit.files).toHaveLength(59);
+      expect(basePlan.execution.unit.files).toContain("tests/unit/app-shell.test.tsx");
+      expect(basePlan.execution.integration.files).toHaveLength(33);
+      expect(basePlan.execution.e2e.files).toHaveLength(25);
+      expect(basePlan.execution.pgtap.files).toHaveLength(28);
+      expect(basePlan.execution.projects).toEqual(["mobile", "tablet", "desktop"]);
+      expect(basePlan.minimums).toMatchObject({ migrations: 55, pgtapFiles: 28, pgtapAssertions: 1926, migrationChainCounterexamples: 155 });
+    });
+
+    it("refuses the new base when its tree, test counts, migrations or pgTAP files disagree with the record", () => {
+      expect(() => plan(newBaseTree, "d".repeat(40))).toThrow(`the base ${NEW_BASE} has tree ${"d".repeat(40)}, not the approved ${NEW_TREE}`);
+      // The old base's record does not cover the new tree, and the new record does not cover the old one.
+      expect(() => plan(newBaseTree, NEW_TREE, OLD_BASE)).toThrow(`the base ${OLD_BASE} has tree ${NEW_TREE}, not the approved 8d35ee599f654df75a1ce2fc2e8dbb5ec07802cf`);
+      // Each count is checked on its own.
+      expect(() => plan(newBaseTree.filter((file) => file !== "tests/unit/pager.test.tsx"))).toThrow("unit holds 58 files, the record 59");
+      expect(() => plan([...newBaseTree, "tests/integration/extra.test.ts"])).toThrow("integration holds 34 files, the record 33");
+      expect(() => plan(newBaseTree.filter((file) => file !== "e2e/e25.spec.ts"))).toThrow("e2e holds 24 files, the record 25");
+      expect(() => plan([...newBaseTree, "supabase/migrations/56.sql"])).toThrow("the tree holds 56 migrations, the record 55");
+      expect(() => plan(newBaseTree.filter((file) => file !== "supabase/tests/database/28.sql"))).toThrow(
+        "pgtap holds 27 files, the record 28; the tree holds 27 pgTAP files, the record's floor is 28",
+      );
+      // Without its record the new base has no baseline at all.
+      const withoutNew = Object.fromEntries(Object.entries(BOOTSTRAP_BASELINES).filter(([base]) => base !== NEW_BASE));
+      expect(() => plan(newBaseTree, NEW_TREE, NEW_BASE, withoutNew)).toThrow(
+        `the base ${NEW_BASE} has no selector and no approved bootstrap record, so its minimum is unknown`,
+      );
+    });
+  });
+
   it("refuses unreadable report files by name", () => {
     expect(decide({ reportProblems: ["unit.vitest.json cannot be parsed: Unexpected token"] }).refusals).toContain(
       "unit.vitest.json cannot be parsed: Unexpected token",

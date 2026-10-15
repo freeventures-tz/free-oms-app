@@ -337,6 +337,30 @@ export const BOOTSTRAP_BASELINES = {
       responsiveProjects: ["mobile", "tablet", "desktop"],
     },
   },
+  // v0.12.3 on main (#100), the base #99 was rebased onto. #100 added two unit files and changed no
+  // pgTAP file, migration or migration-chain source, so the floors are the ones measured above.
+  "61664cfdfde469955c35a862234c857db7246cfe": {
+    tree: "b2a6e667f27f82073d3e1493d25034746984941e",
+    suites: {
+      // vitest.config.mts, project unit
+      unit: ["tests/unit/**/*.test.{ts,tsx}"],
+      // vitest.config.mts, project integration
+      integration: ["tests/integration/**/*.test.ts"],
+      // playwright.config.ts: testDir ./e2e with Playwright's default testMatch
+      e2e: ["e2e/**/*.{spec,test}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"],
+      // supabase test db
+      pgtap: ["supabase/tests/**/*.sql"],
+    },
+    counts: { unit: 59, integration: 33, e2e: 25, pgtap: 28 },
+    migrations: ["supabase/migrations/*.sql"],
+    minimums: {
+      migrations: 55,
+      pgtapFiles: 28,
+      pgtapAssertions: 1926,
+      migrationChainCounterexamples: 155,
+      responsiveProjects: ["mobile", "tablet", "desktop"],
+    },
+  },
 };
 
 /**
