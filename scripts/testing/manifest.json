@@ -64,7 +64,7 @@
     { "pattern": "app/{auth,sign-in,first-login,no-access}/**", "reason": "authentication screens" },
     { "pattern": "app/(app)/admin/**", "reason": "account administration" },
     { "pattern": "components/{ui,auth}/**", "reason": "shared UI components" },
-    { "pattern": "components/{app-shell.tsx,nav-link.tsx,language-switcher.tsx}", "reason": "shared shell" },
+    { "pattern": "components/{app-shell.tsx,nav-link.tsx,nav-icons.ts,language-switcher.tsx}", "reason": "shared shell" },
     { "pattern": "{i18n,messages}/**", "reason": "translation dictionaries reach every screen" },
     { "pattern": "public/sw.js", "reason": "the service worker caches every page" }
   ],
