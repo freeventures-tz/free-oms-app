@@ -54,10 +54,37 @@
       "suite": "e2e",
       "file": "e2e/responsive-shell.spec.ts",
       "title": "the rail or sidebar sits beside the page, not above it",
-      "projects": ["mobile"],
-      "reason": "The phone has a drawer, not a rail; the drawer is tested on mobile in the same file.",
+      "projects": ["mobile", "tablet"],
+      "reason": "Phones and portrait tablets have a drawer, not a rail or sidebar. The drawer is tested on both tiers by \"the navigation matches the device tier\" in the same file; this test runs on desktop at the rail (1100px) and sidebar (1440px) widths.",
       "owner": "Owner",
       "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the icon rail fits its items and names them on focus",
+      "projects": ["mobile", "tablet"],
+      "reason": "The icon rail is the `lg` tier, which neither the phone nor the portrait tablet reaches; they have a drawer, tested on both by \"the navigation matches the device tier\" in the same file. This test runs on desktop, resized to the rail width (1100px).",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the sidebar stays in reach at the bottom of a long page",
+      "projects": ["mobile", "tablet"],
+      "reason": "Phones and portrait tablets have no sidebar; their drawer opens from the top bar and is tested on both by \"the navigation matches the device tier\" in the same file. This test runs on desktop.",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the phone top bar fits a 320px screen",
+      "projects": ["tablet", "desktop"],
+      "reason": "The test sets its own 320px viewport, the narrowest phone, and runs on the mobile tier with phone touch emulation. On tablet or desktop it would repeat the same 320px check without the phone profile, so the mobile run of this test is its coverage.",
+      "owner": "Owner",
+      "review": "Permanent: the narrowest phone is a phone (design.md §3)."
     },
     {
       "suite": "e2e",

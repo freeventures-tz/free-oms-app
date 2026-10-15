@@ -405,6 +405,52 @@ describe("the aggregate gate", () => {
     }
   });
 
+  it("accepts #100's seven responsive-shell tier skips, and nothing beside them", () => {
+    const { skips } = JSON.parse(readFileSync(join(process.cwd(), "scripts/testing/known-skips.json"), "utf8"));
+    const RAIL = "the rail or sidebar sits beside the page, not above it";
+    const ICONS = "the icon rail fits its items and names them on focus";
+    const REACH = "the sidebar stays in reach at the bottom of a long page";
+    const TOP_BAR = "the phone top bar fits a 320px screen";
+    const seven: Array<[string, string]> = [
+      ["tablet", RAIL],
+      ["mobile", ICONS],
+      ["tablet", ICONS],
+      ["mobile", REACH],
+      ["tablet", REACH],
+      ["tablet", TOP_BAR],
+      ["desktop", TOP_BAR],
+    ];
+    const asSkipped = (rows: Array<[string, string]>) =>
+      normalisePlaywright(
+        playwrightJson([...allE2e, ...rows.map(([project, title]): [string, string, string, string] => ["responsive-shell.spec.ts", project, title, "skipped"])]),
+      );
+
+    const accepted = decide({ reports: replace("e2e", asSkipped(seven)), knownSkips: skips });
+    expect(accepted.refusals).toEqual([]);
+    expect(accepted.pass).toBe(true);
+
+    // Each test still has to run on the tier it is for.
+    const wrongTier: Array<[string, string]> = [
+      ["desktop", RAIL],
+      ["desktop", ICONS],
+      ["desktop", REACH],
+      ["mobile", TOP_BAR],
+    ];
+    for (const row of wrongTier) {
+      const refused = decide({ reports: replace("e2e", asSkipped([row])), knownSkips: skips });
+      expect(refused.pass, row.join(" ")).toBe(false);
+      expect(refused.refusals).toContain(`e2e: unexplained skip e2e:e2e/responsive-shell.spec.ts:${row[0]}:${row[1]}`);
+    }
+
+    // A title the list does not name is refused on every tier, in the same file.
+    for (const project of ["mobile", "tablet", "desktop"]) {
+      const title = "a skip link is the first stop and lands on the page";
+      const refused = decide({ reports: replace("e2e", asSkipped([[project, title]])), knownSkips: skips });
+      expect(refused.pass, project).toBe(false);
+      expect(refused.refusals).toContain(`e2e: unexplained skip e2e:e2e/responsive-shell.spec.ts:${project}:${title}`);
+    }
+  });
+
   describe("review findings R1 to R4", () => {
     it("R3: refuses one passing test per file when the runner listed more", () => {
       // The review's probe: a report with just one passing case per required file. The listing says
