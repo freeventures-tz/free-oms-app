@@ -290,9 +290,9 @@ describe("a build that has been served", () => {
 });
 
 describe("this repository as a candidate", () => {
-  it("has consistent 0.12.3 metadata across package, both lockfile fields and the changelog", () => {
+  it("has consistent 0.12.4 metadata across package, both lockfile fields and the changelog", () => {
     expect(described.metadata).toEqual([]);
-    expect(described.identity.version).toEqual({ package: "0.12.3", lockfile: "0.12.3", lockfileRoot: "0.12.3", changelog: "0.12.3" });
+    expect(described.identity.version).toEqual({ package: "0.12.4", lockfile: "0.12.4", lockfileRoot: "0.12.4", changelog: "0.12.4" });
   });
 
   it("holds all 55 migrations, the report migration among them, and the released manifests", () => {
