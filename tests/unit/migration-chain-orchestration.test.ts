@@ -1,6 +1,11 @@
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
+import { describeCandidate } from "@/scripts/testing/release.mjs";
 
 /**
  * What the migration-chain command REPORTS, as opposed to what it proves.
@@ -20,11 +25,33 @@ import { runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
 
 type Call = { command: string; args: string[] };
 
+const MIGRATIONS = join("supabase", "migrations");
+const MANIFEST = join("supabase", "release-checks", "v0121_migration_manifest.txt");
+
+/**
+ * A disposable copy of what the command reads and moves: the migrations and the released-history
+ * manifest. Parking a release's later migrations renames real files, so it happens here and never
+ * in the checkout, where other unit files read the migrations at the same time.
+ */
+function disposableRoot() {
+  const root = mkdtempSync(join(tmpdir(), "oms-migration-chain-"));
+  cpSync(MIGRATIONS, join(root, MIGRATIONS), { recursive: true });
+  cpSync(MANIFEST, join(root, MANIFEST));
+  return root;
+}
+
+const sqlFiles = (dir: string) =>
+  readdirSync(dir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+
 /**
  * A stand-in for the real command surface.
  *
  * `failOn` names the step that should blow up: `"proof"` fails the partial reset that starts the
- * proof, `"restore"` fails the full reset at the end, and both may be named at once.
+ * proof, `"restore"` fails the full reset at the end, and both may be named at once. `during` runs
+ * inside every supabase call, with the disposable root, so a test can look at the filesystem while
+ * the command has migrations parked.
  */
 function harness(
   failOn: Array<
@@ -35,14 +62,17 @@ function harness(
     | "counterexample-unseen"
     | "masked-rename"
   > = [],
+  during: (args: string[], root: string) => void = () => {},
 ) {
   const calls: Call[] = [];
   const out: string[] = [];
   const errors: string[] = [];
   let reads = 0;
+  const root = disposableRoot();
 
   const supabase = (args: string[]) => {
     calls.push({ command: "supabase", args });
+    during(args, root);
     // The partial reset — `db reset --version <migration 21>` — is the first thing the proof does.
     if (failOn.includes("proof") && args.includes("--version")) {
       throw new Error("supabase db reset --version exited 1");
@@ -54,6 +84,7 @@ function harness(
   };
 
   const code = runMigrationChainCheck({
+    root,
     supabase,
     psqlFile: (path: string) => calls.push({ command: "psql", args: [path] }),
     // Stands in for the psql line the real query returns. Its price count follows whether this
@@ -113,6 +144,8 @@ function harness(
     log: (line: string) => out.push(line),
     error: (line: string) => errors.push(line),
   });
+  // The command catches its own failures, including one thrown by `during`, so it always returns.
+  rmSync(root, { recursive: true, force: true });
 
   return { code, calls, out: out.join("\n"), errors: errors.join("\n") };
 }
@@ -468,5 +501,45 @@ describe("the migration-chain command's verdict", () => {
     expect(errors).toContain("migration-chain: FAIL");
     expect(errors).toContain("supabase db reset --version exited 1");
     expect(errors).toContain("could not restore the local database");
+  });
+});
+
+describe("where the command parks migrations", () => {
+  // Identity reads the checkout's migrations, as `testing-release-identity.test.ts` does when it is
+  // imported. Unit files run in parallel, so that read can land while a run here has a release's
+  // later migrations parked. Reading at exactly that moment, on every parked step, makes the race
+  // deterministic: the checkout must still hold every migration.
+  const git = (args: string[]) => {
+    const key = args.join(" ");
+    if (key === "status --porcelain=v1 --untracked-files=all") return "";
+    if (key === "rev-parse HEAD") return "b".repeat(40);
+    if (key === "rev-parse HEAD^{tree}") return "c".repeat(40);
+    throw new Error(`unexpected git ${key}`);
+  };
+
+  it("leaves the checkout's migrations in place while fixture migrations are parked", () => {
+    const checkout = sqlFiles(MIGRATIONS);
+    const reads: Array<{ parked: number; identity: string[] }> = [];
+
+    // Every apply step reads identity from the checkout. On the steps that measure one release, the
+    // command has that release's later migrations parked at that moment.
+    const { code, errors } = harness([], (args, root) => {
+      if (args[0] !== "migration" || args[1] !== "up") return;
+      const held = join(root, "supabase", ".migration-chain-held");
+      const candidate = describeCandidate(process.cwd(), git, {});
+      reads.push({
+        parked: existsSync(held) ? sqlFiles(held).length : 0,
+        identity: candidate.identity.migrations.files.map((entry: { file: string }) => entry.file),
+      });
+    });
+
+    expect(errors).toBe("");
+    expect(code).toBe(0);
+    for (const read of reads) expect(read.identity).toEqual(checkout);
+    // And the parking really happened, in the disposable root, at more than one boundary, so those
+    // reads were taken while files were out.
+    expect(reads.filter((read) => read.parked > 0).length).toBeGreaterThan(1);
+    expect(sqlFiles(MIGRATIONS)).toEqual(checkout);
+    expect(readdirSync("supabase")).not.toContain(".migration-chain-held");
   });
 });

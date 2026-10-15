@@ -1078,10 +1078,10 @@ function describePreservation(line) {
  * deliberately still does: it is the standing check that a NEW migration has not broken the
  * oldest boundary in the repository.
  */
-function withMigrationsUpTo(upTo, run) {
+function withMigrationsUpTo(root, upTo, run) {
   if (!upTo) return run();
 
-  const dir = join("supabase", "migrations");
+  const dir = join(root, "supabase", "migrations");
   const held = readdirSync(dir)
     .filter((name) => name.endsWith(".sql") && name.slice(0, 14) > upTo)
     .sort();
@@ -1114,8 +1114,8 @@ function withMigrationsUpTo(upTo, run) {
  * it sits on disk would fail on one developer machine and pass on another. What the hosted database
  * received is the repository bytes, which is what this compares.
  */
-function assertReleasedMigrationsUnchanged({ log }) {
-  const manifest = readFileSync(MIGRATION_MANIFEST, "utf8")
+function assertReleasedMigrationsUnchanged({ root, log }) {
+  const manifest = readFileSync(join(root, MIGRATION_MANIFEST), "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim() && !line.startsWith("#"))
     .map((line) => {
@@ -1125,7 +1125,7 @@ function assertReleasedMigrationsUnchanged({ log }) {
 
   const moved = [];
   for (const { digest, name } of manifest) {
-    const path = join("supabase", "migrations", name);
+    const path = join(root, "supabase", "migrations", name);
     let actual;
     try {
       actual = createHash("sha256")
@@ -1148,7 +1148,7 @@ function assertReleasedMigrationsUnchanged({ log }) {
 
   // And nothing may be INSERTED among them either: a new migration sorts after the released ones
   // or it changes the order in which the hosted database would have applied them.
-  const onDisk = readdirSync(join("supabase", "migrations")).filter((n) => n.endsWith(".sql")).sort();
+  const onDisk = readdirSync(join(root, "supabase", "migrations")).filter((n) => n.endsWith(".sql")).sort();
   const released = manifest.map((m) => m.name);
   const prefix = onDisk.slice(0, released.length);
 
@@ -1171,13 +1171,17 @@ function assertReleasedMigrationsUnchanged({ log }) {
  * Injected rather than reached for directly, so the orchestration — which failure exits non-zero,
  * which one still prints PASS, whether the restore runs at all — is testable without a database and
  * without breaking a migration to force a red state.
+ *
+ * `root` is where the migrations are read and parked. The command runs at the checkout ("."); a test
+ * passes a disposable copy, because parking moves files and the checkout's own migrations must stay
+ * where every other test reads them.
  */
-export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, error }) {
+export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, error, root = "." }) {
   let proofFailure = null;
 
   try {
     // Before any database work: the released history this whole harness assumes is intact.
-    assertReleasedMigrationsUnchanged({ log });
+    assertReleasedMigrationsUnchanged({ root, log });
 
     for (const phase of PHASES) {
       for (const fixture of phase.fixtures) {
@@ -1228,7 +1232,7 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
             ? "\n--- applying this release only, up to " + phase.upTo + ", the ordinary way ---"
             : "\n--- applying everything after it, the ordinary way ---",
         );
-        withMigrationsUpTo(phase.upTo, () => supabase(["migration", "up", "--local"]));
+        withMigrationsUpTo(root, phase.upTo, () => supabase(["migration", "up", "--local"]));
 
         log("\n--- running the same preservation query, after ---");
         const after = preservation(phase.query);
