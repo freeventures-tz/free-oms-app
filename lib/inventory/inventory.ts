@@ -159,41 +159,70 @@ function nameOf(profile: unknown): string {
 }
 
 /**
- * Approval rows for a set of entities, keyed by entity id.
+ * How many ids one read asks for. The Data API answers with at most `max_rows` rows (1,000,
+ * supabase/config.toml) and does not say when it stopped there, so a read keyed by nothing returns
+ * an arbitrary thousand once the table outgrows it: receipts would lose their lines, and an approved
+ * record would fall back to "pending". Every read below is therefore keyed by the records the board
+ * actually shows, a hundred at a time, which also keeps the request line short.
+ */
+const ID_CHUNK = 100;
+
+function chunksOf(ids: string[]): string[][] {
+  const out: string[][] = [];
+  for (let start = 0; start < ids.length; start += ID_CHUNK) out.push(ids.slice(start, start + ID_CHUNK));
+  return out;
+}
+
+/**
+ * Approval rows for the entities a board shows, keyed by entity id.
  *
- * One query for the whole board rather than one per record: twenty pending receipts would otherwise
+ * One read per hundred records rather than one per record: twenty pending receipts would otherwise
  * be twenty round trips, and on this deployment a round trip crosses the Atlantic twice
- * (reviews/pr-04-review-brief.md §2).
+ * (reviews/pr-04-review-brief.md §2). The requests and their decisions are both keyed by the same
+ * ids, so they are asked for together instead of one after the other.
  */
 async function approvalsFor(
   supabase: Awaited<ReturnType<typeof createServerSupabase>>,
   entityType: string,
+  entityIds: string[],
 ): Promise<Map<string, ApprovalState>> {
-  const rows = requireRows(
-    await supabase
-      .from("approval_requests")
-      .select(`
-        entity_id, status, approved_at, approved_role,
-        profiles!approval_requests_approved_by_fkey(full_name)
-      `)
-      .eq("entity_type", entityType),
-    `inventory.approvals.${entityType}`,
-  );
+  const byEntity = new Map<string, ApprovalState>();
+  if (entityIds.length === 0) return byEntity;
+  const parts = chunksOf(entityIds);
 
   // The decision itself, for the reason a rejection carries. `approval_requests` deliberately holds
   // no rejector — §4.3 — so the note and the decider come from append-only decision history.
-  const decisions = requireRows(
-    await supabase
-      .from("approval_decisions")
-      .select(`
-        request_id, outcome, note, decided_at, decided_role,
-        approval_requests!inner(entity_id, entity_type),
-        profiles!approval_decisions_decided_by_fkey(full_name)
-      `)
-      .eq("approval_requests.entity_type", entityType)
-      .order("decided_at", { ascending: false }),
-    `inventory.decisions.${entityType}`,
-  );
+  const [requestParts, decisionParts] = await Promise.all([
+    Promise.all(
+      parts.map((ids) =>
+        supabase
+          .from("approval_requests")
+          .select(`
+            entity_id, status, approved_at, approved_role,
+            profiles!approval_requests_approved_by_fkey(full_name)
+          `)
+          .eq("entity_type", entityType)
+          .in("entity_id", ids),
+      ),
+    ),
+    Promise.all(
+      parts.map((ids) =>
+        supabase
+          .from("approval_decisions")
+          .select(`
+            request_id, outcome, note, decided_at, decided_role,
+            approval_requests!inner(entity_id, entity_type),
+            profiles!approval_decisions_decided_by_fkey(full_name)
+          `)
+          .eq("approval_requests.entity_type", entityType)
+          .in("approval_requests.entity_id", ids)
+          .order("decided_at", { ascending: false }),
+      ),
+    ),
+  ]);
+  const rows = requestParts.flatMap((part) => requireRows(part, `inventory.approvals.${entityType}`));
+  // Each entity is in exactly one chunk, so newest-first within a chunk is newest-first per entity.
+  const decisions = decisionParts.flatMap((part) => requireRows(part, `inventory.decisions.${entityType}`));
 
   const latestDecision = new Map<
     string,
@@ -211,7 +240,6 @@ async function approvalsFor(
     });
   }
 
-  const byEntity = new Map<string, ApprovalState>();
   for (const row of rows) {
     const entityId = row.entity_id as string;
     const decision = latestDecision.get(entityId) ?? null;
@@ -364,8 +392,8 @@ export async function loadSuppliers(): Promise<Supplier[]> {
 export async function loadReceipts(): Promise<StockReceipt[]> {
   const supabase = await createServerSupabase();
 
-  const [receiptRows, lineRows] = await Promise.all([
-    supabase
+  const receipts = requireRows(
+    await supabase
       .from("stock_receipts")
       .select(`
         id, supplier_id, location_code, delivery_note_ref, delivery_date, entered_role, entered_at,
@@ -374,18 +402,27 @@ export async function loadReceipts(): Promise<StockReceipt[]> {
       `)
       .order("entered_at", { ascending: false })
       .limit(200),
-    supabase.from("stock_receipt_lines").select(`
-        id, receipt_id, product_id, expected_quantity, received_quantity, damaged_quantity,
-        short_quantity, excess_quantity, accepted_quantity, damage_note
-      `),
-  ]);
+    "inventory.receipts",
+  );
+  const receiptIds = receipts.map((row) => row.id as string);
 
-  const receipts = requireRows(receiptRows, "inventory.receipts");
-  const lines = requireRows(lineRows, "inventory.receipt_lines");
-  const [approvals, paidFrom] = await Promise.all([
-    approvalsFor(supabase, "stock_receipt"),
-    imprestLinksFor(receipts.map((row) => row.id as string)),
+  // Lines, approvals and payments are all keyed by the receipts above, so they travel together.
+  const [lineParts, approvals, paidFrom] = await Promise.all([
+    Promise.all(
+      chunksOf(receiptIds).map((ids) =>
+        supabase
+          .from("stock_receipt_lines")
+          .select(`
+            id, receipt_id, product_id, expected_quantity, received_quantity, damaged_quantity,
+            short_quantity, excess_quantity, accepted_quantity, damage_note
+          `)
+          .in("receipt_id", ids),
+      ),
+    ),
+    approvalsFor(supabase, "stock_receipt", receiptIds),
+    imprestLinksFor(receiptIds),
   ]);
+  const lines = lineParts.flatMap((part) => requireRows(part, "inventory.receipt_lines"));
 
   const linesByReceipt = new Map<string, ReceiptLine[]>();
   for (const row of lines) {
@@ -508,8 +545,8 @@ export async function loadImprestPaymentOptions(): Promise<PaidFromDisbursement[
 export async function loadTransfers(): Promise<StockTransfer[]> {
   const supabase = await createServerSupabase();
 
-  const [transferRows, lineRows] = await Promise.all([
-    supabase
+  const transfers = requireRows(
+    await supabase
       .from("stock_transfers")
       .select(`
         id, from_location, to_location, note, entered_at,
@@ -517,12 +554,19 @@ export async function loadTransfers(): Promise<StockTransfer[]> {
       `)
       .order("entered_at", { ascending: false })
       .limit(200),
-    supabase.from("stock_transfer_lines").select("id, transfer_id, product_id, quantity"),
-  ]);
+    "inventory.transfers",
+  );
+  const transferIds = transfers.map((row) => row.id as string);
 
-  const transfers = requireRows(transferRows, "inventory.transfers");
-  const lines = requireRows(lineRows, "inventory.transfer_lines");
-  const approvals = await approvalsFor(supabase, "stock_transfer");
+  const [lineParts, approvals] = await Promise.all([
+    Promise.all(
+      chunksOf(transferIds).map((ids) =>
+        supabase.from("stock_transfer_lines").select("id, transfer_id, product_id, quantity").in("transfer_id", ids),
+      ),
+    ),
+    approvalsFor(supabase, "stock_transfer", transferIds),
+  ]);
+  const lines = lineParts.flatMap((part) => requireRows(part, "inventory.transfer_lines"));
 
   const linesByTransfer = new Map<string, TransferLine[]>();
   for (const row of lines) {
@@ -563,7 +607,11 @@ export async function loadAdjustments(): Promise<StockAdjustment[]> {
     "inventory.adjustments",
   );
 
-  const approvals = await approvalsFor(supabase, "stock_adjustment");
+  const approvals = await approvalsFor(
+    supabase,
+    "stock_adjustment",
+    rows.map((row) => row.id as string),
+  );
 
   return rows.map((row) => ({
     id: row.id as string,
