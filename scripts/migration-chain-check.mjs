@@ -1175,16 +1175,35 @@ function assertReleasedMigrationsUnchanged({ root, log }) {
  * `root` is where the migrations are read and parked. The command runs at the checkout ("."); a test
  * passes a disposable copy, because parking moves files and the checkout's own migrations must stay
  * where every other test reads them.
+ *
+ * `shard` runs one part of the proofs, `{ index, total }`, so CI can spread them over parallel jobs
+ * that each have their own database. Every proof starts from its own partial reset and reads
+ * nothing another proof left, which is what makes them separable: each fixture of each phase, the
+ * migration 33 boundary, and each report scenario is one proof. They are dealt out in order, one to
+ * each shard in turn. Every shard checks the released history first and restores the database last,
+ * and all the shards together run exactly what the command runs without `shard`.
  */
-export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, error, root = "." }) {
+export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, error, root = ".", shard = null }) {
   let proofFailure = null;
+  let proof = 0;
+  let taken = 0;
+  /** Whether the next proof in order belongs to this shard. Called once per proof, in order. */
+  const mine = () => {
+    const take = !shard || proof % shard.total === shard.index - 1;
+    proof += 1;
+    if (take) taken += 1;
+    return take;
+  };
 
   try {
+    if (shard) log(`--- shard ${shard.index} of ${shard.total} ---`);
+
     // Before any database work: the released history this whole harness assumes is intact.
     assertReleasedMigrationsUnchanged({ root, log });
 
     for (const phase of PHASES) {
       for (const fixture of phase.fixtures) {
+        if (!mine()) continue;
         log(`\n=== ${phase.subject} · fixture: ${fixture.name} ===`);
 
         log(`--- resetting to migration ${phase.version} (${phase.describes}) ---`);
@@ -1300,15 +1319,18 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
     // every migration has applied, and the phases above measure the two ends of the upgrade rather
     // than the middle of it. A hosted apply sits here for as long as it takes, so this is where a
     // public table without row-level security would actually be exposed.
-    log(`\n=== the boundary · migration ${MIGRATION_33_VERSION} alone ===`);
-    supabase(["db", "reset", "--version", MIGRATION_33_VERSION]);
-    psqlFile(ASSERT_MIGRATION_33);
+    if (mine()) {
+      log(`\n=== the boundary · migration ${MIGRATION_33_VERSION} alone ===`);
+      supabase(["db", "reset", "--version", MIGRATION_33_VERSION]);
+      psqlFile(ASSERT_MIGRATION_33);
+    }
 
     // THE SUCCESS → RETRY BOUNDARY (issue #51, from issue #19's harness). A different question from
     // every phase above: not "did the migration preserve the business", but "can the retry
     // migration even RUN against a database that has already produced a report, and is that report
     // the same afterwards?" — and the answer to the first half used to be no.
     for (const scenario of REPORT_SCENARIOS) {
+      if (!mine()) continue;
       log(`\n=== report boundary: ${scenario.name} ===`);
 
       log(`--- resetting to migration ${REPORT_SUCCESS_VERSION} (the success path, before the retries) ---`);
@@ -1379,8 +1401,20 @@ export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, 
   }
   if (proofFailure || restoreFailure) return 1;
 
+  if (shard) log(`\n--- shard ${shard.index} of ${shard.total}: ${taken} of ${proof} proofs ---`);
   log("\nmigration-chain: PASS");
   return 0;
+}
+
+/** `--shard 2/4` from the command line, or null. Anything else that names a shard is refused. */
+export function parseShard(argv) {
+  const at = argv.indexOf("--shard");
+  if (at < 0) return null;
+  const match = /^(\d+)\/(\d+)$/.exec(argv[at + 1] ?? "");
+  const index = Number(match?.[1]);
+  const total = Number(match?.[2]);
+  if (!match || index < 1 || index > total) throw new Error(`--shard must look like 2/4, not ${argv[at + 1] ?? "(nothing)"}`);
+  return { index, total };
 }
 
 const invokedDirectly =
@@ -1390,6 +1424,7 @@ if (invokedDirectly) {
   const container = `supabase_db_${projectId()}`;
   process.exit(
     runMigrationChainCheck({
+      shard: parseShard(process.argv.slice(2)),
       supabase: (args) => run(process.execPath, [SUPABASE_CLI, ...args]),
       psqlFile: (path) => psqlIn(container, path, [], true),
       preservation: (path) => readPreservation(container, path),

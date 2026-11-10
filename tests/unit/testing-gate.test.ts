@@ -348,6 +348,20 @@ describe("the aggregate gate", () => {
     expect(refusals).toContain("pgtap: required file supabase/tests/database/002_stock.sql did not run");
   });
 
+  it("adds the migration chain's shards up, and refuses a missing one or too few counterexamples", () => {
+    const part = (lines: string[], index: number) =>
+      normaliseMigrationChain([...lines.map((name) => `--- counterexample: ${name} ---`), "", "migration-chain: PASS"].join("\n"), { index, total: 2 });
+    const others = goodReports().filter((report) => report.suite !== "migrationChain");
+    // The same counterexample name in both shards is two tests, not one reported twice.
+    const both = [...others, part(["one", "two"], 1), part(["one"], 2)];
+    expect(decide({ reports: both }).refusals).toEqual([]);
+    expect(decide({ reports: both }).summary.migrationChain.total).toBe(3);
+    expect(decide({ reports: [...others, part(["one", "two", "three"], 1)] }).refusals).toContain("migrationChain: shard 2 of 2 is missing");
+    expect(decide({ reports: [...others, part(["one"], 1), part(["one"], 2)] }).refusals).toContain("migrationChain: 2 counterexamples ran; at least 3 are required");
+    const failed = normaliseMigrationChain("--- counterexample: one ---\n!! migration-chain: FAIL", { index: 2, total: 2 });
+    expect(decide({ reports: [...others, part(["one", "two"], 1), failed] }).pass).toBe(false);
+  });
+
   it("refuses two unsharded reports for one suite", () => {
     expect(decide({ reports: [...goodReports(), normalisePgTap(PGTAP)] }).refusals).toContain("pgtap: 2 unsharded reports; expected one");
   });

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { discoverInventory, gitRunner, matchesAny, repositoryFiles } from "@/scripts/testing/common.mjs";
 import { buildGraph, importSpecifiers } from "@/scripts/testing/graph.mjs";
+import { NEVER_PARTIAL } from "@/scripts/testing/gate.mjs";
 import { validateManifest } from "@/scripts/testing/select.mjs";
 
 /**
@@ -26,6 +27,7 @@ describe("the reviewed test manifest", () => {
     const unmapped = files.filter((file) => {
       if (Object.values(manifest.suites as Record<string, string[]>).some((globs) => matchesAny(file, globs))) return false;
       if (manifest.forceFull.some((rule: { pattern: string }) => matchesAny(file, [rule.pattern]))) return false;
+      if (manifest.appCritical.some((rule: { pattern: string }) => matchesAny(file, [rule.pattern]))) return false;
       if (manifest.appWide.some((rule: { pattern: string }) => matchesAny(file, [rule.pattern]))) return false;
       if (matchesAny(file, manifest.docsOnly)) return false;
       return !Object.values(manifest.domains as Record<string, { sources: string[] }>).some((domain) => matchesAny(file, domain.sources));
@@ -96,8 +98,24 @@ describe("the reviewed test manifest", () => {
     }
   });
 
-  it("sends authentication, permissions, and money and stock commands to every suite", () => {
+  it("holds every path the gate will not let a lane shrink", () => {
+    // Samples of each NEVER_PARTIAL pattern: the manifest must send them all to full coverage.
     const full = (path: string) => manifest.forceFull.some((rule: { pattern: string }) => matchesAny(path, [rule.pattern]));
+    for (const pattern of NEVER_PARTIAL as string[]) {
+      const sample = pattern.replace("/**", "/any/file.ts");
+      expect(full(sample), sample).toBe(true);
+    }
+  });
+
+  it("puts no path in two classes, so a change has one lane and one reason", () => {
+    const classes: Record<string, Array<{ pattern: string }>> = { forceFull: manifest.forceFull, appCritical: manifest.appCritical, appWide: manifest.appWide };
+    const twice = files.filter((file) => Object.values(classes).filter((rules) => rules.some((rule) => matchesAny(file, [rule.pattern]))).length > 1);
+    expect(twice).toEqual([]);
+  });
+
+  it("marks authentication, permissions, and money and stock commands as high-risk application code", () => {
+    // Every E2E spec and every test that imports them runs (select.mjs, the app-critical lane).
+    const full = (path: string) => manifest.appCritical.some((rule: { pattern: string }) => matchesAny(path, [rule.pattern]));
     for (const path of [
       "lib/auth/guard.ts",
       "lib/supabase/server.ts",

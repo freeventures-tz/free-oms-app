@@ -19,6 +19,7 @@
     "responsiveProjects": ["mobile", "tablet", "desktop"]
   },
   "retiredTests": [],
+  "e2eShardMinutes": 6,
   "e2eMinutes": {
     "about": "Minutes each spec took on all three projects in the full local run of 16 October 2026. Used only to balance E2E shards; a spec not named here counts as 2.",
     "e2e/authentication.spec.ts": 1.3,
@@ -73,12 +74,16 @@
     { "pattern": "scripts/**", "reason": "release, migration-chain and test infrastructure" },
     { "pattern": ".github/**", "reason": "CI workflow" },
     { "pattern": "{package.json,package-lock.json}", "reason": "dependencies or scripts" },
-    { "pattern": "{next.config.ts,proxy.ts,tsconfig.json,eslint.config.mjs,postcss.config.mjs,components.json,.env.example,.gitignore}", "reason": "application or build configuration" },
+    { "pattern": "{.env.example,.gitignore}", "reason": "what the checkout holds and what the stack reads" },
     { "pattern": "{vitest.config.mts,playwright.config.ts}", "reason": "test runner configuration" },
     { "pattern": "tests/setup/**", "reason": "global test setup" },
     { "pattern": "tests/support/**", "reason": "shared test support" },
     { "pattern": "tests/integration/helpers.ts", "reason": "shared integration helpers" },
     { "pattern": "e2e/{fixtures.ts,global-setup.ts,receipt-photo.ts}", "reason": "shared E2E fixtures" },
+    { "pattern": "vercel.json", "reason": "deployment configuration" }
+  ],
+  "appCritical": [
+    { "pattern": "{next.config.ts,proxy.ts,tsconfig.json,eslint.config.mjs,postcss.config.mjs,components.json}", "reason": "application or build configuration" },
     { "pattern": "lib/{auth,admin,supabase}/**", "reason": "authentication, authorization or the database client" },
     { "pattern": "lib/{imprest,inventory,production,sales,settlement,validation}/**", "reason": "financial or stock commands and their validation" },
     { "pattern": "lib/{money.ts,time/**,stock-refusal.ts}", "reason": "business money, date or stock helpers" },
@@ -89,8 +94,7 @@
     { "pattern": "app/{auth,sign-in,first-login,no-access}/**", "reason": "authentication screens" },
     { "pattern": "app/(app)/admin/**", "reason": "account administration" },
     { "pattern": "components/auth/**", "reason": "authentication screens" },
-    { "pattern": "public/sw.js", "reason": "the service worker caches every page" },
-    { "pattern": "vercel.json", "reason": "deployment configuration" }
+    { "pattern": "public/sw.js", "reason": "the service worker caches every page" }
   ],
   "appWide": [
     { "pattern": "components/ui/**", "reason": "shared interface components reach every screen" },

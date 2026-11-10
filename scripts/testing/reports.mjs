@@ -8,6 +8,7 @@
  *   e2e.playwright.shard-2-of-3.json               one shard of a sharded run
  *   pgtap.log                                      `supabase test db` output (pg_prove)
  *   migration-chain.log                            `npm run test:migration-chain` output
+ *   migration-chain.shard-2-of-4.log               one shard of the chain's proofs (`--shard 2/4`)
  *   unit.vitest-list.json, integration.vitest-list.json, e2e.playwright-list.json
  *                                                  the tests each runner listed before running
  *   e2e.playwright-list.shard-2-of-3.json          one shard's listing; a suite's listings add up
@@ -25,6 +26,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { toPosix } from "./common.mjs";
 
 const NAME = /^(unit|integration|e2e|pgtap|migration-chain)\.(vitest\.json|playwright\.json|log)$|^(e2e)\.playwright\.shard-(\d+)-of-(\d+)\.json$/;
+const CHAIN_SHARD = /^migration-chain\.shard-(\d+)-of-(\d+)\.log$/;
 
 function repoPath(root, path) {
   const posix = toPosix(isAbsolute(path) ? relative(root, path) : path);
@@ -143,13 +145,18 @@ export function normalisePgTap(text) {
   };
 }
 
-/** Each counterexample the harness announces is one test; PASS on the last line is the verdict. */
-/** @param {string} text @returns {any} */
-export function normaliseMigrationChain(text) {
+/**
+ * Each counterexample the harness announces is one test; PASS on the last line is the verdict. A
+ * shard's tests carry the shard in their IDs, because the same counterexample name recurs in many
+ * phases and two shards may each hold their own first one.
+ */
+/** @param {string} text @param {{ index: number, total: number } | null} [shard] @returns {any} */
+export function normaliseMigrationChain(text, shard = null) {
   const tests = [];
+  const prefix = shard ? `migration-chain:${shard.index}/${shard.total}` : "migration-chain";
   for (const match of text.matchAll(/^--- counterexample: (.+?) ---$/gm)) {
     tests.push({
-      id: `migration-chain:${tests.length + 1}:${match[1]}`,
+      id: `${prefix}:${tests.length + 1}:${match[1]}`,
       suite: "migrationChain",
       file: "scripts/migration-chain-check.mjs",
       project: null,
@@ -161,7 +168,7 @@ export function normaliseMigrationChain(text) {
   }
   const passed = /^migration-chain: PASS$/m.test(text);
   if (!passed) for (const test of tests) test.status = "failed";
-  return { suite: "migrationChain", shard: null, tests, durationMs: null, runnerSuccess: passed };
+  return { suite: "migrationChain", shard, tests, durationMs: null, runnerSuccess: passed };
 }
 
 /**
@@ -227,6 +234,11 @@ export function readResults(dir, root) {
       } catch (error) {
         problems.push(`${name} cannot be parsed: ${error.message}`);
       }
+      continue;
+    }
+    const chainShard = name.match(CHAIN_SHARD);
+    if (chainShard) {
+      reports.push(normaliseMigrationChain(readFileSync(join(dir, name), "utf8"), { index: Number(chainShard[1]), total: Number(chainShard[2]) }));
       continue;
     }
     const match = name.match(NAME);

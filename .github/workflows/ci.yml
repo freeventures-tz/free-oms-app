@@ -26,6 +26,12 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  schedule:
+    # Every suite on main each night, with nothing changed since the last run. A test that fails
+    # here failed on a commit it has already passed on, which is how a flaky or date-dependent
+    # test is told from a broken change. 01:00 UTC is 04:00 in Dar es Salaam, clear of the
+    # business day's midnight.
+    - cron: "0 1 * * *"
   workflow_call:
     inputs:
       ref:
@@ -62,6 +68,11 @@ defaults:
 
 env:
   OMS_TEST_RESULTS_DIR: ${{ github.workspace }}/oms-test/results
+  # Services of the local stack that no suite uses: the dashboard and its metadata API, log
+  # collection, edge functions (this project has none), image resizing and realtime. Leaving them
+  # out is most of the time a job spends before its first test. The database, Auth, the Data API,
+  # storage, the gateway and the mail catcher all start as before.
+  SUPABASE_EXCLUDE: studio,postgres-meta,logflare,vector,edge-runtime,imgproxy,realtime
 
 # The order below is deliberate: the cheapest checks that can fail run first, and every test that
 # touches a database runs against a stack started FROM THIS REPOSITORY'S config.toml. Auth settings
@@ -109,6 +120,8 @@ jobs:
               fi
               ;;
             push) base="$BEFORE" ;;
+            # The nightly run has no change of its own: it is held to main's last commit.
+            schedule) base="$(git rev-parse HEAD^1)" ;;
             *) base="$RELEASE_BASE" ;;
           esac
           echo "head=$head" >> "$GITHUB_OUTPUT"
@@ -121,7 +134,7 @@ jobs:
           BASE: ${{ steps.identity.outputs.base }}
           HEAD_SHA: ${{ steps.identity.outputs.head }}
           MODE: ${{ inputs.gate == 'release' && 'full' || github.event_name == 'pull_request' && 'enforce' || 'shadow' }}
-          MAX_SHARDS: ${{ inputs.gate == 'release' && '1' || '4' }}
+          MAX_SHARDS: ${{ inputs.gate == 'release' && '1' || '8' }}
         run: |
           mkdir -p oms-test/plan
           node scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode "$MODE" --max-shards "$MAX_SHARDS" --output oms-test/plan/plan.json
@@ -156,8 +169,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+      - name: Restore installed packages
+        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        id: packages
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install packages
+        if: steps.packages.outputs.cache-hit != 'true'
+        run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - name: List unit tests
@@ -182,6 +203,14 @@ jobs:
     needs: plan
     if: needs.plan.outputs.database == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      # One shard failing must not hide what the others found.
+      fail-fast: false
+      matrix:
+        # The migration chain's proofs are dealt out between four jobs, each with its own
+        # database. Every proof starts from its own partial reset, which is what makes them
+        # separable. The first job also runs pgTAP, lint and the advisors.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -189,16 +218,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+      - name: Restore installed packages
+        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        id: packages
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install packages
+        if: steps.packages.outputs.cache-hit != 'true'
+        run: npm ci
       - uses: supabase/setup-cli@v1
         with:
           # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
           version: 2.113.0
       - name: Start Supabase
-        run: supabase start
+        run: supabase start -x "$SUPABASE_EXCLUDE"
       - name: Migrations apply from a clean database
+        if: matrix.shard == 1
         run: supabase db reset
       - name: Migration chain preserves a real database, three times over
         # Independent of each migration's own snapshot checks, and three separate proofs.
@@ -228,24 +266,31 @@ jobs:
         # state a hosted apply passes through. Restores the full database after, and fails the
         # job if it cannot.
         #
-        # The log is kept so the gate can count the counterexamples that actually ran.
+        # The log is kept so the gate can count the counterexamples that actually ran. Each job
+        # runs its share (`--shard`), and the gate adds the shards up and refuses a missing one.
+        env:
+          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+          LOG: migration-chain.shard-${{ matrix.shard }}-of-${{ strategy.job-total }}.log
         run: |
           mkdir -p oms-test/results
-          npm run test:migration-chain 2>&1 | tee oms-test/results/migration-chain.log
+          npm run test:migration-chain -- --shard "$SHARD" 2>&1 | tee "oms-test/results/$LOG"
       - name: pgTAP
+        if: matrix.shard == 1
         run: |
           mkdir -p oms-test/results
           supabase test db 2>&1 | tee oms-test/results/pgtap.log
       - name: Database lint
+        if: matrix.shard == 1
         run: supabase db lint --level warning
       - name: Database advisors
+        if: matrix.shard == 1
         # `db lint` is a plpgsql checker, not the advisors. The CLI has no advisors command, so the
         # rules live in supabase/advisors.sql and this step fails on any blocking finding.
         run: node scripts/run-advisors.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: results-database
+          name: results-database-${{ matrix.shard }}
           path: oms-test/results/
           if-no-files-found: ignore
           retention-days: 14
@@ -262,15 +307,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+      - name: Restore installed packages
+        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        id: packages
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install packages
+        if: steps.packages.outputs.cache-hit != 'true'
+        run: npm ci
       - uses: supabase/setup-cli@v1
         with:
           # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
           version: 2.113.0
       - name: Start Supabase
-        run: supabase start
+        run: supabase start -x "$SUPABASE_EXCLUDE"
       - name: Write local environment
         run: |
           {
@@ -317,8 +370,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+      - name: Restore installed packages
+        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        id: packages
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install packages
+        if: steps.packages.outputs.cache-hit != 'true'
+        run: npm ci
       - uses: actions/download-artifact@v4
         with:
           name: plan
@@ -336,7 +397,12 @@ jobs:
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
           version: 2.113.0
       - name: Start Supabase
-        run: supabase start
+        # The browser downloads while the stack starts; nothing needs either before the build.
+        run: |
+          npx playwright install --with-deps chromium > playwright-install.log 2>&1 &
+          browser=$!
+          supabase start -x "$SUPABASE_EXCLUDE"
+          wait "$browser" || { cat playwright-install.log; exit 1; }
       - name: Write local environment
         run: |
           {
@@ -344,7 +410,6 @@ jobs:
             echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(supabase status -o env | grep '^PUBLISHABLE_KEY=' | cut -d= -f2- | tr -d '\"')"
             echo "SUPABASE_SECRET_KEY=$(supabase status -o env | grep '^SECRET_KEY=' | cut -d= -f2- | tr -d '\"')"
           } > .env.local
-      - run: npx playwright install --with-deps chromium
       - run: npm run build
       - name: Record the tested build
         # A release candidate's evidence names this build; release-gate.yml binds it to the manifest.
@@ -357,10 +422,12 @@ jobs:
           LISTING: e2e.playwright-list.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json
         run: npx playwright test --list --reporter=json $SPECS > "oms-test/results/$LISTING"
       - name: E2E
+        # No reset first: this job started its stack a moment ago, the migrations and the seed ran
+        # then, and nothing has written to the database since (listing runs no setup).
         env:
           SPECS: ${{ steps.specs.outputs.files }}
           OMS_E2E_RESULTS_NAME: e2e.playwright.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json
-        run: npm run test:e2e -- $SPECS
+        run: npx playwright test $SPECS
       - name: E2E benchmarks (release candidates)
         # The documented method: each benchmark spec alone, after its own reset, on the mobile
         # project, filtered to its benchmark block, with FV_BENCHMARK=1.

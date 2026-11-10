@@ -324,7 +324,38 @@ describe("test selection", () => {
       expect(http.expectedJobs).toEqual(["static", "integration"]);
     });
 
-    it("anything high-risk, and every doubt, runs every suite", () => {
+    it("high-risk application code runs every test that can see it, and no database-only suite", () => {
+      // The fixture's money helper, marked high-risk application code rather than everything.
+      const critical = {
+        ...activated,
+        forceFull: activated.forceFull.filter((rule) => rule.pattern !== "lib/money.ts"),
+        appCritical: [{ pattern: "lib/money.ts", reason: "business money helper" }],
+      };
+      const plan = selectTests({ manifest: critical, files: withUi, edges, changes: [{ status: "M", path: "lib/money.ts" }], identity: proven, mode: "enforce" });
+      expect(plan.lane).toBe("app-critical");
+      expect(plan.risk).toBe("high");
+      expect(plan.fullReasons).toEqual([]);
+      expect(plan.execution.e2e.mode).toBe("full");
+      expect(plan.selection.e2e.fullReasons).toEqual(["lib/money.ts: business money helper"]);
+      expect(plan.execution.unit.mode).toBe("full");
+      // lib/reports/query.ts imports the money helper, and tests/integration/paging.test.ts imports
+      // that, so the HTTP suite uses the changed code and runs whole.
+      expect(plan.execution.integration.mode).toBe("full");
+      // Nothing the database's own suites read is application code.
+      expect(plan.execution.pgtap.mode).toBe("none");
+      expect(plan.execution.migrationChain.mode).toBe("none");
+      expect(plan.selection.migrationChain.mode).toBe("not selected");
+      expect(plan.expectedJobs).toEqual(["static", "integration", "e2e"]);
+    });
+
+    it("a screen that a high-risk file imports reaches every E2E spec too", () => {
+      const critical = { ...activated, appCritical: [{ pattern: "app/reports/page.tsx", reason: "stands in for a server action" }] };
+      const plan = selectTests({ manifest: critical, files: withUi, edges, changes: [{ status: "M", path: "lib/reports/query.ts" }], identity: proven, mode: "enforce" });
+      expect(plan.execution.e2e.mode).toBe("full");
+      expect(plan.selection.e2e.fullReasons).toEqual(["app/reports/page.tsx imports lib/reports/query.ts: stands in for a server action"]);
+    });
+
+    it("the database, dependencies, test infrastructure and every doubt run every suite", () => {
       for (const path of ["lib/money.ts", "supabase/tests/database/001_auth.sql", "package.json", "scripts/testing/select.mjs", "lib/unknown.ts"]) {
         const plan = enforce([{ status: "M", path }]);
         expect(plan.lane, path).toBe("critical");
@@ -402,7 +433,7 @@ describe("test selection", () => {
     expect(select([{ status: "M", path: "lib/money.ts" }]).selection.migrationChain.mode).toBe("full");
     const low = select([{ status: "M", path: "components/brand/logo.tsx" }]).selection.migrationChain;
     expect(low.mode).toBe("not selected");
-    expect(low.reason).toMatch(/CI and every release candidate still run it/);
+    expect(low.reason).toMatch(/every push to main and every release candidate still run it/);
     // Execution, which the gates enforce, keeps it full either way.
     expect(select([{ status: "M", path: "components/brand/logo.tsx" }]).execution.migrationChain.mode).toBe("full");
   });

@@ -120,6 +120,23 @@ describe("what CI reads from a plan", () => {
     expect(outputs).toMatchObject({ lane: "app-wide", database: "false", e2e: "true", "e2e-shards": "[1,2,3]", "e2e-shard-total": "3" });
   });
 
+  it("high-risk application code needs every E2E spec and no database job", () => {
+      const critical = { ...manifest, appCritical: [{ pattern: "app/sales/**", reason: "stands in for a server action" }], domains: {} };
+      const outputs = planOutputs(selectTests({ manifest: critical, files, edges: new Map(), changes: [{ status: "M", path: "app/sales/page.tsx" }], identity, mode: "enforce", maxShards: 8 }));
+      expect(outputs).toMatchObject({ lane: "app-critical", database: "false", integration: "false", e2e: "true" });
+    });
+
+  it("makes shards of the manifest's own size when it names one", () => {
+    // 29 minutes of specs: three shards at the default twelve minutes, five at six.
+    const small = { ...manifest, e2eShardMinutes: 6 };
+    const wide = (m: typeof manifest) => selectTests({ manifest: m, files, edges: new Map(), changes: [{ status: "M", path: "components/ui/button.tsx" }], identity, mode: "enforce", maxShards: 8 });
+    expect(wide(manifest).execution.e2e.shards).toHaveLength(3);
+    // No shard can be lighter than the heaviest spec (ten minutes), so six-minute shards settle at three as well.
+    expect(wide(small).execution.e2e.shards).toHaveLength(3);
+    const even = { ...small, e2eMinutes: { "e2e/a.spec.ts": 6, "e2e/b.spec.ts": 6, "e2e/c.spec.ts": 6, "e2e/sales.spec.ts": 6, "e2e/shell.spec.ts": 5 } };
+    expect(wide(even).execution.e2e.shards).toHaveLength(5);
+  });
+
   it("a database change needs every job", () => {
     expect(planOutputs(plan("supabase/migrations/001_first.sql"))).toMatchObject({ lane: "critical", database: "true", integration: "true", e2e: "true" });
   });

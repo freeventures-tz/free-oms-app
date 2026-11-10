@@ -94,6 +94,17 @@ describe("CI routing", () => {
     expect(ci.on.workflow_call.inputs.ref.required).toBe(true);
   });
 
+  it("runs every suite on main each night, held to main's last commit", () => {
+    expect(ci.on.schedule).toEqual([{ cron: "0 1 * * *" }]);
+    const select = ci.jobs.plan.steps.find((step: { name?: string }) => step.name === "Select tests");
+    // Not a pull request and not a release: everything runs, with the lane reported beside it.
+    expect(render(select.env.MODE, event("schedule"))).toBe("shadow");
+    const identity = ci.jobs.plan.steps.find((step: { id?: string }) => step.id === "identity");
+    expect(identity.run).toContain('schedule) base="$(git rev-parse HEAD^1)" ;;');
+    expect(cancels(event("schedule", { run_id: "30" }))).toBe(false);
+    expect(render(ci.jobs.gate.name, event("schedule"))).toBe("Development Gate");
+  });
+
   it("never checks out a fork's code with privileges", () => {
     for (const raw of [rawCi, rawRelease]) {
       expect(raw).not.toContain("pull_request_target");
@@ -162,7 +173,7 @@ describe("CI routing", () => {
     expect(runs("integration")).toContain("npm run test:integration");
     expect(ci.jobs.e2e.name).toBe("Responsive authentication E2E");
     expect(runs("e2e")).toContain("npm run build");
-    expect(runs("e2e")).toContain("npm run test:e2e -- $SPECS");
+    expect(runs("e2e")).toContain("npx playwright test $SPECS");
   });
 
   it("every suite job hands its results to the gate, whatever happened", () => {
@@ -185,7 +196,7 @@ describe("CI routing", () => {
     expect(mode(called("1"))).toBe("full");
     // One E2E job for a release, so one build is the evidence the candidate is bound to.
     expect(render(select.env.MAX_SHARDS, called("1"))).toBe("1");
-    expect(render(select.env.MAX_SHARDS, pr(7, "1"))).toBe("4");
+    expect(render(select.env.MAX_SHARDS, pr(7, "1"))).toBe("8");
     expect(select.run).toContain('--mode "$MODE" --max-shards "$MAX_SHARDS"');
   });
 
@@ -216,6 +227,60 @@ describe("CI routing", () => {
     expect(names.indexOf("npm run build")).toBeLessThan(names.indexOf("E2E"));
   });
 
+  it("runs E2E on the database its own job just started, and never writes to it first", () => {
+    // A reset before the run would repeat what `supabase start` did a moment earlier. That holds
+    // only while nothing between the start and the run touches the database, so the steps between
+    // them are pinned: the build, the record of it, and a listing, none of which opens it.
+    const steps = ci.jobs.e2e.steps;
+    const names = steps.map((step: { name?: string; run?: string }) => step.name ?? step.run ?? "");
+    const run = steps.find((step: { name?: string }) => step.name === "E2E");
+    expect(run.run).toBe("npx playwright test $SPECS");
+    expect(names.slice(names.indexOf("Start Supabase") + 1, names.indexOf("E2E"))).toEqual(["Write local environment", "npm run build", "Record the tested build", "List E2E tests"]);
+    const start = steps.find((step: { name?: string }) => step.name === "Start Supabase");
+    // The browser downloads beside the stack's start, and a failed download still fails the job.
+    expect(start.run).toContain("npx playwright install --with-deps chromium > playwright-install.log 2>&1 &");
+    expect(start.run).toContain('wait "$browser" || { cat playwright-install.log; exit 1; }');
+  });
+
+  it("deals the migration chain's proofs out between jobs, and runs pgTAP, lint and advisors once", () => {
+    const database = ci.jobs.database;
+    expect(database.strategy["fail-fast"]).toBe(false);
+    expect(database.strategy.matrix.shard).toEqual([1, 2, 3, 4]);
+    const chain = database.steps.find((step: { run?: string }) => step.run?.includes("npm run test:migration-chain"));
+    expect(chain.env.SHARD).toBe("${{ matrix.shard }}/${{ strategy.job-total }}");
+    expect(chain.env.LOG).toBe("migration-chain.shard-${{ matrix.shard }}-of-${{ strategy.job-total }}.log");
+    expect(chain.run).toContain('npm run test:migration-chain -- --shard "$SHARD" 2>&1 | tee "oms-test/results/$LOG"');
+    expect(chain.if).toBeUndefined();
+    for (const name of ["Migrations apply from a clean database", "pgTAP", "Database lint", "Database advisors"]) {
+      expect(database.steps.find((step: { name?: string }) => step.name === name).if, name).toBe("matrix.shard == 1");
+    }
+    const upload = database.steps.find((step: { with?: { name?: string } }) => step.with?.name?.startsWith("results-database"));
+    expect(upload.with.name).toBe("results-database-${{ matrix.shard }}");
+  });
+
+  it("starts every stack without the services no suite uses, and keeps the ones they do", () => {
+    const excluded = String(ci.env.SUPABASE_EXCLUDE).split(",");
+    expect(excluded).toEqual(["studio", "postgres-meta", "logflare", "vector", "edge-runtime", "imgproxy", "realtime"]);
+    // The database always starts; these are the others the suites call.
+    for (const needed of ["gotrue", "postgrest", "kong", "storage-api", "mailpit"]) expect(excluded).not.toContain(needed);
+    for (const job of ["database", "integration", "e2e"]) {
+      const start = ci.jobs[job].steps.find((step: { name?: string }) => step.name === "Start Supabase");
+      expect(start.run, job).toContain('supabase start -x "$SUPABASE_EXCLUDE"');
+    }
+  });
+
+  it("restores installed packages by the lockfile, and installs only on a miss", () => {
+    for (const job of ["static", "database", "integration", "e2e"]) {
+      const steps = ci.jobs[job].steps;
+      const restore = steps.find((step: { id?: string }) => step.id === "packages");
+      expect(restore.uses, job).toBe("actions/cache@v4");
+      expect(restore.with).toEqual({ path: "node_modules", key: "node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}" });
+      const install = steps.find((step: { run?: string }) => step.run === "npm ci");
+      expect(install.if, job).toBe("steps.packages.outputs.cache-hit != 'true'");
+      expect(steps.indexOf(restore)).toBeLessThan(steps.indexOf(install));
+    }
+  });
+
   it("fails a pipeline on its first failing command, so a tee cannot hide a red suite", () => {
     expect(ci.defaults.run.shell).toBe("bash");
     expect(release.defaults.run.shell).toBe("bash");
@@ -238,7 +303,7 @@ describe("CI routing", () => {
     }
     for (const [job, main, suite] of [
       ["integration", "npm run test:integration", "integration"],
-      ["e2e", "npm run test:e2e -- $SPECS", "e2e"],
+      ["e2e", "npx playwright test $SPECS", "e2e"],
     ] as const) {
       const steps = ci.jobs[job].steps;
       const mainIndex = steps.findIndex((step: { run?: string }) => step.run === main);
@@ -262,7 +327,7 @@ describe("CI routing", () => {
     expect(listing("integration", "vitest list --project integration --json=oms-test/results/integration.vitest-list.json")).toBeLessThan(
       runIndex("integration", "npm run test:integration"),
     );
-    expect(listing("e2e", 'playwright test --list --reporter=json $SPECS > "oms-test/results/$LISTING"')).toBeLessThan(runIndex("e2e", "npm run test:e2e -- $SPECS"));
+    expect(listing("e2e", 'playwright test --list --reporter=json $SPECS > "oms-test/results/$LISTING"')).toBeLessThan(runIndex("e2e", "npx playwright test $SPECS"));
     const e2eListing = ci.jobs.e2e.steps.find((step: { name?: string }) => step.name === "List E2E tests");
     expect(e2eListing.env.LISTING).toBe("e2e.playwright-list.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json");
   });

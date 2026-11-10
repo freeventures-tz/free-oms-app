@@ -123,7 +123,15 @@ above; nobody picks it.
 | tests | Test files only | Static, plus the changed E2E specs, plus the whole HTTP suite if one of its files changed |
 | screen | One area's screens (a reviewed domain) | Static, that area's E2E specs and the four E2E smoke specs, on all three projects |
 | app-wide | Shared interface, shell, layout, styles or wording | Static and every E2E spec |
-| critical | Authentication, permissions, server actions, money and stock commands, the database, dependencies, configuration, CI, the tests' own infrastructure, a rename or deletion, and every doubt | Every suite, as before |
+| app-critical | Authentication, permissions, server actions, money and stock commands, application configuration | Static, every E2E spec, and the whole HTTP suite when it uses the changed code. No database job: none of its inputs is application code |
+| critical | The database, dependencies, CI, the tests' own infrastructure, a rename or deletion, and every doubt | Every suite, as before |
+
+Added on 10 November 2026 from `docs/RESEARCH.md` (workspace), and **not yet run on GitHub**: E2E in
+up to eight shards of about six minutes of specs; the migration chain's proofs dealt out between
+four database jobs (`--shard`); installed packages restored by lockfile; every local stack started
+without the services no suite uses (`SUPABASE_EXCLUDE` in `ci.yml`, **not yet proven locally**); no
+second reset before E2E; and a nightly run of every suite on `main`. The wall times in section 4
+predate these and should fall further; measure them on the first runs.
 
 Two rules make the smaller lanes safe.
 

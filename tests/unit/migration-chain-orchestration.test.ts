@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
+import { parseShard, runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
+import { normaliseMigrationChain } from "@/scripts/testing/reports.mjs";
 import { describeCandidate } from "@/scripts/testing/release.mjs";
 
 /**
@@ -501,6 +502,94 @@ describe("the migration-chain command's verdict", () => {
     expect(errors).toContain("migration-chain: FAIL");
     expect(errors).toContain("supabase db reset --version exited 1");
     expect(errors).toContain("could not restore the local database");
+  });
+});
+
+/**
+ * The same command with a gate that works: its answer moves with every counterexample and every
+ * permitted write, and with nothing else. `shard` runs one part of the proofs, as a CI job does.
+ */
+function proofs(shard?: { index: number; total: number }) {
+  const calls: Call[] = [];
+  const out: string[] = [];
+  const errors: string[] = [];
+  const root = disposableRoot();
+  const code = runMigrationChainCheck({
+    root,
+    shard,
+    supabase: (args: string[]) => calls.push({ command: "supabase", args }),
+    psqlFile: (path: string) => calls.push({ command: "psql", args: [path] }),
+    preservation: () => {
+      const priced = calls.some((call) => call.args[0]?.includes("01b_write_price"));
+      const moves = calls.filter((call) => /counterexample|09_compatibility/.test(call.args[0] ?? "")).length;
+      return `21|${priced ? 1 : 0}|${moves.toString(16).padStart(32, "0")}|d751713988987e9331980363e24189ce|[]|[]`;
+    },
+    log: (line: string) => out.push(line),
+    error: (line: string) => errors.push(line),
+  });
+  rmSync(root, { recursive: true, force: true });
+  const text = out.join("\n");
+  return {
+    code,
+    text,
+    errors: errors.join("\n"),
+    headers: [...text.matchAll(/^=== (.+) ===$/gm)].map((match) => match[1]),
+    counterexamples: [...text.matchAll(/^--- counterexample: (.+?) ---$/gm)].length,
+    partialResets: calls.filter((call) => call.command === "supabase" && call.args.includes("--version")).length,
+    restores: fullResets(calls).length,
+  };
+}
+
+describe("the chain split between parallel jobs", () => {
+  const whole = proofs();
+
+  it("runs, across its shards, exactly the proofs the whole command runs, each once", () => {
+    expect(whole.code).toBe(0);
+    for (const total of [2, 3, 4]) {
+      const shards = Array.from({ length: total }, (_, index) => proofs({ index: index + 1, total }));
+      for (const shard of shards) {
+        expect(shard.errors).toBe("");
+        expect(shard.code).toBe(0);
+        expect(shard.text).toContain("migration-chain: PASS");
+      }
+      // Every proof announces itself with a header, and each proof starts with one partial reset.
+      expect(shards.flatMap((shard) => shard.headers).sort()).toEqual([...whole.headers].sort());
+      expect(shards.reduce((sum, shard) => sum + shard.partialResets, 0)).toBe(whole.partialResets);
+      expect(shards.reduce((sum, shard) => sum + shard.counterexamples, 0)).toBe(whole.counterexamples);
+    }
+  });
+
+  it("checks the released history and restores the database in every shard", () => {
+    for (const index of [1, 2, 3, 4]) {
+      const shard = proofs({ index, total: 4 });
+      expect(shard.text).toMatch(/released migrations unchanged/);
+      expect(shard.restores).toBe(1);
+      expect(shard.text).toContain(`--- shard ${index} of 4 ---`);
+    }
+  });
+
+  it("deals the proofs out in turn, so no shard is left with nothing", () => {
+    const sizes = [1, 2, 3, 4].map((index) => proofs({ index, total: 4 }).headers.length);
+    expect(Math.min(...sizes)).toBeGreaterThan(0);
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+  });
+
+  it("still holds the counterexample floor when the gate adds the shards' logs up", () => {
+    const logs = [1, 2, 3, 4].map((index) => normaliseMigrationChain(proofs({ index, total: 4 }).text, { index, total: 4 }));
+    const ids = logs.flatMap((report) => report.tests.map((test: { id: string }) => test.id));
+    expect(ids).toHaveLength(whole.counterexamples);
+    // The same counterexample name recurs in many phases; the shard in the ID keeps them apart.
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(logs.every((report) => report.runnerSuccess)).toBe(true);
+    expect(logs.map((report) => report.shard)).toEqual([1, 2, 3, 4].map((index) => ({ index, total: 4 })));
+  });
+
+  it("reads --shard 2/4 from the command line, and refuses anything else that names a shard", () => {
+    expect(parseShard([])).toBeNull();
+    expect(parseShard(["--shard", "2/4"])).toEqual({ index: 2, total: 4 });
+    for (const bad of [["--shard"], ["--shard", "5/4"], ["--shard", "0/4"], ["--shard", "two"]]) {
+      expect(() => parseShard(bad)).toThrow(/--shard must look like 2\/4/);
+    }
   });
 });
 

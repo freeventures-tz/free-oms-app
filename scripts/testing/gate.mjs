@@ -57,8 +57,11 @@ export const NEVER_PARTIAL = [
   "vitest.config.mts",
   "tests/setup/**",
   "tests/support/**",
+  "tests/integration/helpers.ts",
   "e2e/fixtures.ts",
   "e2e/global-setup.ts",
+  "e2e/receipt-photo.ts",
+  ".gitignore",
 ];
 
 /** Whether the plan follows a lane: enforce mode, and nothing that forces full coverage. */

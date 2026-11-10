@@ -10,11 +10,15 @@
  * is reported beside it so the rules keep being measured against full runs. In enforce mode
  * (pull requests, and `npm run check`) `execution` follows the change's lane:
  *
- *   docs       documentation only: the static checks
- *   tests      test files only: the static checks, and the changed HTTP or E2E tests
- *   screen     one area's screens: static, that area's E2E specs and the E2E smoke specs
- *   app-wide   shared interface, layout or wording: static and every E2E spec
- *   critical   anything a rule marks high-risk, and every doubt: every suite, as before
+ *   docs          documentation only: the static checks
+ *   tests         test files only: the static checks, and the changed HTTP or E2E tests
+ *   screen        one area's screens: static, that area's E2E specs and the E2E smoke specs
+ *   app-wide      shared interface, layout or wording: static and every E2E spec
+ *   app-critical  authentication, permissions, server actions, money and stock commands and
+ *                 application configuration: static, every E2E spec, and the HTTP suite when it
+ *                 uses the changed code. High risk, and every test that can see the change runs
+ *   critical      the database, dependencies, CI, the tests' own infrastructure, a rename or
+ *                 deletion, and every doubt: every suite, as before
  *
  * The database suites (pgTAP, the migration chain, lint and advisors) and the HTTP suite run
  * against the database alone. Their inputs all sit behind full-coverage rules, so outside the
@@ -152,6 +156,8 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
   const reached = Object.fromEntries(SUITES.map((suite) => [suite, new Set()]));
   // Whether anything the application serves changed, as opposed to documentation or a test file.
   let appChanged = false;
+  // Whether that includes code the manifest marks high-risk (authentication, money, stock).
+  let appCritical = false;
   const domains = new Set();
   let risk = "low";
   const raise = (level) => {
@@ -212,6 +218,17 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
       // Shared interface, layout and wording reach every screen, so every E2E spec runs. They
       // cannot reach the database, so they do not force the other suites.
       appChanged = true;
+      // High-risk application code runs every test that can see it: every E2E spec, the whole
+      // unit suite, and whatever the import graph reaches. It cannot change what the database's
+      // own suites prove, because none of their inputs is application code.
+      const critical = (manifest.appCritical ?? []).find((rule) => matchesAny(path, [rule.pattern]));
+      if (critical) {
+        suiteFull.e2e.push(`${path}: ${critical.reason}`);
+        raise("high");
+        appCritical = true;
+        sourcesChanged.push(path);
+        continue;
+      }
       const wide = (manifest.appWide ?? []).find((rule) => matchesAny(path, [rule.pattern]));
       if (wide) {
         suiteFull.e2e.push(`${path}: ${wide.reason}`);
@@ -252,7 +269,9 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
       // An application file that imports the change carries it to that file's screens. E2E specs
       // import no application code, so this is how a change deep in one area reaches the specs of
       // every area that uses it. A shared or high-risk file that imports it reaches every screen.
-      const shared = [...(manifest.forceFull ?? []), ...(manifest.appWide ?? [])].find((rule) => matchesAny(dependant, [rule.pattern]));
+      const shared = [...(manifest.forceFull ?? []), ...(manifest.appCritical ?? []), ...(manifest.appWide ?? [])].find((rule) =>
+        matchesAny(dependant, [rule.pattern]),
+      );
       if (shared) {
         const note = `${dependant} imports ${path}: ${shared.reason}`;
         if (!suiteFull.e2e.includes(note)) suiteFull.e2e.push(note);
@@ -306,16 +325,26 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
   // The chain takes twenty minutes and checks released migrations; locally it runs for high-risk
   // changes, which include every change under supabase/. CI and release candidates always run it.
   selection.migrationChain =
-    risk === "high"
-      ? { mode: "full", reason: "high risk: the historical chain runs in full" }
-      : { mode: "not selected", reason: "no migration, release check or other high-risk path changed; CI and every release candidate still run it" };
+    fullReasons.length > 0
+      ? { mode: "full", reason: "a database input or a doubt: the historical chain runs in full" }
+      : { mode: "not selected", reason: "no migration, release check or test infrastructure changed; every push to main and every release candidate still run it" };
   selection.advisors = { mode: "full", reason: "database lint and advisors always run" };
 
   const enforced = mode === "enforce" && manifest.activation?.selectiveEnforcement === true;
   const everything = !enforced || fullReasons.length > 0;
   const testsChanged = SUITES.some((suite) => reached[suite].size > 0);
   const lane =
-    fullReasons.length > 0 ? "critical" : selection.e2e.mode === "full" ? "app-wide" : appChanged ? "screen" : testsChanged ? "tests" : "docs";
+    fullReasons.length > 0
+      ? "critical"
+      : appCritical
+        ? "app-critical"
+        : selection.e2e.mode === "full"
+          ? "app-wide"
+          : appChanged
+            ? "screen"
+            : testsChanged
+              ? "tests"
+              : "docs";
 
   const all = (suite) => ({ mode: "full", files: inventory[suite] });
   const none = (reason) => ({ mode: "none", files: [], reason });
@@ -352,6 +381,7 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
   if (execution.e2e.mode !== "none") {
     execution.e2e.shards = partitionShards(execution.e2e.files, manifest.e2eMinutes ?? {}, {
       maxShards,
+      ...(Number.isFinite(manifest.e2eShardMinutes) ? { targetMinutes: manifest.e2eShardMinutes } : {}),
       groups: Object.values(manifest.groups?.e2e ?? {}).map((group) => group.files),
     });
   }
