@@ -89,7 +89,9 @@ export function planOutputs(plan) {
     database: String(jobs.has("database")),
     integration: String(jobs.has("integration")),
     e2e: String(jobs.has("e2e") && shards.length > 0),
-    "e2e-shards": JSON.stringify(shards.map((_, index) => index + 1)),
+    // Never an empty list: a job matrix with no values is an error on GitHub, and the E2E job's
+    // `if` (the `e2e` output above) is what skips it when the plan needs no spec.
+    "e2e-shards": JSON.stringify(shards.length > 0 ? shards.map((_, index) => index + 1) : [1]),
     "e2e-shard-total": String(shards.length),
   };
 }

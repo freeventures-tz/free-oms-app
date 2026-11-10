@@ -111,8 +111,9 @@ describe("what CI reads from a plan", () => {
     });
   });
 
-  it("documentation needs no E2E job, and its matrix is empty", () => {
-    expect(planOutputs(plan("README.md"))).toMatchObject({ lane: "docs", database: "false", integration: "false", e2e: "false", "e2e-shards": "[]", "e2e-shard-total": "0" });
+  it("documentation needs no E2E job, and its matrix still holds a value", () => {
+    // The job's `if` skips it. An empty matrix would be an error, so the list is never empty.
+    expect(planOutputs(plan("README.md"))).toMatchObject({ lane: "docs", database: "false", integration: "false", e2e: "false", "e2e-shards": "[1]", "e2e-shard-total": "0" });
   });
 
   it("a shared interface change runs every spec, split between jobs", () => {

@@ -541,41 +541,40 @@ function proofs(shard?: { index: number; total: number }) {
 }
 
 describe("the chain split between parallel jobs", () => {
+  // Each run copies the migrations to a disposable folder, so the runs are made once here and
+  // read by every test below: the whole command, and the four shards CI deals it into.
   const whole = proofs();
+  const four = [1, 2, 3, 4].map((index) => proofs({ index, total: 4 }));
 
   it("runs, across its shards, exactly the proofs the whole command runs, each once", () => {
     expect(whole.code).toBe(0);
-    for (const total of [2, 3, 4]) {
-      const shards = Array.from({ length: total }, (_, index) => proofs({ index: index + 1, total }));
-      for (const shard of shards) {
-        expect(shard.errors).toBe("");
-        expect(shard.code).toBe(0);
-        expect(shard.text).toContain("migration-chain: PASS");
-      }
-      // Every proof announces itself with a header, and each proof starts with one partial reset.
-      expect(shards.flatMap((shard) => shard.headers).sort()).toEqual([...whole.headers].sort());
-      expect(shards.reduce((sum, shard) => sum + shard.partialResets, 0)).toBe(whole.partialResets);
-      expect(shards.reduce((sum, shard) => sum + shard.counterexamples, 0)).toBe(whole.counterexamples);
+    for (const shard of four) {
+      expect(shard.errors).toBe("");
+      expect(shard.code).toBe(0);
+      expect(shard.text).toContain("migration-chain: PASS");
     }
+    // Every proof announces itself with a header, and each proof starts with one partial reset.
+    expect(four.flatMap((shard) => shard.headers).sort()).toEqual([...whole.headers].sort());
+    expect(four.reduce((sum, shard) => sum + shard.partialResets, 0)).toBe(whole.partialResets);
+    expect(four.reduce((sum, shard) => sum + shard.counterexamples, 0)).toBe(whole.counterexamples);
   });
 
   it("checks the released history and restores the database in every shard", () => {
-    for (const index of [1, 2, 3, 4]) {
-      const shard = proofs({ index, total: 4 });
+    four.forEach((shard, at) => {
       expect(shard.text).toMatch(/released migrations unchanged/);
       expect(shard.restores).toBe(1);
-      expect(shard.text).toContain(`--- shard ${index} of 4 ---`);
-    }
+      expect(shard.text).toContain(`--- shard ${at + 1} of 4 ---`);
+    });
   });
 
   it("deals the proofs out in turn, so no shard is left with nothing", () => {
-    const sizes = [1, 2, 3, 4].map((index) => proofs({ index, total: 4 }).headers.length);
+    const sizes = four.map((shard) => shard.headers.length);
     expect(Math.min(...sizes)).toBeGreaterThan(0);
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
   });
 
   it("still holds the counterexample floor when the gate adds the shards' logs up", () => {
-    const logs = [1, 2, 3, 4].map((index) => normaliseMigrationChain(proofs({ index, total: 4 }).text, { index, total: 4 }));
+    const logs = four.map((shard, at) => normaliseMigrationChain(shard.text, { index: at + 1, total: 4 }));
     const ids = logs.flatMap((report) => report.tests.map((test: { id: string }) => test.id));
     expect(ids).toHaveLength(whole.counterexamples);
     // The same counterexample name recurs in many phases; the shard in the ID keeps them apart.

@@ -1183,7 +1183,15 @@ function assertReleasedMigrationsUnchanged({ root, log }) {
  * each shard in turn. Every shard checks the released history first and restores the database last,
  * and all the shards together run exactly what the command runs without `shard`.
  */
-export function runMigrationChainCheck({ supabase, psqlFile, preservation, log, error, root = ".", shard = null }) {
+export function runMigrationChainCheck({
+  supabase,
+  psqlFile,
+  preservation,
+  log,
+  error,
+  root = ".",
+  shard = /** @type {{ index: number, total: number } | null} */ (null),
+}) {
   let proofFailure = null;
   let proof = 0;
   let taken = 0;

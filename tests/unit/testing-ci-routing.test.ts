@@ -238,8 +238,16 @@ describe("CI routing", () => {
     expect(names.slice(names.indexOf("Start Supabase") + 1, names.indexOf("E2E"))).toEqual(["Write local environment", "npm run build", "Record the tested build", "List E2E tests"]);
     const start = steps.find((step: { name?: string }) => step.name === "Start Supabase");
     // The browser downloads beside the stack's start, and a failed download still fails the job.
-    expect(start.run).toContain("npx playwright install --with-deps chromium > playwright-install.log 2>&1 &");
-    expect(start.run).toContain('wait "$browser" || { cat playwright-install.log; exit 1; }');
+    expect(start.run).toContain('npx playwright install --with-deps chromium > "$RUNNER_TEMP/playwright-install.log" 2>&1 &');
+    expect(start.run).toContain('wait "$browser" || { cat "$RUNNER_TEMP/playwright-install.log"; exit 1; }');
+    // Nothing a step writes may land in the checkout: a release candidate's build is recorded
+    // from a clean tree, and an untracked log would make it dirty.
+    for (const step of steps) {
+      // Every file a step redirects into: not `2>&1`, and `>>` counted once.
+      for (const target of String(step.run ?? "").matchAll(/(?<![0-9&>])>>?\s*"?([^\s"&|>]+)/g)) {
+        expect(target[1], step.name ?? step.run).toMatch(/^(oms-test\/|\$RUNNER_TEMP\/|\$GITHUB_OUTPUT$|\.env\.local$)/);
+      }
+    }
   });
 
   it("deals the migration chain's proofs out between jobs, and runs pgTAP, lint and advisors once", () => {
@@ -267,6 +275,10 @@ describe("CI routing", () => {
       const start = ci.jobs[job].steps.find((step: { name?: string }) => step.name === "Start Supabase");
       expect(start.run, job).toContain('supabase start -x "$SUPABASE_EXCLUDE"');
     }
+    // The local fast start leaves out the same services, so a suite that passes here passes there.
+    const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts;
+    expect(scripts["db:start:fast"]).toBe(`supabase start -x ${ci.env.SUPABASE_EXCLUDE}`);
+    expect(scripts["db:start"]).toBe("supabase start");
   });
 
   it("restores installed packages by the lockfile, and installs only on a miss", () => {

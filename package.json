@@ -13,6 +13,7 @@
     "test:integration": "supabase db reset && vitest run --project integration",
     "test:e2e": "supabase db reset && playwright test",
     "db:start": "supabase start",
+    "db:start:fast": "supabase start -x studio,postgres-meta,logflare,vector,edge-runtime,imgproxy,realtime",
     "db:reset": "supabase db reset",
     "db:lint": "supabase db lint --level warning",
     "test:db": "supabase test db",

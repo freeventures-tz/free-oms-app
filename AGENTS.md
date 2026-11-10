@@ -25,9 +25,11 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 - Real customer records stay out of git and out of evidence. Screens, recordings and tests use the seeded fixture data and the seeded test account.
 - Upload images with `IMAGE_ADAPTER=gist`. Post videos through the PR comment box in the signed-in browser.
 ## Checks
-`npm run check`. Run it before opening a PR and again after rebasing. It says which lane the change is in (docs, tests, screen, app-wide or critical) and what CI will run for it, then runs lint, types, the unit suite and the build. CI runs the rest of the lane on the pull request, and every suite on `main` after the merge. Add `-- --all` to run the lane's database-backed suites locally first; do that for a critical change when you want the proof before pushing.
+`npm run check`. Run it before opening a PR and again after rebasing. It says which lane the change is in (docs, tests, screen, app-wide, app-critical or critical) and what CI will run for it, then runs lint, types, the unit suite and the build. CI runs the rest of the lane on the pull request, and every suite on `main` after the merge and every night. Add `-- --all` to run the lane's database-backed suites locally first; do that for a critical change when you want the proof before pushing.
 
-The lane comes from the paths changed, never from a flag. Authentication, permissions, server actions, money and stock commands, the database, dependencies, configuration and CI always run every suite.
+The lane comes from the paths changed, never from a flag. Authentication, permissions, server actions, and money and stock commands always run every E2E spec. The database, dependencies, CI and the tests' own infrastructure always run every suite.
+
+Start the local stack with `npm run db:start:fast`. It leaves out the dashboard, log collection and the other services no suite uses, as CI does. Use `npm run db:start` when you want the dashboard.
 
 `docs/testing-and-release.md` is the authoritative reference for lanes, the Development Gate and Release Gate. *Releasing* below is unchanged.
 ## Multi-agent rules

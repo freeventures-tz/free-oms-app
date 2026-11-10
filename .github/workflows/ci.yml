@@ -397,12 +397,13 @@ jobs:
           # change of ours, and "verified" stops meaning anything. Bump it as a visible commit.
           version: 2.113.0
       - name: Start Supabase
-        # The browser downloads while the stack starts; nothing needs either before the build.
+        # The browser downloads while the stack starts; nothing needs either before the build. Its
+        # log goes outside the checkout, so the tested build is still recorded from a clean tree.
         run: |
-          npx playwright install --with-deps chromium > playwright-install.log 2>&1 &
+          npx playwright install --with-deps chromium > "$RUNNER_TEMP/playwright-install.log" 2>&1 &
           browser=$!
           supabase start -x "$SUPABASE_EXCLUDE"
-          wait "$browser" || { cat playwright-install.log; exit 1; }
+          wait "$browser" || { cat "$RUNNER_TEMP/playwright-install.log"; exit 1; }
       - name: Write local environment
         run: |
           {

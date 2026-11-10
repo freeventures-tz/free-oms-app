@@ -16,7 +16,7 @@ document is activated yet. A released part is in a tagged release.
 | Policy in `AGENTS.md` (*Checks*, *Releasing*) | In force | Run `npm run check` before every PR and after every rebase. CI runs what the change's lane needs. Every merge to `main` is a release with a SemVer tag and a changelog entry |
 | One CI run per PR update, pushes tested on `main` only | Implemented | Takes effect when the PR that adds it merges |
 | Lanes: a pull request runs what its change can affect | Implemented | Takes effect when the PR that adds it merges (section 4). `scripts/testing/manifest.json` `activation.selectiveEnforcement` is `true`; setting it to `false` returns every gate to full execution |
-| Full run on every push to `main` | Implemented | Every suite runs on what landed, whatever lane the pull request was in, and reports what the lane would have missed |
+| Full run on every push to `main`, and every night | Implemented | Every suite runs on what landed, whatever lane the pull request was in, and reports what the lane would have missed. The nightly run repeats it on an unchanged commit, to tell a flaky test from a broken change |
 | Development Gate (aggregate check) | Implemented | Reported on every PR and every push to `main`. Not a required check until the Owner configures it (section 9) |
 | Release Gate (full candidate run, manual) | Implemented | Can be started by hand on an exact commit. It runs every suite and the benchmarks and binds its evidence to the build it tested. It deploys nothing, and no merge waits for it |
 | `develop` branch, development environment | Proposed | Neither exists. Nothing here creates them |
@@ -114,7 +114,7 @@ design exists to prevent.
 
 ### Lanes
 
-In enforce mode the plan's `execution` follows one of five lanes. The lane is read off the rules
+In enforce mode the plan's `execution` follows one of six lanes. The lane is read off the rules
 above; nobody picks it.
 
 | Lane | The change | What runs |
@@ -126,12 +126,10 @@ above; nobody picks it.
 | app-critical | Authentication, permissions, server actions, money and stock commands, application configuration | Static, every E2E spec, and the whole HTTP suite when it uses the changed code. No database job: none of its inputs is application code |
 | critical | The database, dependencies, CI, the tests' own infrastructure, a rename or deletion, and every doubt | Every suite, as before |
 
-Added on 10 November 2026 from `docs/RESEARCH.md` (workspace), and **not yet run on GitHub**: E2E in
-up to eight shards of about six minutes of specs; the migration chain's proofs dealt out between
-four database jobs (`--shard`); installed packages restored by lockfile; every local stack started
-without the services no suite uses (`SUPABASE_EXCLUDE` in `ci.yml`, **not yet proven locally**); no
-second reset before E2E; and a nightly run of every suite on `main`. The wall times in section 4
-predate these and should fall further; measure them on the first runs.
+The last two rows differ only in the database job. High-risk application code is seen by every
+E2E spec, the whole unit suite and any HTTP test that imports it, and all of those run. pgTAP, the
+migration chain, lint and the advisors read no application code, so they could not tell the change
+from the base, and they run when the database changes and on every push to `main`.
 
 Two rules make the smaller lanes safe.
 
@@ -162,25 +160,46 @@ Feature-branch pushes no longer start a second run. The four suite jobs and thei
 unchanged: `Lint · Types · Unit · Build`, `Migrations · pgTAP · Advisors`,
 `Auth & Data API integration` and `Responsive authentication E2E`.
 
-The planner says which jobs the plan needs, and a job it does not need is skipped. The E2E job runs
-as up to four parallel shards, each with its own runner, build, local stack and database. The plan
-splits the specs between them by measured minutes (`e2eMinutes` in the manifest), and every spec
-runs on all three projects inside its shard, mobile first, as it does in the whole suite. A small
-selection stays in one shard, because every shard pays about four minutes for its own setup. A
-release candidate always runs in one shard, so one build is the evidence it is bound to.
+The planner says which jobs the plan needs, and a job it does not need is skipped. The work that
+is left is spread over parallel jobs, and each job does as little as it can before its first test.
 
-What that costs, from the last full run on `main` (14 October 2026: E2E 33 minutes in one job, the
-database job 16, HTTP 7, static 2):
+- **E2E runs as up to eight shards**, each with its own runner, build, local stack and database.
+  The plan splits the specs between them by measured minutes (`e2eMinutes` and `e2eShardMinutes`
+  in the manifest), keeps a shared-state group in one shard, and every spec runs on all three
+  projects inside its shard, mobile first, as it does in the whole suite. A small selection stays
+  in one shard, because every shard pays for its own setup. A release candidate always runs in one
+  shard, so one build is the evidence it is bound to.
+- **The migration chain runs as four shards** of the database job (`npm run test:migration-chain
+  -- --shard 2/4`). Each of its proofs starts from its own partial reset and reads nothing another
+  left: every fixture of every phase, the migration 33 boundary and each report scenario is one
+  proof, dealt out in turn. Every shard checks the released history and restores the database. The
+  first shard also runs pgTAP, lint and the advisors. The gate adds the shards' counterexamples up
+  against the floor and refuses a missing shard. The chain grows by a proof with every release, so
+  one job would only get slower.
+- **Setup is cut where it repeated work.** Installed packages are restored by lockfile and `npm
+  ci` runs only on a miss. Every stack starts without the services no suite uses
+  (`SUPABASE_EXCLUDE` in `ci.yml`: the dashboard and its metadata API, log collection, edge
+  functions, image resizing and realtime; the database, Auth, the Data API, storage, the gateway
+  and the mail catcher start as before). An E2E shard fetches its browser while the stack starts,
+  and does not reset a database its own job created a moment earlier.
+
+What that should cost, worked out from the last full run on `main` (14 October 2026: E2E 33
+minutes in one job, the database job 16, HTTP 7, static 2). The repository is public, so runner
+minutes are free and each runner has four cores; the limit is wall time, not cost.
 
 | Lane | Jobs | Expected wall time |
 | --- | --- | --- |
-| docs, or unit tests only | static | about 3 minutes |
-| screen | static, one E2E shard of a few specs | about 8 to 10 minutes |
-| app-wide | static, four E2E shards | about 12 to 15 minutes |
-| critical, and every push to `main` | all four, E2E in four shards | about 17 minutes, set by the database job |
+| docs, or unit tests only | static | about 2 to 3 minutes |
+| screen | static, one to four E2E shards | about 6 to 8 minutes |
+| app-wide and app-critical | static, eight E2E shards | about 7 to 9 minutes |
+| critical, every push to `main`, and the nightly run | all four, E2E in eight shards, the chain in four | about 8 to 10 minutes |
 
-Those are estimates until the first runs are measured; before this change every update took about
+Those are estimates until the first runs are measured. Before this change every update took about
 33 minutes, and ran twice.
+
+**Every night at 01:00 UTC every suite runs on `main`**, with nothing changed since the last run. A
+test that fails there failed on a commit it has already passed on, which is how a flaky or
+date-dependent test is told from a broken change before it costs someone a rerun.
 
 A push to `main` runs everything whatever the pull request ran. If a lane missed a regression, that
 run finds it, and its gate report names the failing test the lane would have left out. Fix it
@@ -251,9 +270,13 @@ alone, after its own reset, on all three projects, on commit `6a1fcaa` (`D:\fv99
 kept outside the repository). 24 of the 25 passed with no failure and no retry. The one that did
 not is `imprest-funding.spec.ts`: its first tests read the posted balance of a fund that already
 exists, and in the whole suite `imprest-daily-count.spec.ts` has opened one by then. The manifest
-keeps those two together (`groups.e2e`), and the shards never separate them. Passing alone and
-passing in the whole suite does not prove every other subset passes, so the first sharded runs on
-GitHub are the proof of the exact shards. A spec that turns out to need another is added to a group.
+keeps those two together (`groups.e2e`), and the shards never separate them. The same day the
+whole suite was run as the eight shards the plan makes, each after its own reset and the first on
+a freshly started stack with none, on the six-container stack CI starts: 694 passed, 59 skipped,
+none failed, none retried, the whole suite's own counts (`D:\fv99val\evidence-lean`). The migration
+chain's four shards ran there too and added up to its 155 counterexamples. Passing alone and
+passing in those shards does not prove every other subset passes: a lane's own selection is a
+different subset. A spec that turns out to need another is added to a group.
 Sharding inside one runner, or splitting one spec's projects between jobs, is still not enabled and
 would need its own proof.
 
