@@ -90,14 +90,19 @@ design exists to prevent.
    suite, because they reach every screen and cannot reach the database. Documentation
    (`README.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`, `docs/**`) forces nothing.
 3. Changed test files run. Test files that import a changed file, directly or through other
-   files, run. A reviewed domain adds the E2E specs that cover its screens.
+   files, run. A reviewed domain adds the E2E specs that cover its screens. E2E specs import no
+   application code, so the import graph carries a change to them another way: every application
+   file that imports the changed file, directly or through other files, adds its own domain's
+   specs, and if one of those files is shared or high-risk, every E2E spec runs.
 4. Mandatory smoke tests always run. pgTAP: authorization, first login and bypass, grants and RLS,
    audit attribution, API bridge and stock invariant. HTTP: authority, API boundaries, recovery,
    stock invariant, lost response and Director concurrency. E2E: authentication, role routing, the
    shell and interaction feedback.
-5. Shared-state groups are indivisible. Selecting any file in the imprest fund group selects all
-   of it, which keeps funding first and not-counted and retirement last (`vitest.config.mts`). The
-   seeded-stock group works the same way. A test in no reviewed group forces its suite to full.
+5. Shared-state groups are indivisible. Selecting any HTTP file in the imprest fund group selects
+   all of it, which keeps funding first and not-counted and retirement last (`vitest.config.mts`).
+   The seeded-stock group works the same way. The E2E suite has one group, found by running every
+   spec alone (section 5), and a group is never split between E2E shards. A test in no reviewed
+   group forces its suite to full.
 6. pgTAP, database lint and advisors always run in full. The migration chain always runs in CI and
    for release candidates; locally the plan selects it for every high-risk change.
 7. Anything uncertain forces full coverage and says why: an unknown or missing base, a shallow
@@ -234,9 +239,15 @@ somewhere in the URL.
 E2E shards split by spec file, and each shard has its own checkout, build, stack, ports, Auth
 accounts, storage and fixture files, because each is its own runner. Whether a spec can run
 without the specs that used to run before it was measured on 10 November 2026: every spec was run
-alone, after its own reset, on all three projects (`D:\fv99val\evidence-indep`, kept outside the
-repository). The manifest's E2E groups record what that run found. Sharding inside one runner, or
-splitting one spec's projects between jobs, is still not enabled and would need its own proof.
+alone, after its own reset, on all three projects, on commit `6a1fcaa` (`D:\fv99val\evidence-indep`,
+kept outside the repository). 24 of the 25 passed with no failure and no retry. The one that did
+not is `imprest-funding.spec.ts`: its first tests read the posted balance of a fund that already
+exists, and in the whole suite `imprest-daily-count.spec.ts` has opened one by then. The manifest
+keeps those two together (`groups.e2e`), and the shards never separate them. Passing alone and
+passing in the whole suite does not prove every other subset passes, so the first sharded runs on
+GitHub are the proof of the exact shards. A spec that turns out to need another is added to a group.
+Sharding inside one runner, or splitting one spec's projects between jobs, is still not enabled and
+would need its own proof.
 
 ## 6. Release candidates
 

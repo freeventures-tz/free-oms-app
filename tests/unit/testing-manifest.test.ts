@@ -118,6 +118,23 @@ describe("the reviewed test manifest", () => {
     }
   });
 
+  it("keeps the one spec that needs an open fund with the spec that opens it, and that spec sorts first", () => {
+    // Measured on 10 November 2026: every E2E spec passed alone, after its own reset, on all three
+    // projects, except imprest-funding, whose first tests read a fund that already exists.
+    const groups = Object.values(manifest.groups.e2e as Record<string, { files: string[] }>);
+    const withFunding = groups.filter((group) => group.files.includes("e2e/imprest-funding.spec.ts"));
+    expect(withFunding).toHaveLength(1);
+    const files = [...withFunding[0].files].sort();
+    expect(files.indexOf("e2e/imprest-daily-count.spec.ts")).toBeGreaterThan(-1);
+    expect(files.indexOf("e2e/imprest-daily-count.spec.ts")).toBeLessThan(files.indexOf("e2e/imprest-funding.spec.ts"));
+  });
+
+  it("names, for the imprest screens, every spec that drives them", () => {
+    // No group pulls a whole area in any more, so the area's domain has to name its own specs.
+    const named = new Set(manifest.domains["imprest-ui"].e2e as string[]);
+    for (const file of inventory.e2e.filter((entry: string) => /^e2e\/imprest-/.test(entry))) expect(named.has(file), file).toBe(true);
+  });
+
   it("gives every E2E spec a measured weight for the shards", () => {
     for (const file of inventory.e2e) expect(manifest.e2eMinutes[file], file).toBeGreaterThan(0);
   });

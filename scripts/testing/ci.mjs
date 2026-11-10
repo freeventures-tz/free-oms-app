@@ -25,22 +25,49 @@ const DEFAULT_MINUTES = 2;
  * Splits spec files into shards of similar weight. Every spec runs on all three projects inside its
  * own shard, mobile first, so the order within a spec is the one the full suite has always used.
  *
- * Deterministic: heaviest first, each into the lightest shard so far, ties to the lower shard and
- * the earlier name. One shard when the work is small, because every shard pays for its own
+ * Specs that share state travel together. `groups` are the manifest's shared-state groups: a spec
+ * that reads what an earlier spec left needs that spec on the same database, before it, so every
+ * group (and every chain of groups that share a member) is one unit that is never split. Inside a
+ * shard the specs run in name order, as they do in the whole suite.
+ *
+ * Deterministic: heaviest unit first, each into the lightest shard so far, ties to the lower shard
+ * and the earlier name. One shard when the work is small, because every shard pays for its own
  * checkout, build and local stack.
  */
-/** @param {string[]} files @param {Record<string, number>} [minutes] @param {{ maxShards?: number, targetMinutes?: number }} [options] @returns {string[][]} */
-export function partitionShards(files, minutes = {}, { maxShards = 1, targetMinutes = SHARD_TARGET_MINUTES } = {}) {
+/** @param {string[]} files @param {Record<string, number>} [minutes] @param {{ maxShards?: number, targetMinutes?: number, groups?: string[][] }} [options] @returns {string[][]} */
+export function partitionShards(files, minutes = {}, { maxShards = 1, targetMinutes = SHARD_TARGET_MINUTES, groups = [] } = {}) {
   const sorted = [...new Set(files)].sort();
   if (sorted.length === 0) return [];
   const weight = (file) => (Number.isFinite(minutes[file]) && minutes[file] > 0 ? minutes[file] : DEFAULT_MINUTES);
-  const total = sorted.reduce((sum, file) => sum + weight(file), 0);
-  const count = Math.max(1, Math.min(maxShards, sorted.length, Math.ceil(total / targetMinutes)));
+
+  // Union the files of each group, so groups that share a member become one unit.
+  const parent = new Map(sorted.map((file) => [file, file]));
+  const find = (file) => {
+    while (parent.get(file) !== file) file = parent.get(file);
+    return file;
+  };
+  for (const group of groups) {
+    const members = group.filter((file) => parent.has(file));
+    for (const member of members.slice(1)) parent.set(find(member), find(members[0]));
+  }
+  const byRoot = new Map();
+  for (const file of sorted) {
+    const root = find(file);
+    if (!byRoot.has(root)) byRoot.set(root, []);
+    byRoot.get(root).push(file);
+  }
+  const units = [...byRoot.values()].map((members) => ({ files: members, weight: members.reduce((sum, file) => sum + weight(file), 0) }));
+
+  // No shard can be lighter than the heaviest unit, so there is no point in making more shards
+  // than that unit allows: the others would each pay for a stack to run a few minutes of specs.
+  const total = units.reduce((sum, unit) => sum + unit.weight, 0);
+  const heaviest = Math.max(...units.map((unit) => unit.weight));
+  const count = Math.max(1, Math.min(maxShards, units.length, Math.ceil(total / Math.max(targetMinutes, heaviest))));
   const shards = Array.from({ length: count }, () => ({ files: [], weight: 0 }));
-  for (const file of [...sorted].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
+  for (const unit of [...units].sort((a, b) => b.weight - a.weight || a.files[0].localeCompare(b.files[0]))) {
     const lightest = shards.reduce((best, shard) => (shard.weight < best.weight ? shard : best), shards[0]);
-    lightest.files.push(file);
-    lightest.weight += weight(file);
+    lightest.files.push(...unit.files);
+    lightest.weight += unit.weight;
   }
   return shards.map((shard) => shard.files.sort());
 }

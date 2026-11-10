@@ -83,6 +83,15 @@ describe("splitting E2E specs into shards", () => {
     expect(partitionShards([...all].reverse(), minutes, { maxShards: 4 })).toEqual(partitionShards(all, minutes, { maxShards: 4 }));
   });
 
+  it("never splits specs that share state, and keeps a chain of groups together", () => {
+    // b reads what a left, and c reads what b left: one unit of 22 minutes, however heavy.
+    const groups = [["e2e/a.spec.ts", "e2e/b.spec.ts"], ["e2e/b.spec.ts", "e2e/c.spec.ts"]];
+    const shards = partitionShards(all, minutes, { maxShards: 4, groups });
+    expect(shards).toEqual([["e2e/a.spec.ts", "e2e/b.spec.ts", "e2e/c.spec.ts"], ["e2e/sales.spec.ts", "e2e/shell.spec.ts"]]);
+    // A group member that is not in this run does not pull the others together.
+    expect(partitionShards(["e2e/a.spec.ts", "e2e/c.spec.ts"], { "e2e/a.spec.ts": 13, "e2e/c.spec.ts": 13 }, { maxShards: 4, groups })).toEqual([["e2e/a.spec.ts"], ["e2e/c.spec.ts"]]);
+  });
+
   it("counts a spec with no measured time as an average one", () => {
     const unmeasured = Array.from({ length: 12 }, (_, index) => `e2e/new-${String(index).padStart(2, "0")}.spec.ts`);
     // Twelve specs at two minutes each is 24 minutes: two shards of six.

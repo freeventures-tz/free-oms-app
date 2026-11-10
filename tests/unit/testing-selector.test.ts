@@ -263,6 +263,26 @@ describe("test selection", () => {
       expect(plan.expectedJobs).toEqual(["static", "e2e"]);
     });
 
+    it("a change deep in one area reaches the specs of every area whose screens import it", () => {
+      // app/reports/page.tsx imports lib/reports/query.ts, so a change to the query reaches the
+      // reports screens although no spec imports either file.
+      const deep = { ...activated, domains: { ...activated.domains, helpers: { risk: "low", sources: ["lib/reports/**"], e2e: [] } } };
+      const plan = selectTests({ manifest: deep, files: withUi, edges, changes: [{ status: "M", path: "lib/reports/query.ts" }], identity: proven, mode: "enforce" });
+      expect(plan.execution.e2e.files).toEqual(["e2e/reports.spec.ts", "e2e/shell.spec.ts"]);
+      expect(plan.selection.e2e.reasons["e2e/reports.spec.ts"]).toContain("domain reports (app/reports/page.tsx imports lib/reports/query.ts)");
+    });
+
+    it("a change that a shared or high-risk file imports reaches every screen", () => {
+      // The shared button imports the logo, so a change to the logo is on every screen.
+      const withButton: Record<string, string> = { ...sources, "components/ui/button.tsx": 'export { Logo as Button } from "@/components/brand/logo";' };
+      const graph = buildGraph(withUi, (path: string) => withButton[path] ?? "");
+      const plan = selectTests({ manifest: activated, files: withUi, edges: graph.edges, changes: [{ status: "M", path: "components/brand/logo.tsx" }], identity: proven, mode: "enforce" });
+      expect(plan.lane).toBe("app-wide");
+      expect(plan.execution.e2e.mode).toBe("full");
+      expect(plan.selection.e2e.fullReasons).toEqual(["components/ui/button.tsx imports components/brand/logo.tsx: shared interface components reach every screen"]);
+      expect(plan.execution.pgtap.mode).toBe("none");
+    });
+
     it("always runs the whole unit suite, which needs no database", () => {
       const plan = enforce([{ status: "M", path: "components/brand/logo.tsx" }]);
       expect(plan.selection.unit.files).toEqual(["tests/unit/logo.test.ts"]);

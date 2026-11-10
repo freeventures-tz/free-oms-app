@@ -240,11 +240,34 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
   // the file that pulled the test in.
   for (const path of sourcesChanged) {
     for (const dependant of reverseClosure(edges, [path])) {
+      if (dependant === path) continue;
       const suite = suiteOf(dependant, manifest);
-      if (!suite || dependant === path || !inventory[suite].includes(dependant)) continue;
-      selected[suite].add(dependant);
-      addReason(reasons[suite], dependant, `imports ${path}`);
-      reached[suite].add(dependant);
+      if (suite) {
+        if (!inventory[suite].includes(dependant)) continue;
+        selected[suite].add(dependant);
+        addReason(reasons[suite], dependant, `imports ${path}`);
+        reached[suite].add(dependant);
+        continue;
+      }
+      // An application file that imports the change carries it to that file's screens. E2E specs
+      // import no application code, so this is how a change deep in one area reaches the specs of
+      // every area that uses it. A shared or high-risk file that imports it reaches every screen.
+      const shared = [...(manifest.forceFull ?? []), ...(manifest.appWide ?? [])].find((rule) => matchesAny(dependant, [rule.pattern]));
+      if (shared) {
+        const note = `${dependant} imports ${path}: ${shared.reason}`;
+        if (!suiteFull.e2e.includes(note)) suiteFull.e2e.push(note);
+        raise("medium");
+        continue;
+      }
+      for (const [name, domain] of Object.entries(manifest.domains ?? {})) {
+        if (!matchesAny(dependant, domain.sources)) continue;
+        domains.add(name);
+        raise(domain.risk);
+        for (const spec of domain.e2e ?? []) {
+          selected.e2e.add(spec);
+          addReason(reasons.e2e, spec, `domain ${name} (${dependant} imports ${path})`);
+        }
+      }
     }
   }
 
@@ -327,7 +350,10 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
     }
   }
   if (execution.e2e.mode !== "none") {
-    execution.e2e.shards = partitionShards(execution.e2e.files, manifest.e2eMinutes ?? {}, { maxShards });
+    execution.e2e.shards = partitionShards(execution.e2e.files, manifest.e2eMinutes ?? {}, {
+      maxShards,
+      groups: Object.values(manifest.groups?.e2e ?? {}).map((group) => group.files),
+    });
   }
   execution.projects = RESPONSIVE_PROJECTS;
   const expectedJobs = [
