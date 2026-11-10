@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { describe, expect, it } from "vitest";
 
 import { type ActionResult, type GuardedAction, useGuardedAction } from "@/lib/ui/use-guarded-action";
@@ -71,5 +71,31 @@ describe("a settled attempt", () => {
     expect(commits.filter((c) => c.pending && (c.successKey || c.settled))).toEqual([]);
     const first = commits.find((c) => c.successKey);
     expect(first).toEqual({ pending: false, error: undefined, successKey: "common.saved", settled: "common.saved" });
+  });
+
+  it("shows the verdict without waiting for a transition the action started", async () => {
+    // A Server Action that revalidates starts a transition for the refreshed page, and React holds
+    // every other transition's updates until it finishes. On a long board that is seconds on a
+    // phone. The verdict is the server's answer and must not sit behind that render.
+    let finishRefresh: () => void = () => {};
+    const refresh = new Promise<void>((resolve) => (finishRefresh = resolve));
+    const { commits, Probe, start } = record(async () => {
+      startTransition(async () => {
+        await refresh;
+      });
+      return { successKey: "common.saved" };
+    });
+    render(<Probe />);
+    await act(async () => start());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    // The refresh is still in flight here.
+    expect(commits.at(-1)).toEqual({ pending: false, error: undefined, successKey: "common.saved", settled: "common.saved" });
+    expect(commits.filter((c) => c.pending && (c.successKey || c.settled))).toEqual([]);
+    await act(async () => {
+      finishRefresh();
+      await refresh;
+    });
   });
 });
