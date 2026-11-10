@@ -2,8 +2,8 @@
   "version": 1,
   "about": "Reviewed test-selection rules. Read with docs/testing-and-release.md. A path no rule below names forces full coverage, and so does any change to this file.",
   "activation": {
-    "selectiveEnforcement": false,
-    "note": "Selection runs in shadow only. Turning enforcement on needs the Owner's approval of the phase 4 settings; until then every gate requires full execution."
+    "selectiveEnforcement": true,
+    "note": "Pull requests and `npm run check` run what the change's lane needs (docs, screen, app-wide or critical). Pushes to main and release candidates still run everything. Set this to false to return every gate to full execution; that edit forces full coverage by itself."
   },
   "suites": {
     "unit": ["tests/unit/**/*.test.{ts,tsx}"],
@@ -19,6 +19,34 @@
     "responsiveProjects": ["mobile", "tablet", "desktop"]
   },
   "retiredTests": [],
+  "e2eMinutes": {
+    "about": "Minutes each spec took on all three projects in the full local run of 16 October 2026. Used only to balance E2E shards; a spec not named here counts as 2.",
+    "e2e/authentication.spec.ts": 1.3,
+    "e2e/catalogue.spec.ts": 4.6,
+    "e2e/imprest-daily-count.spec.ts": 1.9,
+    "e2e/imprest-disbursements.spec.ts": 2.0,
+    "e2e/imprest-funding.spec.ts": 3.6,
+    "e2e/imprest-not-counted.spec.ts": 1.2,
+    "e2e/imprest-raised-approval.spec.ts": 1.4,
+    "e2e/imprest-retirement.spec.ts": 1.3,
+    "e2e/imprest-reversal.spec.ts": 1.2,
+    "e2e/imprest-send-back.spec.ts": 1.5,
+    "e2e/imprest-settlement.spec.ts": 2.2,
+    "e2e/imprest-stock-receipt-link.spec.ts": 0.8,
+    "e2e/imprest-verification.spec.ts": 1.1,
+    "e2e/interaction-feedback.spec.ts": 1.2,
+    "e2e/inventory.spec.ts": 3.4,
+    "e2e/production.spec.ts": 3.6,
+    "e2e/pwa.spec.ts": 0.2,
+    "e2e/report-imprest.spec.ts": 0.4,
+    "e2e/reports.spec.ts": 3.2,
+    "e2e/responsive-shell.spec.ts": 0.6,
+    "e2e/role-routing.spec.ts": 0.8,
+    "e2e/sales.spec.ts": 4.2,
+    "e2e/settlement.spec.ts": 5.5,
+    "e2e/stock-invariant.spec.ts": 1.0,
+    "e2e/stock-mobile-benchmark.spec.ts": 0.1
+  },
   "benchmarks": {
     "flag": "FV_BENCHMARK=1",
     "developmentGate": "opt-in; the reviewed skips in known-skips.json apply",
@@ -47,8 +75,6 @@
     { "pattern": "{package.json,package-lock.json}", "reason": "dependencies or scripts" },
     { "pattern": "{next.config.ts,proxy.ts,tsconfig.json,eslint.config.mjs,postcss.config.mjs,components.json,.env.example,.gitignore}", "reason": "application or build configuration" },
     { "pattern": "{vitest.config.mts,playwright.config.ts}", "reason": "test runner configuration" },
-    { "pattern": "{AGENTS.md,CLAUDE.md}", "reason": "policy and process documentation changes operational behaviour" },
-    { "pattern": "docs/**", "reason": "policy and process documentation changes operational behaviour" },
     { "pattern": "tests/setup/**", "reason": "global test setup" },
     { "pattern": "tests/support/**", "reason": "shared test support" },
     { "pattern": "tests/integration/helpers.ts", "reason": "shared integration helpers" },
@@ -56,19 +82,25 @@
     { "pattern": "lib/{auth,admin,supabase}/**", "reason": "authentication, authorization or the database client" },
     { "pattern": "lib/{imprest,inventory,production,sales,settlement,validation}/**", "reason": "financial or stock commands and their validation" },
     { "pattern": "lib/{money.ts,time/**,stock-refusal.ts}", "reason": "business money, date or stock helpers" },
-    { "pattern": "lib/{env.ts,nav.ts,utils.ts,ui/**}", "reason": "shared environment, navigation or UI helpers" },
+    { "pattern": "lib/env.ts", "reason": "environment the server and the build read" },
     { "pattern": "app/**/actions.ts", "reason": "server actions run financial, stock or account commands" },
     { "pattern": "app/actions/**", "reason": "shared server actions" },
-    { "pattern": "app/{layout.tsx,page.tsx,globals.css}", "reason": "shared layout" },
-    { "pattern": "app/(app)/{layout.tsx,loading.tsx,error.tsx}", "reason": "shared signed-in layout" },
+    { "pattern": "app/(app)/layout.tsx", "reason": "the signed-in layout decides who gets in" },
     { "pattern": "app/{auth,sign-in,first-login,no-access}/**", "reason": "authentication screens" },
     { "pattern": "app/(app)/admin/**", "reason": "account administration" },
-    { "pattern": "components/{ui,auth}/**", "reason": "shared UI components" },
-    { "pattern": "components/{app-shell.tsx,nav-link.tsx,nav-icons.ts,language-switcher.tsx}", "reason": "shared shell" },
-    { "pattern": "{i18n,messages}/**", "reason": "translation dictionaries reach every screen" },
-    { "pattern": "public/sw.js", "reason": "the service worker caches every page" }
+    { "pattern": "components/auth/**", "reason": "authentication screens" },
+    { "pattern": "public/sw.js", "reason": "the service worker caches every page" },
+    { "pattern": "vercel.json", "reason": "deployment configuration" }
   ],
-  "docsOnly": ["README.md", "CHANGELOG.md"],
+  "appWide": [
+    { "pattern": "components/ui/**", "reason": "shared interface components reach every screen" },
+    { "pattern": "components/{app-shell.tsx,nav-link.tsx,nav-icons.ts,language-switcher.tsx}", "reason": "the shared shell reaches every screen" },
+    { "pattern": "lib/{nav.ts,utils.ts,ui/**}", "reason": "shared navigation and interface helpers reach every screen" },
+    { "pattern": "app/{layout.tsx,page.tsx,globals.css}", "reason": "the shared layout and styles reach every screen" },
+    { "pattern": "app/(app)/{loading.tsx,error.tsx}", "reason": "the shared loading and failure states reach every screen" },
+    { "pattern": "{i18n,messages}/**", "reason": "wording reaches every screen, and the specs find controls by it" }
+  ],
+  "docsOnly": ["README.md", "CHANGELOG.md", "AGENTS.md", "CLAUDE.md", "docs/**"],
   "domains": {
     "reports-ui": {
       "risk": "medium",

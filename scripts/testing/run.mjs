@@ -39,7 +39,9 @@ function npm(args) {
  *   local        what the plan's SELECTION needs: lint, types, the selected unit files, the full
  *                pgTAP suite (which holds the mandatory database smoke), database lint and advisors
  *                every time, the migration chain when the plan selects it, and HTTP and E2E proof
- *                where the selection reaches them
+ *                where the selection reaches them. For a plan made in enforce mode (`npm run
+ *                check`) it is the plan's EXECUTION instead: exactly what CI will hold the pull
+ *                request to, so a database suite the lane leaves out is left out here too
  *   development  what the plan's EXECUTION requires, in the CI job order (full while in shadow)
  *   release      everything, always, whatever the plan says, then every opt-in benchmark
  *
@@ -49,7 +51,8 @@ function npm(args) {
 /** @param {any} plan @param {string} tier @param {{ benchmarks?: boolean }} [options] @returns {{ steps: any[], skipped: Array<{ suite: string, reason: string }> }} */
 export function buildSteps(plan, tier, { benchmarks = false } = {}) {
   if (!["local", "development", "release"].includes(tier)) throw new Error(`unknown tier ${tier}`);
-  const source = tier === "local" ? plan.selection : plan.execution;
+  const lanePlan = plan.mode === "enforce";
+  const source = tier === "local" && !lanePlan ? plan.selection : plan.execution;
   const full = (suite) => tier === "release" || source[suite]?.mode === "full";
   const files = (suite) => (tier === "release" ? plan.inventory[suite] : source[suite]?.files ?? []);
   // A release candidate always runs the benchmarks, and the Release Gate accepts a benchmark skipped
@@ -72,18 +75,25 @@ export function buildSteps(plan, tier, { benchmarks = false } = {}) {
   } else {
     skipped.push({ suite: "unit", reason: "no unit test selected" });
   }
-  if (tier !== "local") steps.push({ name: "build", job: "static", ...npm(["run", "build"]) });
+  if (tier !== "local" || lanePlan) steps.push({ name: "build", job: "static", ...npm(["run", "build"]) });
 
-  const chain = tier !== "local" || plan.selection?.migrationChain?.mode === "full";
+  // A lane plan says outright whether the database suites are needed. Any other plan runs pgTAP,
+  // lint and advisors every time, and the chain in CI order or when the selection asks for it.
+  const required = (key) => tier === "release" || !lanePlan || (source[key]?.mode ?? "full") !== "none";
+  const chain = lanePlan && tier !== "release" ? required("migrationChain") : tier !== "local" || plan.selection?.migrationChain?.mode === "full";
   if (chain) {
     steps.push({ name: "migration chain", job: "database", destructive: true, targets: [], log: "migration-chain.log", ...npm(["run", "test:migration-chain"]) });
   } else {
-    skipped.push({ suite: "migrationChain", reason: plan.selection?.migrationChain?.reason ?? "not selected" });
+    skipped.push({ suite: "migrationChain", reason: (lanePlan ? source.migrationChain?.reason : plan.selection?.migrationChain?.reason) ?? "not selected" });
   }
-  steps.push({ name: "reset before pgTAP", job: "database", destructive: true, targets: [], ...npx(["supabase", "db", "reset"]) });
-  steps.push({ name: "pgTAP", job: "database", destructive: true, targets: [], log: "pgtap.log", ...npx(["supabase", "test", "db"]) });
-  steps.push({ name: "database lint", job: "database", targets: [], ...npx(["supabase", "db", "lint", "--level", "warning"]) });
-  steps.push({ name: "advisors", job: "database", targets: [], ...{ command: process.execPath, args: ["scripts/run-advisors.mjs"] } });
+  if (required("pgtap")) {
+    steps.push({ name: "reset before pgTAP", job: "database", destructive: true, targets: [], ...npx(["supabase", "db", "reset"]) });
+    steps.push({ name: "pgTAP", job: "database", destructive: true, targets: [], log: "pgtap.log", ...npx(["supabase", "test", "db"]) });
+    steps.push({ name: "database lint", job: "database", targets: [], ...npx(["supabase", "db", "lint", "--level", "warning"]) });
+    steps.push({ name: "advisors", job: "database", targets: [], ...{ command: process.execPath, args: ["scripts/run-advisors.mjs"] } });
+  } else {
+    skipped.push({ suite: "pgtap", reason: source.pgtap?.reason ?? "not required for this change" });
+  }
 
   const integration = full("integration") ? [] : files("integration");
   if (full("integration") || integration.length > 0) {

@@ -7,8 +7,20 @@ name: CI
 # (the combination that would actually land), and pushes are tested only on main, which is the
 # post-merge check of what really landed. Draft pull requests are validated like any other.
 #
-# The Release Gate (release-gate.yml) calls this same workflow for an exact candidate commit, so the
-# release check and the feature check can never run different suites.
+# A pull request runs what its change can affect (scripts/testing/select.mjs, enforce mode):
+#
+#   docs       documentation only: the static job
+#   screen     one area's screens: static, that area's E2E specs and the E2E smoke specs
+#   app-wide   shared interface, layout or wording: static and every E2E spec
+#   critical   authentication, permissions, money and stock commands, the database, dependencies,
+#              configuration, CI and the tests' own infrastructure, and every doubt: every suite
+#
+# A job the plan does not need is skipped, and the gate accepts that skip only because the plan it
+# checks says so. A push to main runs every suite on what landed, whatever the pull request ran, so
+# a regression a lane missed is caught within one run. E2E specs are split between parallel jobs.
+#
+# The Release Gate (release-gate.yml) calls this same workflow for an exact candidate commit, in
+# full, so the release check and the feature check can never run different suites.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -57,10 +69,16 @@ env:
 # place proves the wrong thing.
 jobs:
   plan:
-    name: Plan tests (shadow)
+    name: Plan tests
     runs-on: ubuntu-latest
     outputs:
       head: ${{ steps.identity.outputs.head }}
+      lane: ${{ steps.jobs.outputs.lane }}
+      database: ${{ steps.jobs.outputs.database }}
+      integration: ${{ steps.jobs.outputs.integration }}
+      e2e: ${{ steps.jobs.outputs.e2e }}
+      e2e-shards: ${{ steps.jobs.outputs.e2e-shards }}
+      e2e-shard-total: ${{ steps.jobs.outputs.e2e-shard-total }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,14 +113,22 @@ jobs:
           esac
           echo "head=$head" >> "$GITHUB_OUTPUT"
           echo "base=$base" >> "$GITHUB_OUTPUT"
-      - name: Select tests (reported, not enforced)
+      - name: Select tests
+        # A pull request is held to its lane. A push to main runs everything and reports what the
+        # lane would have run beside it (shadow), so the rules keep being measured against full
+        # runs. A release candidate runs everything, in one E2E job, so one build is the evidence.
         env:
           BASE: ${{ steps.identity.outputs.base }}
           HEAD_SHA: ${{ steps.identity.outputs.head }}
-          MODE: ${{ inputs.gate == 'release' && 'full' || 'shadow' }}
+          MODE: ${{ inputs.gate == 'release' && 'full' || github.event_name == 'pull_request' && 'enforce' || 'shadow' }}
+          MAX_SHARDS: ${{ inputs.gate == 'release' && '1' || '4' }}
         run: |
           mkdir -p oms-test/plan
-          node scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode "$MODE" --output oms-test/plan/plan.json
+          node scripts/testing/select.mjs --base "$BASE" --head "$HEAD_SHA" --mode "$MODE" --max-shards "$MAX_SHARDS" --output oms-test/plan/plan.json
+      - name: Say which jobs the plan needs
+        id: jobs
+        run: |
+          node scripts/testing/ci.mjs outputs --plan oms-test/plan/plan.json | tee -a "$GITHUB_OUTPUT"
       - name: Plan with the approved base's rules
         # The minimum a change must run comes from the base it merges into, never from the change
         # alone: the base's own selector and manifest, over the base's own file tree, so a test the
@@ -153,6 +179,8 @@ jobs:
 
   database:
     name: Migrations · pgTAP · Advisors
+    needs: plan
+    if: needs.plan.outputs.database == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -224,6 +252,8 @@ jobs:
 
   integration:
     name: Auth & Data API integration
+    needs: plan
+    if: needs.plan.outputs.integration == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -272,7 +302,14 @@ jobs:
 
   e2e:
     name: Responsive authentication E2E
+    needs: plan
+    if: needs.plan.outputs.e2e == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      # One shard failing must not hide what the others found.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.e2e-shards) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -282,6 +319,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: oms-test/plan
+      - name: Specs for this shard
+        # Each shard has its own runner, build, stack and database. Every spec runs on all three
+        # projects inside its shard, mobile first, as it does in the whole suite.
+        id: specs
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: echo "files=$(node scripts/testing/ci.mjs shard-files --plan oms-test/plan/plan.json --shard "$SHARD")" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
           # Pinned deliberately. With `latest`, a run that passed yesterday can fail today with no
@@ -300,12 +348,19 @@ jobs:
       - run: npm run build
       - name: Record the tested build
         # A release candidate's evidence names this build; release-gate.yml binds it to the manifest.
+        # A release run has one shard, so there is one build to name.
         run: node scripts/testing/release.mjs --describe-artifact --output oms-test/results/artifact.json
       - name: List E2E tests
         env:
           OMS_TEST_RESULTS_DIR: ""
-        run: npx playwright test --list --reporter=json > oms-test/results/e2e.playwright-list.json
-      - run: npm run test:e2e
+          SPECS: ${{ steps.specs.outputs.files }}
+          LISTING: e2e.playwright-list.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json
+        run: npx playwright test --list --reporter=json $SPECS > "oms-test/results/$LISTING"
+      - name: E2E
+        env:
+          SPECS: ${{ steps.specs.outputs.files }}
+          OMS_E2E_RESULTS_NAME: e2e.playwright.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json
+        run: npm run test:e2e -- $SPECS
       - name: E2E benchmarks (release candidates)
         # The documented method: each benchmark spec alone, after its own reset, on the mobile
         # project, filtered to its benchmark block, with FV_BENCHMARK=1.
@@ -314,22 +369,25 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: results-e2e
+          # One shard keeps the name release-gate.yml downloads; more than one are numbered.
+          name: results-e2e${{ needs.plan.outputs.e2e-shard-total != '1' && format('-{0}', matrix.shard) || '' }}
           path: oms-test/results/
           if-no-files-found: ignore
           retention-days: 14
 
   gate:
     # The one required check. It runs whatever happened above (`always()`), and passes only when it
-    # can see that every expected job succeeded and every required test ran and passed
-    # (scripts/testing/gate.mjs). A failed, cancelled, skipped, timed-out or missing job, a missing
-    # report, a test that never ran, an unexplained skip or a suite with zero tests all refuse it.
+    # can see that every job the plan requires succeeded and every required test ran and passed
+    # (scripts/testing/gate.mjs). A failed, cancelled, timed-out or missing job, a missing report, a
+    # test that never ran, an unexplained skip or a suite with zero tests all refuse it. A skipped
+    # job is accepted only when the plan's own execution leaves its suites out, and the gate works
+    # that out from the plan itself.
     name: ${{ inputs.gate == 'release' && 'Release Gate' || 'Development Gate' }}
     if: always()
     needs: [plan, static, database, integration, e2e]

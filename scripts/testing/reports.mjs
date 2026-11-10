@@ -10,6 +10,7 @@
  *   migration-chain.log                            `npm run test:migration-chain` output
  *   unit.vitest-list.json, integration.vitest-list.json, e2e.playwright-list.json
  *                                                  the tests each runner listed before running
+ *   e2e.playwright-list.shard-2-of-3.json          one shard's listing; a suite's listings add up
  *   artifact.json                                  the build the E2E job tested (release.mjs)
  *   e2e-benchmark-<name>.playwright.json, integration-benchmark.vitest.json
  *                                                  an isolated benchmark pass (benchmarks.mjs)
@@ -176,7 +177,7 @@ export function listedIds(suite, json, root) {
   return new Set(json.map((entry) => `${suite}:${repoPath(root, entry.file)}:${entry.name}`));
 }
 
-const LISTING = /^(unit|integration)\.vitest-list\.json$|^(e2e)\.playwright-list\.json$/;
+const LISTING = /^(unit|integration)\.vitest-list\.json$|^(e2e)\.playwright-list(?:\.shard-\d+-of-\d+)?\.json$/;
 
 /**
  * Reads every report in a directory. Returns the run reports, the listings by suite, the recorded
@@ -200,7 +201,9 @@ export function readResults(dir, root) {
     if (listing) {
       const suite = listing[1] ?? listing[2];
       try {
-        listings[suite] = listedIds(suite, JSON.parse(readFileSync(join(dir, name), "utf8")), root);
+        // Each E2E shard lists its own specs, so a suite's listings are added together.
+        const listed = listedIds(suite, JSON.parse(readFileSync(join(dir, name), "utf8")), root);
+        listings[suite] = new Set([...(listings[suite] ?? []), ...listed]);
       } catch (error) {
         problems.push(`${name} cannot be parsed: ${error.message}`);
       }

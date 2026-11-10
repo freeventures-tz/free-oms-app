@@ -6,9 +6,19 @@
  * writes that decision down as a plan. It never touches a database.
  *
  * The plan has two halves. `selection` is what the rules say the change needs. `execution` is what a
- * gate will require to have run. Until the Owner activates selective enforcement, `execution` is the
- * full suite every time and `selection` is reported beside it (shadow mode), so the rules can be
- * measured against full runs before anything depends on them.
+ * gate will require to have run. In shadow and full mode `execution` is every suite, and `selection`
+ * is reported beside it so the rules keep being measured against full runs. In enforce mode
+ * (pull requests, and `npm run check`) `execution` follows the change's lane:
+ *
+ *   docs       documentation only: the static checks
+ *   tests      test files only: the static checks, and the changed HTTP or E2E tests
+ *   screen     one area's screens: static, that area's E2E specs and the E2E smoke specs
+ *   app-wide   shared interface, layout or wording: static and every E2E spec
+ *   critical   anything a rule marks high-risk, and every doubt: every suite, as before
+ *
+ * The database suites (pgTAP, the migration chain, lint and advisors) and the HTTP suite run
+ * against the database alone. Their inputs all sit behind full-coverage rules, so outside the
+ * critical lane those inputs are byte-identical to the base, whose own run already stands.
  *
  * Every doubt resolves to full coverage, with the reason written into the plan: an unknown or
  * missing base, a shallow clone, a path no rule names, a rename or deletion, an unexpected test
@@ -35,6 +45,7 @@ import {
   selectorDigest,
   sha256,
 } from "./common.mjs";
+import { partitionShards } from "./ci.mjs";
 import { buildGraph, reverseClosure } from "./graph.mjs";
 
 export const SUITES = ["unit", "integration", "e2e", "pgtap"];
@@ -125,17 +136,22 @@ function suiteOf(path, manifest) {
  *   identity  { base, head, ... } plus `problems`: identity doubts found while collecting it
  */
 /** @param {any} options @returns {any} */
-export function selectTests({ manifest, files, edges, changes, unresolved = [], mode = "shadow", identity = {}, selector = {} }) {
+export function selectTests({ manifest, files, edges, changes, unresolved = [], mode = "shadow", identity = {}, selector = {}, maxShards = 1 }) {
   if (!["shadow", "full", "enforce"].includes(mode)) throw new Error(`unknown mode ${mode}`);
-  if (mode === "enforce" && manifest?.activation?.selectiveEnforcement !== true) {
-    throw new Error("selective enforcement is not activated; plan with --mode shadow or --mode full");
-  }
+  // With the manifest's switch off, an enforce plan requires everything. One edit to the manifest
+  // returns every gate to full execution, and that edit forces full coverage by itself.
 
   const inventory = discoverInventory(".", manifest, files);
   const fullReasons = [...(identity.problems ?? [])];
   const suiteFull = Object.fromEntries(SUITES.map((suite) => [suite, []]));
   const reasons = Object.fromEntries(SUITES.map((suite) => [suite, {}]));
   const selected = Object.fromEntries(SUITES.map((suite) => [suite, new Set()]));
+  // Test files the change itself reaches: a changed or new test, or one that imports a changed
+  // file. The mandatory smoke files are not in here, because they are picked for every change,
+  // including one that cannot alter what they prove.
+  const reached = Object.fromEntries(SUITES.map((suite) => [suite, new Set()]));
+  // Whether anything the application serves changed, as opposed to documentation or a test file.
+  let appChanged = false;
   const domains = new Set();
   let risk = "low";
   const raise = (level) => {
@@ -187,8 +203,19 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
         if (inventory[suite].includes(path)) {
           selected[suite].add(path);
           addReason(reasons[suite], path, "changed or new test");
+          reached[suite].add(path);
         }
         if (suite !== "unit") raise("medium");
+        sourcesChanged.push(path);
+        continue;
+      }
+      // Shared interface, layout and wording reach every screen, so every E2E spec runs. They
+      // cannot reach the database, so they do not force the other suites.
+      appChanged = true;
+      const wide = (manifest.appWide ?? []).find((rule) => matchesAny(path, [rule.pattern]));
+      if (wide) {
+        suiteFull.e2e.push(`${path}: ${wide.reason}`);
+        raise("medium");
         sourcesChanged.push(path);
         continue;
       }
@@ -212,11 +239,12 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
   // Import-graph dependants of each changed source, one changed file at a time so each reason names
   // the file that pulled the test in.
   for (const path of sourcesChanged) {
-    for (const reached of reverseClosure(edges, [path])) {
-      const suite = suiteOf(reached, manifest);
-      if (!suite || reached === path || !inventory[suite].includes(reached)) continue;
-      selected[suite].add(reached);
-      addReason(reasons[suite], reached, `imports ${path}`);
+    for (const dependant of reverseClosure(edges, [path])) {
+      const suite = suiteOf(dependant, manifest);
+      if (!suite || dependant === path || !inventory[suite].includes(dependant)) continue;
+      selected[suite].add(dependant);
+      addReason(reasons[suite], dependant, `imports ${path}`);
+      reached[suite].add(dependant);
     }
   }
 
@@ -261,22 +289,63 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
   selection.advisors = { mode: "full", reason: "database lint and advisors always run" };
 
   const enforced = mode === "enforce" && manifest.activation?.selectiveEnforcement === true;
+  const everything = !enforced || fullReasons.length > 0;
+  const testsChanged = SUITES.some((suite) => reached[suite].size > 0);
+  const lane =
+    fullReasons.length > 0 ? "critical" : selection.e2e.mode === "full" ? "app-wide" : appChanged ? "screen" : testsChanged ? "tests" : "docs";
+
+  const all = (suite) => ({ mode: "full", files: inventory[suite] });
+  const none = (reason) => ({ mode: "none", files: [], reason });
   const execution = {};
-  for (const suite of SUITES) {
-    execution[suite] = enforced
-      ? { mode: selection[suite].mode, files: selection[suite].files }
-      : { mode: "full", files: inventory[suite] };
+  // The unit suite takes under a minute and needs no database, so it always runs whole.
+  execution.unit = all("unit");
+  if (everything) {
+    for (const suite of ["integration", "e2e", "pgtap"]) execution[suite] = all(suite);
+    execution.migrationChain = { mode: "full" };
+    execution.advisors = { mode: "full" };
+  } else {
+    // Every database input (migrations, pgTAP files, the stack's configuration, the chain and
+    // advisor scripts) sits behind a full-coverage rule, so here they are byte-identical to the
+    // base and the base's own run stands for them.
+    const sameDatabase = "no database input changed: migrations, database tests and stack configuration are identical to the base";
+    execution.pgtap = none(sameDatabase);
+    execution.migrationChain = { mode: "none", reason: sameDatabase };
+    execution.advisors = { mode: "none", reason: sameDatabase };
+    // The HTTP suite calls the database's API, never the application. It runs whole when the
+    // change reaches one of its files, because its files share one database and one order.
+    execution.integration =
+      reached.integration.size > 0 || suiteFull.integration.length > 0
+        ? all("integration")
+        : none("no integration test changed and none imports a changed file; the suite calls the database's API, which is unchanged");
+    if (appChanged || selection.e2e.mode === "full") {
+      execution.e2e = { mode: selection.e2e.mode, files: selection.e2e.files };
+    } else {
+      // Nothing the application serves changed, so the smoke specs have nothing new to prove. A
+      // changed or new spec still runs, with whatever shares its state.
+      const own = [...expandGroups(reached.e2e, manifest.groups?.e2e, {})].sort();
+      execution.e2e = own.length > 0 ? { mode: "selected", files: own } : none("nothing the application serves changed");
+    }
   }
-  execution.migrationChain = { mode: "full" };
-  execution.advisors = { mode: "full" };
+  if (execution.e2e.mode !== "none") {
+    execution.e2e.shards = partitionShards(execution.e2e.files, manifest.e2eMinutes ?? {}, { maxShards });
+  }
   execution.projects = RESPONSIVE_PROJECTS;
+  const expectedJobs = [
+    "static",
+    ...(execution.pgtap.mode !== "none" || execution.migrationChain.mode !== "none" ? ["database"] : []),
+    ...(execution.integration.mode !== "none" ? ["integration"] : []),
+    ...(execution.e2e.mode !== "none" ? ["e2e"] : []),
+  ];
 
   const plan = {
     schemaVersion: PLAN_SCHEMA_VERSION,
     mode,
     executionPolicy: enforced
-      ? "selective enforcement (Owner-activated)"
-      : "full execution; the selection is reported in shadow",
+      ? `selective enforcement: ${lane} lane`
+      : mode === "enforce"
+        ? "full execution; selective enforcement is switched off in the manifest"
+        : "full execution; the selection is reported in shadow",
+    lane,
     identity: { ...identity, problems: identity.problems ?? [] },
     selector,
     changes: [...changes].sort((a, b) => a.path.localeCompare(b.path)),
@@ -289,7 +358,7 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
     minimums: manifest.minimums ?? {},
     retiredTests: manifest.retiredTests ?? [],
     benchmarks: benchmarkEntries(manifest),
-    expectedJobs: EXPECTED_JOBS,
+    expectedJobs,
   };
   return { ...plan, digest: planDigest(plan) };
 }
@@ -432,6 +501,7 @@ function bootstrapPlan({ git, base, head, record }) {
     schemaVersion: PLAN_SCHEMA_VERSION,
     mode: "full",
     executionPolicy: "full execution; the base's approved bootstrap record",
+    lane: "critical",
     identity: { base, head, inventoryRev: base, baseTree: tree, problems: [] },
     selector: { bootstrapRecord: sha256(canonicalJson(record)) },
     changes: [],
@@ -598,6 +668,7 @@ export function fallbackPlan({ manifest, files, reason, identity = {} }) {
     schemaVersion: PLAN_SCHEMA_VERSION,
     mode: "full",
     executionPolicy: "full execution; the selector failed",
+    lane: "critical",
     identity: { ...identity, problems: [...(identity.problems ?? []), reason] },
     selector: {},
     changes: [],
@@ -623,9 +694,12 @@ export function fallbackPlan({ manifest, files, reason, identity = {} }) {
 /** @param {string[]} argv @returns {any} */
 export function runSelectCli(argv, root = process.cwd()) {
   const args = parseArgs(argv);
-  const known = new Set(["base", "head", "mode", "output", "worktree", "manifest", "inventory-rev", "baseline"]);
+  const known = new Set(["base", "head", "mode", "output", "worktree", "manifest", "inventory-rev", "baseline", "max-shards"]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
   if (!args.output || args.output === true) throw new Error("--output <plan.json> is required");
+  // How many parallel E2E jobs the caller can run. One by default: a local run has one stack.
+  const maxShards = args["max-shards"] === undefined ? 1 : Number(args["max-shards"]);
+  if (!Number.isInteger(maxShards) || maxShards < 1) throw new Error("--max-shards must be a whole number, 1 or more");
 
   const manifestPath = typeof args.manifest === "string" ? args.manifest : resolve(root, "scripts/testing/manifest.json");
   const manifest = readJson(manifestPath);
@@ -667,6 +741,7 @@ export function runSelectCli(argv, root = process.cwd()) {
       changes,
       unresolved,
       mode: typeof args.mode === "string" ? args.mode : "shadow",
+      maxShards,
       identity,
       selector: {
         selectorDigest: selectorDigest(root),
@@ -697,6 +772,10 @@ if (invokedDirectly) {
     const line = (suite) => `${suite}: ${plan.selection[suite].mode} (${plan.selection[suite].files.length} of ${plan.inventory[suite].length})`;
     console.log(`test:select · risk ${plan.risk} · ${plan.executionPolicy}`);
     for (const suite of SUITES) console.log(`  ${line(suite)}`);
+    if (plan.mode === "enforce") {
+      const runs = (suite) => `${suite} ${plan.execution[suite].mode === "none" ? "not needed" : `${plan.execution[suite].files.length} file(s)`}`;
+      console.log(`  will run: ${SUITES.map(runs).join(" · ")} · jobs ${plan.expectedJobs.join(", ")}`);
+    }
     for (const reason of plan.fullReasons) console.log(`  full because: ${reason}`);
   } catch (error) {
     console.error(`test:select refused: ${error.message}`);

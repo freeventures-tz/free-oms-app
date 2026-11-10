@@ -25,9 +25,11 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 - Real customer records stay out of git and out of evidence. Screens, recordings and tests use the seeded fixture data and the seeded test account.
 - Upload images with `IMAGE_ADAPTER=gist`. Post videos through the PR comment box in the signed-in browser.
 ## Checks
-`npm run lint`, `npm run typecheck`, `npm run test`, `npm run test:e2e`, `npm run build`. Run all of them before opening a PR and again after rebasing.
+`npm run check`. Run it before opening a PR and again after rebasing. It says which lane the change is in (docs, tests, screen, app-wide or critical) and what CI will run for it, then runs lint, types, the unit suite and the build. CI runs the rest of the lane on the pull request, and every suite on `main` after the merge. Add `-- --all` to run the lane's database-backed suites locally first; do that for a critical change when you want the proof before pushing.
 
-`docs/testing-and-release.md` is the authoritative reference for test selection, the Development Gate and Release Gate, and the staged changes to this process. It says what is implemented and what is activated. Until the Owner approves an activation there, the checks above and *Releasing* below stay in force unchanged.
+The lane comes from the paths changed, never from a flag. Authentication, permissions, server actions, money and stock commands, the database, dependencies, configuration and CI always run every suite.
+
+`docs/testing-and-release.md` is the authoritative reference for lanes, the Development Gate and Release Gate. *Releasing* below is unchanged.
 ## Multi-agent rules
 - Work on your own task branch; `main` changes only by merged PR.
 - Leave other agents' worktrees, branches and uncommitted work untouched.

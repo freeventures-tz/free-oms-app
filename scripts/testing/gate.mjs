@@ -19,6 +19,13 @@
  * evidence: while the base has no selector (this transition), it is the base's full inventory
  * (select.mjs --baseline), and a run without one is refused.
  *
+ * A plan made in enforce mode with no reason for full coverage follows its lane (select.mjs): it
+ * may leave out the database, HTTP or E2E suites, and then the jobs that run them are not required.
+ * The gate does not take the plan's word for that. It works out the required jobs from the plan's
+ * own execution, and it refuses a plan that leaves a suite out while the change touches the
+ * database, the dependencies, CI or the test infrastructure, whatever the selector that made the
+ * plan said. A Release Gate never follows a lane.
+ *
  * Retries that rescued a test are not failures, but each one is listed: a green retry is a
  * reliability finding until someone explains the first failure.
  */
@@ -26,7 +33,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { FULL_SHA, PLAN_SCHEMA_VERSION, RESPONSIVE_PROJECTS, canonicalJson, parseArgs, readJson, selectorDigest } from "./common.mjs";
+import { FULL_SHA, PLAN_SCHEMA_VERSION, RESPONSIVE_PROJECTS, canonicalJson, matchesAny, parseArgs, readJson, selectorDigest } from "./common.mjs";
 import { readResults } from "./reports.mjs";
 import { EXPECTED_JOBS, SUITES, planDigest } from "./select.mjs";
 
@@ -34,6 +41,31 @@ const REPORTED_SUITES = [...SUITES, "migrationChain"];
 
 /** Which job must have produced each suite's report. */
 export const SUITE_JOB = { unit: "static", integration: "integration", e2e: "e2e", pgtap: "database", migrationChain: "database" };
+
+/**
+ * Paths whose change always needs every suite. The manifest says the same, and a plan that leaves a
+ * suite out while one of these changed was made by a selector or manifest that no longer does, so
+ * the gate holds the line itself.
+ */
+export const NEVER_PARTIAL = [
+  "supabase/**",
+  "scripts/**",
+  ".github/**",
+  "package.json",
+  "package-lock.json",
+  "playwright.config.ts",
+  "vitest.config.mts",
+  "tests/setup/**",
+  "tests/support/**",
+  "e2e/fixtures.ts",
+  "e2e/global-setup.ts",
+];
+
+/** Whether the plan follows a lane: enforce mode, and nothing that forces full coverage. */
+/** @param {any} plan */
+export function followsLane(plan) {
+  return plan?.mode === "enforce" && (plan.fullReasons ?? []).length === 0;
+}
 
 /** An exact string, or a `/regular expression/`. */
 function textMatches(pattern, value) {
@@ -110,15 +142,30 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
   // required only when the change's manifest retires it by name, which is itself a manifest change
   // and so forces full coverage and review. Without usable baseline evidence the gate cannot see what
   // the change dropped or lowered, so it refuses instead of holding the head to its own rules.
-  const baseRefusals = baselineRefusals(plan, basePlan);
+  //
+  // A plan that follows a lane is held to its own execution instead. It deletes and renames nothing
+  // and changes no test rule (each of those forces full coverage), so the base has nothing to add;
+  // the check just below refuses a lane plan that claims otherwise.
+  const lane = gate !== "Release Gate" && followsLane(plan);
+  const needed = (suite) => !lane || (plan.execution[suite]?.mode ?? "full") !== "none";
+  if (lane) {
+    const partial = REPORTED_SUITES.filter((suite) => !needed(suite) || plan.execution[suite]?.mode === "selected");
+    for (const change of plan.changes ?? []) {
+      const path = [change.path, change.oldPath].filter(Boolean).find((entry) => matchesAny(entry, NEVER_PARTIAL));
+      if (path && partial.length > 0) {
+        refusals.push(`the plan runs only part of ${partial.join(", ")}, but ${path} changed, which needs every suite`);
+      }
+    }
+  }
+  const baseRefusals = lane ? [] : baselineRefusals(plan, basePlan);
   refusals.push(...baseRefusals);
-  const baseline = baseRefusals.length === 0 ? basePlan : null;
+  const baseline = !lane && baseRefusals.length === 0 ? basePlan : null;
   if (baseline?.baseline) warnings.push(`baseline: ${baseline.baseline}`);
   const retired = new Map((plan.retiredTests ?? []).map((entry) => [entry.file, entry]));
   const required = {};
   for (const suite of SUITES) {
     const own = plan.execution[suite]?.files ?? [];
-    const minimum = baseline ? baseline.execution[suite].files : plan.inventory[suite];
+    const minimum = lane ? own : baseline ? baseline.execution[suite].files : plan.inventory[suite];
     const wanted = [...new Set([...own, ...minimum])].sort();
     required[suite] = [];
     for (const file of wanted) {
@@ -144,11 +191,20 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     else if (Array.isArray(value)) minimums[key] = [...new Set([...(minimums[key] ?? []), ...value])];
   }
 
-  // The planner is a required job like any other: a gate without it has nothing to stand on.
-  for (const job of [...new Set(["plan", ...EXPECTED_JOBS, ...(plan.expectedJobs ?? [])])]) {
+  // The planner is a required job like any other: a gate without it has nothing to stand on. On a
+  // lane, the jobs are the ones that run the suites the plan's own execution requires. A job the
+  // plan leaves out may be skipped or absent, but one that ran and did not succeed still refuses.
+  const requiredJobs = lane
+    ? new Set(["plan", "static", ...REPORTED_SUITES.filter(needed).map((suite) => SUITE_JOB[suite])])
+    : new Set(["plan", ...EXPECTED_JOBS, ...(plan.expectedJobs ?? [])]);
+  for (const job of requiredJobs) {
     const result = jobs[job]?.result;
     if (!result) refusals.push(`job ${job} is absent`);
     else if (result !== "success") refusals.push(`job ${job} finished as ${result}`);
+  }
+  for (const [job, value] of Object.entries(jobs)) {
+    if (requiredJobs.has(job) || !value?.result || value.result === "success" || value.result === "skipped") continue;
+    refusals.push(`job ${job} was not required for this change, but it ran and finished as ${value.result}`);
   }
 
   // A release candidate is only evidence for the build it tested.
@@ -185,10 +241,12 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     REPORTED_SUITES.map((suite) => [suite, reports.filter((report) => report.suite === suite && !report.benchmark)]),
   );
   const summary = {};
+  const notRequired = [];
   for (const suite of REPORTED_SUITES) {
     const suiteReports = bySuite[suite];
     if (suiteReports.length === 0) {
-      refusals.push(`${suite}: no report arrived from job ${SUITE_JOB[suite]}`);
+      if (needed(suite)) refusals.push(`${suite}: no report arrived from job ${SUITE_JOB[suite]}`);
+      else notRequired.push({ suite, reason: plan.execution[suite]?.reason ?? "not required for this change" });
       continue;
     }
 
@@ -201,6 +259,11 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
       if (shards.length !== suiteReports.length) refusals.push(`${suite}: sharded and unsharded reports are mixed`);
     } else if (suiteReports.length > 1) {
       refusals.push(`${suite}: ${suiteReports.length} unsharded reports; expected one`);
+    }
+    // The plan splits the E2E specs between jobs, and the reports must be exactly those shards.
+    const planned = suite === "e2e" ? (plan.execution.e2e?.shards ?? []).length : 0;
+    if (planned > 1 && (shards.length === 0 || shards[0].shard.total !== planned)) {
+      refusals.push(`e2e: the plan splits the specs into ${planned} shards, and the reports are not those shards`);
     }
 
     const tests = suiteReports.flatMap((report) => report.tests);
@@ -333,6 +396,8 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     refusals,
     warnings,
     summary,
+    lane: lane ? plan.lane ?? "screen" : null,
+    notRequired,
     shadow: {
       risk: plan.risk,
       fullReasons: plan.fullReasons ?? [],
@@ -357,7 +422,13 @@ export function renderSummary(decision) {
     }
     lines.push("");
   }
-  if (decision.shadow) {
+  if (decision.lane) {
+    lines.push(`### Lane: ${decision.lane}`, "");
+    if ((decision.notRequired ?? []).length > 0) {
+      lines.push("Not required for this change:", "", ...decision.notRequired.map((entry) => `- ${entry.suite}: ${entry.reason}`), "");
+    }
+  }
+  if (decision.shadow && !decision.lane) {
     lines.push(
       "### Shadow selection",
       "",

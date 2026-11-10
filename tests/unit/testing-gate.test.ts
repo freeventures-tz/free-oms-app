@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { baselineRefusals, evaluateGate, renderSummary, skipMatches } from "@/scripts/testing/gate.mjs";
+import { baselineRefusals, evaluateGate, followsLane, renderSummary, skipMatches } from "@/scripts/testing/gate.mjs";
 import {
   normaliseMigrationChain,
   normalisePgTap,
@@ -353,11 +353,11 @@ describe("the aggregate gate", () => {
   });
 
   it("requires what the approved base requires, whatever the head's plan says", () => {
-    // A head plan running only one unit file (as an enforcing plan might) against a base that
-    // requires both: the second is required anyway, so a report without it refuses.
-    const activated = { ...manifest, activation: { selectiveEnforcement: true } };
-    const head = selectTests({ manifest: activated, files, edges: new Map(), changes: [{ status: "M", path: "tests/unit/money.test.ts" }], identity, mode: "enforce", selector: { selectorDigest: SELECTOR } });
-    expect(head.execution.unit.files).toEqual(["tests/unit/money.test.ts"]);
+    // A head plan altered to require one unit file, against a base that requires both: the second
+    // is required anyway, so a report without it refuses.
+    const shrunk = makePlan();
+    shrunk.execution.unit = { mode: "selected", files: ["tests/unit/money.test.ts"] };
+    const head = { ...shrunk, digest: planDigest(shrunk) };
     const base = makePlan();
 
     const onlyMoney = normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
@@ -367,11 +367,119 @@ describe("the aggregate gate", () => {
   });
 
   it("requires the full inventory when the base has no selector", () => {
-    const activated = { ...manifest, activation: { selectiveEnforcement: true } };
-    const head = selectTests({ manifest: activated, files, edges: new Map(), changes: [{ status: "M", path: "tests/unit/money.test.ts" }], identity, mode: "enforce", selector: { selectorDigest: SELECTOR } });
+    const head = selectTests({ manifest, files, edges: new Map(), changes: [{ status: "M", path: "tests/unit/money.test.ts" }], identity, selector: { selectorDigest: SELECTOR } });
     const basePlan = baselinePlan({ root: ROOT, git: gitWithBase(files), base: identity.base!, head: HEAD, bootstrap: BOOTSTRAP });
     const onlyMoney = normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds"]]), ROOT);
     expect(decide({ plan: head, basePlan, reports: replace("unit", onlyMoney) }).refusals).toContain("unit: required file tests/unit/report.test.ts did not run");
+  });
+
+  describe("a pull request on a lane", () => {
+    // The fixture's manifest with enforcement on, one screen domain, and the paths a real manifest
+    // sends to full coverage.
+    const lanes = {
+      ...manifest,
+      activation: { selectiveEnforcement: true },
+      forceFull: [{ pattern: "supabase/**", reason: "database" }],
+      domains: { sales: { risk: "medium", sources: ["app/sales/**"], e2e: ["e2e/sales.spec.ts"] } },
+    };
+    const laneFiles = [...files, "app/sales/page.tsx"];
+    const lanePlan = (changes: Array<{ status: string; path: string }>, extra: Record<string, unknown> = {}) =>
+      selectTests({ manifest: lanes, files: laneFiles, edges: new Map(), changes, identity, mode: "enforce", selector: { selectorDigest: SELECTOR }, ...extra });
+    const screen = () => lanePlan([{ status: "M", path: "app/sales/page.tsx" }]);
+    const unitAndE2e = () => goodReports().filter((report) => report.suite === "unit" || report.suite === "e2e");
+    const laneJobs = { plan: { result: "success" }, static: { result: "success" }, database: { result: "skipped" }, integration: { result: "skipped" }, e2e: { result: "success" } };
+
+    it("passes with only the jobs its plan needs, and says what it left out and why", () => {
+      const plan = screen();
+      expect(followsLane(plan)).toBe(true);
+      expect(plan.expectedJobs).toEqual(["static", "e2e"]);
+      const reports = unitAndE2e();
+      const decision = evaluateGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(decision.refusals).toEqual([]);
+      expect(decision.pass).toBe(true);
+      expect(decision.lane).toBe("screen");
+      expect(decision.notRequired.map((entry: { suite: string }) => entry.suite)).toEqual(["integration", "pgtap", "migrationChain"]);
+      expect(renderSummary(decision)).toContain("### Lane: screen");
+      expect(renderSummary(decision)).toContain("no database input changed");
+    });
+
+    it("needs no base plan, because a lane deletes no test and changes no rule", () => {
+      const reports = unitAndE2e();
+      const decision = evaluateGate({ plan: screen(), basePlan: null, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(decision.pass).toBe(true);
+    });
+
+    it("still refuses when a job the plan needs was skipped, failed or never arrived", () => {
+      const reports = unitAndE2e();
+      const run = (jobs: Record<string, { result: string }>) =>
+        evaluateGate({ plan: screen(), jobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } }).refusals;
+      expect(run({ ...laneJobs, e2e: { result: "skipped" } })).toContain("job e2e finished as skipped");
+      expect(run({ ...laneJobs, static: { result: "failure" } })).toContain("job static finished as failure");
+      const withoutPlanner = Object.fromEntries(Object.entries(laneJobs).filter(([job]) => job !== "plan"));
+      expect(run(withoutPlanner)).toContain("job plan is absent");
+    });
+
+    it("refuses a job it did not need, if that job ran and did not succeed", () => {
+      const reports = unitAndE2e();
+      const decision = evaluateGate({ plan: screen(), jobs: { ...laneJobs, database: { result: "failure" } }, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(decision.refusals).toContain("job database was not required for this change, but it ran and finished as failure");
+    });
+
+    it("works the required jobs out from the plan's execution, not from the plan's own list of jobs", () => {
+      const altered = screen();
+      altered.expectedJobs = ["static"];
+      const plan = { ...altered, digest: planDigest(altered) };
+      const reports = unitAndE2e();
+      const jobs = { plan: { result: "success" }, static: { result: "success" }, e2e: { result: "skipped" } };
+      const decision = evaluateGate({ plan, jobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(decision.refusals).toContain("job e2e finished as skipped");
+    });
+
+    it("refuses a required spec that did not run on every project", () => {
+      const mobileOnly = normalisePlaywright(playwrightJson(allE2e.filter(([, project]) => project === "mobile")));
+      const reports = [...unitAndE2e().filter((report) => report.suite !== "e2e"), mobileOnly];
+      const decision = evaluateGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(decision.refusals).toContain("e2e: e2e/sales.spec.ts did not run on tablet");
+    });
+
+    it("refuses a plan that leaves suites out although the database changed, whatever made the plan", () => {
+      // The selector sends supabase/** to full coverage. A plan that says otherwise was made by a
+      // selector or manifest that no longer does, and the gate does not take its word.
+      const altered = screen();
+      altered.changes = [...altered.changes, { status: "M", path: "supabase/migrations/001_first.sql" }];
+      const plan = { ...altered, digest: planDigest(altered) };
+      const reports = unitAndE2e();
+      const decision = evaluateGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(decision.refusals.some((line: string) => /runs only part of .*supabase\/migrations\/001_first\.sql changed, which needs every suite/.test(line))).toBe(true);
+    });
+
+    it("a change that forces full coverage is not on a lane: every job and the base plan are required again", () => {
+      const plan = lanePlan([{ status: "M", path: "supabase/tests/database/001_auth.sql" }]);
+      expect(followsLane(plan)).toBe(false);
+      expect(plan.lane).toBe("critical");
+      expect(decide({ plan, jobs: laneJobs }).refusals).toEqual(expect.arrayContaining(["job database finished as skipped", "job integration finished as skipped"]));
+      expect(decide({ plan, basePlan: null }).refusals[0]).toMatch(/^no baseline/);
+      expect(decide({ plan }).pass).toBe(true);
+    });
+
+    it("a Release Gate never follows a lane", () => {
+      const reports = unitAndE2e();
+      const decision = evaluateGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], artifact: ARTIFACT, expect: { head: HEAD, selectorDigest: SELECTOR }, gate: "Release Gate" });
+      expect(decision.refusals).toEqual(expect.arrayContaining(["a Release Gate requires a full plan", "job database finished as skipped"]));
+    });
+
+    it("holds the reports to the shards the plan split the specs into", () => {
+      const plan = lanePlan([{ status: "M", path: "app/sales/page.tsx" }], { maxShards: 2, manifest: { ...lanes, e2eMinutes: { "e2e/shell.spec.ts": 20, "e2e/sales.spec.ts": 20 } } });
+      expect(plan.execution.e2e.shards).toEqual([["e2e/sales.spec.ts"], ["e2e/shell.spec.ts"]]);
+      const shard = (file: string, index: number) => normalisePlaywright(playwrightJson(allE2e.filter(([entry]) => entry === file)), { index, total: 2 });
+      const others = unitAndE2e().filter((report) => report.suite !== "e2e");
+      const both = [...others, shard("sales.spec.ts", 1), shard("shell.spec.ts", 2)];
+      const run = (reports: ReturnType<typeof unitAndE2e>) =>
+        evaluateGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(run(both).pass).toBe(true);
+      expect(run(unitAndE2e()).refusals).toContain("e2e: the plan splits the specs into 2 shards, and the reports are not those shards");
+      expect(run([...others, shard("sales.spec.ts", 1)]).refusals).toContain("e2e: shard 2 of 2 is missing");
+    });
   });
 
   it("refuses a Release Gate on anything but a full plan", () => {

@@ -225,11 +225,112 @@ describe("test selection", () => {
     expect(plan.execution.projects).toEqual(["mobile", "tablet", "desktop"]);
   });
 
-  it("refuses enforcement until the manifest's activation is approved", () => {
-    expect(() => select([], { mode: "enforce" })).toThrow(/selective enforcement is not activated/);
-    const activated = { ...manifest, activation: { selectiveEnforcement: true } };
-    const plan = selectTests({ manifest: activated, files, edges, changes: [{ status: "M", path: "components/brand/logo.tsx" }], identity: proven, mode: "enforce" });
-    expect(plan.execution.unit.files).toEqual(["tests/unit/logo.test.ts"]);
+  it("requires everything in enforce mode while the manifest's switch is off", () => {
+    // One edit to the manifest returns every gate to full execution.
+    const plan = select([{ status: "M", path: "README.md" }], { mode: "enforce" });
+    expect(plan.executionPolicy).toBe("full execution; selective enforcement is switched off in the manifest");
+    expect(plan.execution.pgtap.mode).toBe("full");
+    expect(plan.execution.e2e.files).toHaveLength(3);
+    expect(plan.expectedJobs).toEqual(["static", "database", "integration", "e2e"]);
+  });
+
+  describe("enforce mode: a pull request runs its lane", () => {
+    const activated = {
+      ...manifest,
+      activation: { selectiveEnforcement: true },
+      appWide: [{ pattern: "components/ui/**", reason: "shared interface components reach every screen" }],
+    };
+    const withUi = [...files, "components/ui/button.tsx"].sort();
+    const enforce = (changes: Array<{ status: string; path: string; oldPath?: string }>, extra: Record<string, unknown> = {}) =>
+      selectTests({ manifest: activated, files: withUi, edges, changes, identity: proven, mode: "enforce", ...extra });
+    const modes = (plan: ReturnType<typeof enforce>) =>
+      Object.fromEntries(["unit", "integration", "e2e", "pgtap", "migrationChain", "advisors"].map((key) => [key, plan.execution[key].mode]));
+
+    it("documentation only: the static job, and nothing that needs a database or a browser", () => {
+      const plan = enforce([{ status: "M", path: "README.md" }]);
+      expect(plan.lane).toBe("docs");
+      expect(modes(plan)).toEqual({ unit: "full", integration: "none", e2e: "none", pgtap: "none", migrationChain: "none", advisors: "none" });
+      expect(plan.expectedJobs).toEqual(["static"]);
+    });
+
+    it("one area's screen: that area's specs and the smoke specs, and no database job", () => {
+      const plan = enforce([{ status: "M", path: "components/brand/logo.tsx" }]);
+      expect(plan.lane).toBe("screen");
+      expect(plan.execution.e2e).toMatchObject({ mode: "selected", files: ["e2e/auth.spec.ts", "e2e/shell.spec.ts"] });
+      expect(plan.execution.pgtap).toMatchObject({ mode: "none", files: [] });
+      expect(plan.execution.pgtap.reason).toContain("no database input changed");
+      expect(plan.execution.integration.mode).toBe("none");
+      expect(plan.expectedJobs).toEqual(["static", "e2e"]);
+    });
+
+    it("always runs the whole unit suite, which needs no database", () => {
+      const plan = enforce([{ status: "M", path: "components/brand/logo.tsx" }]);
+      expect(plan.selection.unit.files).toEqual(["tests/unit/logo.test.ts"]);
+      expect(plan.execution.unit).toEqual({ mode: "full", files: ["tests/unit/logo.test.ts", "tests/unit/money.test.ts", "tests/unit/query.test.ts"] });
+    });
+
+    it("shared interface: every E2E spec, and still no database job", () => {
+      const plan = enforce([{ status: "M", path: "components/ui/button.tsx" }]);
+      expect(plan.lane).toBe("app-wide");
+      expect(plan.risk).toBe("medium");
+      expect(plan.fullReasons).toEqual([]);
+      expect(plan.execution.e2e.mode).toBe("full");
+      expect(plan.execution.e2e.files).toHaveLength(3);
+      expect(plan.selection.e2e.fullReasons).toEqual(["components/ui/button.tsx: shared interface components reach every screen"]);
+      expect(plan.expectedJobs).toEqual(["static", "e2e"]);
+    });
+
+    it("the HTTP suite runs whole when the change reaches one of its files, and not for its smoke files alone", () => {
+      // lib/reports/query.ts is imported by tests/integration/paging.test.ts.
+      const reached = enforce([{ status: "M", path: "lib/reports/query.ts" }]);
+      expect(reached.execution.integration).toMatchObject({ mode: "full" });
+      expect(reached.execution.integration.files).toHaveLength(4);
+      expect(reached.expectedJobs).toEqual(["static", "integration", "e2e"]);
+      const smokeOnly = enforce([{ status: "M", path: "components/brand/logo.tsx" }]);
+      expect(smokeOnly.selection.integration.files).toEqual(["tests/integration/authority.test.ts"]);
+      expect(smokeOnly.execution.integration.mode).toBe("none");
+    });
+
+    it("a changed test runs without the smoke specs, because the application did not change", () => {
+      const unit = enforce([{ status: "M", path: "tests/unit/money.test.ts" }]);
+      expect(unit.lane).toBe("tests");
+      expect(unit.expectedJobs).toEqual(["static"]);
+      const spec = enforce([{ status: "M", path: "e2e/reports.spec.ts" }]);
+      expect(spec.execution.e2e).toMatchObject({ mode: "selected", files: ["e2e/reports.spec.ts"] });
+      expect(spec.expectedJobs).toEqual(["static", "e2e"]);
+      const http = enforce([{ status: "M", path: "tests/integration/fund-a.test.ts" }]);
+      expect(http.execution.integration.mode).toBe("full");
+      expect(http.execution.e2e.mode).toBe("none");
+      expect(http.expectedJobs).toEqual(["static", "integration"]);
+    });
+
+    it("anything high-risk, and every doubt, runs every suite", () => {
+      for (const path of ["lib/money.ts", "supabase/tests/database/001_auth.sql", "package.json", "scripts/testing/select.mjs", "lib/unknown.ts"]) {
+        const plan = enforce([{ status: "M", path }]);
+        expect(plan.lane, path).toBe("critical");
+        expect(modes(plan), path).toEqual({ unit: "full", integration: "full", e2e: "full", pgtap: "full", migrationChain: "full", advisors: "full" });
+        expect(plan.expectedJobs, path).toEqual(["static", "database", "integration", "e2e"]);
+      }
+      const renamed = enforce([{ status: "R", path: "components/brand/mark.tsx", oldPath: "components/brand/logo.tsx" }]);
+      expect(renamed.lane).toBe("critical");
+    });
+
+    it("splits the E2E specs into balanced shards, and never more than it is allowed", () => {
+      const minutes = { "e2e/auth.spec.ts": 9, "e2e/reports.spec.ts": 8, "e2e/shell.spec.ts": 7 };
+      const wide = (maxShards: number) => enforce([{ status: "M", path: "components/ui/button.tsx" }], { maxShards, manifest: { ...activated, e2eMinutes: minutes } });
+      expect(wide(1).execution.e2e.shards).toEqual([["e2e/auth.spec.ts", "e2e/reports.spec.ts", "e2e/shell.spec.ts"]]);
+      // 24 minutes at 12 a shard is two shards: the heaviest alone, the other two together.
+      expect(wide(4).execution.e2e.shards).toEqual([["e2e/auth.spec.ts"], ["e2e/reports.spec.ts", "e2e/shell.spec.ts"]]);
+      expect(enforce([{ status: "M", path: "README.md" }]).execution.e2e.shards).toBeUndefined();
+    });
+
+    it("shadow and full plans still require everything, whatever lane the change is in", () => {
+      const shadow = selectTests({ manifest: activated, files: withUi, edges, changes: [{ status: "M", path: "README.md" }], identity: proven });
+      expect(shadow.lane).toBe("docs");
+      expect(shadow.execution.pgtap.mode).toBe("full");
+      expect(shadow.execution.migrationChain.mode).toBe("full");
+      expect(shadow.expectedJobs).toEqual(["static", "database", "integration", "e2e"]);
+    });
   });
 
   it("is deterministic: the same inputs in another order give the same plan digest", () => {

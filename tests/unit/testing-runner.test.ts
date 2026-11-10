@@ -74,6 +74,46 @@ describe("plan runner", () => {
     expect(names(buildSteps(high, "local").steps)).toContain("migration chain");
   });
 
+  describe("a plan made in enforce mode (npm run check)", () => {
+    const activated = { ...manifest, activation: { selectiveEnforcement: true } };
+    const lane = (path: string) =>
+      selectTests({ manifest: activated, files, edges, changes: [{ status: "M", path }], identity, mode: "enforce", selector: { selectorDigest: "d" } });
+
+    it("runs what CI will hold the pull request to: no database suite when the lane leaves it out", () => {
+      const { steps, skipped } = buildSteps(lane("components/brand/logo.tsx"), "local");
+      expect(names(steps)).toEqual(["lint", "typecheck", "list unit", "unit", "build", "build for E2E", "record the tested build", "list e2e", "reset before E2E", "e2e (selected)"]);
+      expect(skipped.map((entry) => entry.suite)).toEqual(["migrationChain", "pgtap", "integration"]);
+      expect(skipped.find((entry) => entry.suite === "pgtap")!.reason).toContain("no database input changed");
+      // The whole unit suite, and only the lane's specs.
+      expect(steps.find((step) => step.name === "unit")!.args).toEqual(["vitest", "run", "--project", "unit"]);
+      expect(steps.find((step) => step.name === "e2e (selected)")!.args).toEqual(["playwright", "test", "e2e/auth.spec.ts"]);
+    });
+
+    it("documentation only: the static steps and nothing else", () => {
+      const { steps } = buildSteps(lane("README.md"), "local");
+      expect(names(steps)).toEqual(["lint", "typecheck", "list unit", "unit", "build"]);
+      expect(steps.every((step) => step.job === "static")).toBe(true);
+    });
+
+    it("a high-risk change runs every suite, the chain included", () => {
+      const { steps, skipped } = buildSteps(lane("lib/money.ts"), "local");
+      expect(skipped).toEqual([]);
+      expect(names(steps)).toEqual(expect.arrayContaining(["migration chain", "pgTAP", "database lint", "advisors", "integration", "e2e"]));
+    });
+
+    it("the development tier follows the same lane, in CI's job order", () => {
+      const { steps } = buildSteps(lane("components/brand/logo.tsx"), "development");
+      expect(names(steps)).not.toContain("pgTAP");
+      expect(names(steps)).not.toContain("migration chain");
+      expect(names(steps)).toContain("e2e (selected)");
+    });
+
+    it("the release tier ignores the lane", () => {
+      const { steps } = buildSteps(lane("README.md"), "release");
+      expect(names(steps)).toEqual(expect.arrayContaining(["migration chain", "pgTAP", "integration", "e2e", "e2e benchmarks"]));
+    });
+  });
+
   it("passes explicit paths for a selection, to the listing and the run alike", () => {
     const { steps } = buildSteps(plan("components/brand/logo.tsx"), "local");
     const step = (name: string) => steps.find((entry: { name: string }) => entry.name === name);

@@ -162,15 +162,58 @@ describe("CI routing", () => {
     expect(runs("integration")).toContain("npm run test:integration");
     expect(ci.jobs.e2e.name).toBe("Responsive authentication E2E");
     expect(runs("e2e")).toContain("npm run build");
-    expect(runs("e2e")).toContain("npm run test:e2e");
+    expect(runs("e2e")).toContain("npm run test:e2e -- $SPECS");
   });
 
   it("every suite job hands its results to the gate, whatever happened", () => {
     for (const job of ["static", "database", "integration", "e2e"]) {
-      const upload = ci.jobs[job].steps.find((step: { with?: { name?: string } }) => step.with?.name === `results-${job}`);
+      // One E2E shard keeps the name the release workflow downloads; more than one are numbered.
+      const upload = ci.jobs[job].steps.find((step: { with?: { name?: string } }) => step.with?.name?.startsWith(`results-${job}`));
       expect(upload, job).toBeDefined();
       expect(upload.if).toBe("always()");
     }
+    const e2eUpload = ci.jobs.e2e.steps.find((step: { with?: { name?: string } }) => step.with?.name?.startsWith("results-e2e"));
+    expect(e2eUpload.with.name).toBe("results-e2e${{ needs.plan.outputs.e2e-shard-total != '1' && format('-{0}', matrix.shard) || '' }}");
+    expect(release.jobs.bind.steps.some((step: { with?: { name?: string } }) => step.with?.name === "results-e2e")).toBe(true);
+  });
+
+  it("holds a pull request to its lane, and runs everything on main and for a release", () => {
+    const select = ci.jobs.plan.steps.find((step: { name?: string }) => step.name === "Select tests");
+    const mode = (context: Context) => render(select.env.MODE, context);
+    expect(mode(pr(7, "1"))).toBe("enforce");
+    expect(mode(push("1"))).toBe("shadow");
+    expect(mode(called("1"))).toBe("full");
+    // One E2E job for a release, so one build is the evidence the candidate is bound to.
+    expect(render(select.env.MAX_SHARDS, called("1"))).toBe("1");
+    expect(render(select.env.MAX_SHARDS, pr(7, "1"))).toBe("4");
+    expect(select.run).toContain('--mode "$MODE" --max-shards "$MAX_SHARDS"');
+  });
+
+  it("skips a suite job only on the plan's say-so, and never the static job or the gate", () => {
+    const outputs = ci.jobs.plan.steps.find((step: { id?: string }) => step.id === "jobs");
+    expect(outputs.run).toContain("node scripts/testing/ci.mjs outputs --plan oms-test/plan/plan.json");
+    for (const job of ["database", "integration", "e2e"]) {
+      expect(ci.jobs[job].needs).toBe("plan");
+      expect(ci.jobs[job].if).toBe(`needs.plan.outputs.${job} == 'true'`);
+      expect(ci.jobs.plan.outputs[job]).toBe(`\${{ steps.jobs.outputs.${job} }}`);
+    }
+    expect(ci.jobs.static.if).toBeUndefined();
+    expect(ci.jobs.static.needs).toBeUndefined();
+    expect(ci.jobs.gate.if).toBe("always()");
+  });
+
+  it("splits the E2E specs between jobs that each have their own stack, and lets every shard finish", () => {
+    const e2e = ci.jobs.e2e;
+    expect(e2e.strategy["fail-fast"]).toBe(false);
+    expect(e2e.strategy.matrix.shard).toBe("${{ fromJSON(needs.plan.outputs.e2e-shards) }}");
+    const specs = e2e.steps.find((step: { id?: string }) => step.id === "specs");
+    expect(specs.run).toContain('node scripts/testing/ci.mjs shard-files --plan oms-test/plan/plan.json --shard "$SHARD"');
+    const run = e2e.steps.find((step: { name?: string }) => step.name === "E2E");
+    expect(run.env.OMS_E2E_RESULTS_NAME).toBe("e2e.playwright.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json");
+    // Each shard starts its own stack and builds its own source before it runs anything.
+    const names = e2e.steps.map((step: { name?: string; run?: string }) => step.name ?? step.run ?? "");
+    expect(names.indexOf("Start Supabase")).toBeLessThan(names.indexOf("E2E"));
+    expect(names.indexOf("npm run build")).toBeLessThan(names.indexOf("E2E"));
   });
 
   it("fails a pipeline on its first failing command, so a tee cannot hide a red suite", () => {
@@ -195,14 +238,14 @@ describe("CI routing", () => {
     }
     for (const [job, main, suite] of [
       ["integration", "npm run test:integration", "integration"],
-      ["e2e", "npm run test:e2e", "e2e"],
+      ["e2e", "npm run test:e2e -- $SPECS", "e2e"],
     ] as const) {
       const steps = ci.jobs[job].steps;
       const mainIndex = steps.findIndex((step: { run?: string }) => step.run === main);
       const bench = steps.findIndex((step: { run?: string }) => step.run === `node scripts/testing/benchmarks.mjs --suite ${suite} --results oms-test/results`);
       expect(bench, job).toBeGreaterThan(mainIndex);
       expect(steps[bench].if).toBe("inputs.gate == 'release'");
-      expect(steps.findIndex((step: { with?: { name?: string } }) => step.with?.name === `results-${job}`)).toBeGreaterThan(bench);
+      expect(steps.findIndex((step: { with?: { name?: string } }) => step.with?.name?.startsWith(`results-${job}`))).toBeGreaterThan(bench);
     }
   });
 
@@ -219,7 +262,9 @@ describe("CI routing", () => {
     expect(listing("integration", "vitest list --project integration --json=oms-test/results/integration.vitest-list.json")).toBeLessThan(
       runIndex("integration", "npm run test:integration"),
     );
-    expect(listing("e2e", "playwright test --list --reporter=json > oms-test/results/e2e.playwright-list.json")).toBeLessThan(runIndex("e2e", "npm run test:e2e"));
+    expect(listing("e2e", 'playwright test --list --reporter=json $SPECS > "oms-test/results/$LISTING"')).toBeLessThan(runIndex("e2e", "npm run test:e2e -- $SPECS"));
+    const e2eListing = ci.jobs.e2e.steps.find((step: { name?: string }) => step.name === "List E2E tests");
+    expect(e2eListing.env.LISTING).toBe("e2e.playwright-list.shard-${{ matrix.shard }}-of-${{ needs.plan.outputs.e2e-shard-total }}.json");
   });
 
   it("R4: plans the base's minimum from the base's own tree, on every event with a base selector", () => {

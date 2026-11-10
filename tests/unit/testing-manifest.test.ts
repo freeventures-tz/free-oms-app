@@ -26,6 +26,7 @@ describe("the reviewed test manifest", () => {
     const unmapped = files.filter((file) => {
       if (Object.values(manifest.suites as Record<string, string[]>).some((globs) => matchesAny(file, globs))) return false;
       if (manifest.forceFull.some((rule: { pattern: string }) => matchesAny(file, [rule.pattern]))) return false;
+      if (manifest.appWide.some((rule: { pattern: string }) => matchesAny(file, [rule.pattern]))) return false;
       if (matchesAny(file, manifest.docsOnly)) return false;
       return !Object.values(manifest.domains as Record<string, { sources: string[] }>).some((domain) => matchesAny(file, domain.sources));
     });
@@ -68,8 +69,57 @@ describe("the reviewed test manifest", () => {
     }
   });
 
-  it("keeps selective enforcement off until the Owner activates it", () => {
-    expect(manifest.activation.selectiveEnforcement).toBe(false);
+  it("has selective enforcement on: a pull request runs its lane", () => {
+    expect(manifest.activation.selectiveEnforcement).toBe(true);
+  });
+
+  it("never lets a lane leave out a suite for the database, dependencies, CI or the tests' own infrastructure", () => {
+    // The gate holds this line itself (NEVER_PARTIAL); the manifest must send the same paths to
+    // full coverage, or a pull request would be planned onto a lane the gate then refuses.
+    const full = (path: string) => manifest.forceFull.some((rule: { pattern: string }) => matchesAny(path, [rule.pattern]));
+    for (const path of [
+      "supabase/migrations/20261006000100_report_imprest_section.sql",
+      "supabase/config.toml",
+      "scripts/testing/select.mjs",
+      "scripts/migration-chain-check.mjs",
+      ".github/workflows/ci.yml",
+      "package.json",
+      "package-lock.json",
+      "playwright.config.ts",
+      "vitest.config.mts",
+      "tests/setup/integration.ts",
+      "tests/support/database.ts",
+      "e2e/fixtures.ts",
+      "e2e/global-setup.ts",
+    ]) {
+      expect(full(path), path).toBe(true);
+    }
+  });
+
+  it("sends authentication, permissions, and money and stock commands to every suite", () => {
+    const full = (path: string) => manifest.forceFull.some((rule: { pattern: string }) => matchesAny(path, [rule.pattern]));
+    for (const path of [
+      "lib/auth/guard.ts",
+      "lib/supabase/server.ts",
+      "lib/admin/accounts.ts",
+      "lib/imprest/disbursements.ts",
+      "lib/inventory/inventory.ts",
+      "lib/sales/sales.ts",
+      "lib/settlement/settlement.ts",
+      "lib/money.ts",
+      "app/(app)/inventory/actions.ts",
+      "app/(app)/admin/accounts/page.tsx",
+      "app/(app)/layout.tsx",
+      "app/sign-in/page.tsx",
+      "proxy.ts",
+      "next.config.ts",
+    ]) {
+      expect(full(path), path).toBe(true);
+    }
+  });
+
+  it("gives every E2E spec a measured weight for the shards", () => {
+    for (const file of inventory.e2e) expect(manifest.e2eMinutes[file], file).toBeGreaterThan(0);
   });
 
   it("resolves every repository import in the application and its test support", () => {
