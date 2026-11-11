@@ -8,7 +8,8 @@
  * The plan has two halves. `selection` is what the rules say the change needs. `execution` is what a
  * gate will require to have run. In shadow and full mode `execution` is every suite, and `selection`
  * is reported beside it so the rules keep being measured against full runs. In enforce mode
- * (pull requests, and `npm run check`) `execution` follows the change's lane:
+ * (draft pull requests, which cannot be merged, and `npm run check`) `execution` follows the
+ * change's lane:
  *
  *   docs          documentation only: the static checks
  *   tests         test files only: the static checks, and the changed HTTP or E2E tests
@@ -348,36 +349,45 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
 
   const all = (suite) => ({ mode: "full", files: inventory[suite] });
   const none = (reason) => ({ mode: "none", files: [], reason });
-  const execution = {};
-  // The unit suite takes under a minute and needs no database, so it always runs whole.
-  execution.unit = all("unit");
-  if (everything) {
-    for (const suite of ["integration", "e2e", "pgtap"]) execution[suite] = all(suite);
-    execution.migrationChain = { mode: "full" };
-    execution.advisors = { mode: "full" };
-  } else {
+  /** What a run requires: every suite, or what the change's lane needs. */
+  const requirement = (everySuite) => {
+    const run = {};
+    // The unit suite takes under a minute and needs no database, so it always runs whole.
+    run.unit = all("unit");
+    if (everySuite) {
+      for (const suite of ["integration", "e2e", "pgtap"]) run[suite] = all(suite);
+      run.migrationChain = { mode: "full" };
+      run.advisors = { mode: "full" };
+      return run;
+    }
     // Every database input (migrations, pgTAP files, the stack's configuration, the chain and
     // advisor scripts) sits behind a full-coverage rule, so here they are byte-identical to the
     // base and the base's own run stands for them.
     const sameDatabase = "no database input changed: migrations, database tests and stack configuration are identical to the base";
-    execution.pgtap = none(sameDatabase);
-    execution.migrationChain = { mode: "none", reason: sameDatabase };
-    execution.advisors = { mode: "none", reason: sameDatabase };
+    run.pgtap = none(sameDatabase);
+    run.migrationChain = { mode: "none", reason: sameDatabase };
+    run.advisors = { mode: "none", reason: sameDatabase };
     // The HTTP suite calls the database's API, never the application. It runs whole when the
     // change reaches one of its files, because its files share one database and one order.
-    execution.integration =
+    run.integration =
       reached.integration.size > 0 || suiteFull.integration.length > 0
         ? all("integration")
         : none("no integration test changed and none imports a changed file; the suite calls the database's API, which is unchanged");
     if (appChanged || selection.e2e.mode === "full") {
-      execution.e2e = { mode: selection.e2e.mode, files: selection.e2e.files };
+      run.e2e = { mode: selection.e2e.mode, files: selection.e2e.files };
     } else {
       // Nothing the application serves changed, so the smoke specs have nothing new to prove. A
       // changed or new spec still runs, with whatever shares its state.
       const own = [...expandGroups(reached.e2e, manifest.groups?.e2e, {})].sort();
-      execution.e2e = own.length > 0 ? { mode: "selected", files: own } : none("nothing the application serves changed");
+      run.e2e = own.length > 0 ? { mode: "selected", files: own } : none("nothing the application serves changed");
     }
-  }
+    return run;
+  };
+  // What the change's lane would run, written into every plan whatever its mode. A full run is
+  // compared against exactly this (gate.mjs), so "a failing test the lane would have skipped" means
+  // the lane's real execution, not the older selection list beside it.
+  const laneExecution = requirement(fullReasons.length > 0);
+  const execution = requirement(everything);
   if (execution.e2e.mode !== "none") {
     execution.e2e.shards = partitionShards(execution.e2e.files, manifest.e2eMinutes ?? {}, {
       maxShards,
@@ -409,6 +419,7 @@ export function selectTests({ manifest, files, edges, changes, unresolved = [], 
     domains: [...domains].sort(),
     fullReasons,
     selection,
+    laneExecution,
     execution,
     inventory,
     minimums: manifest.minimums ?? {},

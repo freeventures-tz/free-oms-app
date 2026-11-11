@@ -13,19 +13,24 @@ document is activated yet. A released part is in a tagged release.
 
 | Part | State | What it means today |
 | --- | --- | --- |
-| Policy in `AGENTS.md` (*Checks*, *Releasing*) | In force | Run `npm run check` before every PR and after every rebase. CI runs what the change's lane needs. Every merge to `main` is a release with a SemVer tag and a changelog entry |
+| Policy in `AGENTS.md` (*Checks*, *Releasing*) | In force | Run `npm run check` before every PR and after every rebase. Every merge to `main` is a release with a SemVer tag and a changelog entry |
 | One CI run per PR update, pushes tested on `main` only | Implemented | Takes effect when the PR that adds it merges |
-| Lanes: a pull request runs what its change can affect | Implemented | Takes effect when the PR that adds it merges (section 4). `scripts/testing/manifest.json` `activation.selectiveEnforcement` is `true`; setting it to `false` returns every gate to full execution |
-| Full run on every push to `main`, and every night | Implemented | Every suite runs on what landed, whatever lane the pull request was in, and reports what the lane would have missed. The nightly run repeats it on an unchanged commit, to tell a flaky test from a broken change |
-| Development Gate (aggregate check) | Implemented | Reported on every PR and every push to `main`. Not a required check until the Owner configures it (section 9) |
+| Every suite before a merge | Implemented | A pull request that can be merged runs every suite on GitHub's merge of the branch into its base, in parallel jobs, and reports as **Development Gate** (section 4) |
+| Lanes, on draft pull requests only | Implemented | A draft cannot be merged. While it is one it runs what its change can affect and reports as **Lane Gate**, a different check. `scripts/testing/manifest.json` `activation.selectiveEnforcement` is `true`; setting it to `false` makes drafts run everything too |
+| Full run on every push to `main`, and every night | Implemented | Every suite runs on what landed and reports any failing test the change's lane would not have run. The nightly run installs from the registry with no cache and repeats the run on an unchanged commit |
+| A full check that can block a merge | **Not activated** | Nothing on GitHub stops a merge while Development Gate is red, missing or stale. That needs branch protection, which only the Owner can set (section 9) |
+| Development Gate (aggregate check) | Implemented | Reported on every pull request that is not a draft, every push to `main` and every night. Not a required check until the Owner configures it (section 9) |
 | Release Gate (full candidate run, manual) | Implemented | Can be started by hand on an exact commit. It runs every suite and the benchmarks and binds its evidence to the build it tested. It deploys nothing, and no merge waits for it |
 | `develop` branch, development environment | Proposed | Neither exists. Nothing here creates them |
 | Controlled production promotion (deploy and migration hold) | Proposed | Vercel and the Supabase integration still follow `main`. See section 7 |
 | Restoration exercise | Proposed | Procedure drafted in section 8. Never run |
 
-The Owner asked for lanes on 10 November 2026: a small change should merge in minutes, and a change
-to a critical function should still get every check. The pull request that adds them changes test
-infrastructure, so it is itself in the critical lane and runs everything.
+The Owner asked on 10 November 2026 for fast iteration: a small change should get its answer in
+minutes, and a change to a critical function should still get every check. An independent review
+the next day held that nothing may reach `main` on a partial run while production deploys from
+`main` automatically, because a failed run after the merge reports a problem and undoes nothing.
+Both hold here: a draft iterates on its lane, and the pull request runs everything before it can
+be merged.
 
 ## 2. The commands
 
@@ -44,8 +49,8 @@ npm run test:release -- --manifest <candidate.json> --bind --gate-report <file> 
 ```
 
 - **`check`** is what to run before a pull request. It plans the working tree against where the
-  branch left `main`, the way CI will plan the pull request, and says which lane the change is in
-  and which suites CI will hold it to. Then it runs lint, types, the unit suite and the build, which
+  branch left `main`, the way CI plans a draft pull request, and says which lane the change is in
+  and which suites a draft will run. Then it runs lint, types, the unit suite and the build, which
   need no database and take a few minutes. `--all` also runs the database-backed suites the plan
   requires, against this checkout's own local stack.
 - **`test:select`** writes a plan: the exact base, head, merge base and trees; the changed paths;
@@ -152,8 +157,10 @@ reviewed group, so the map cannot quietly fall behind the code.
 
 | Event | What runs | Cancelled by |
 | --- | --- | --- |
-| Pull request opened, updated, reopened or marked ready (drafts included) | The change's lane, on the merge commit, then **Development Gate** | A newer update to the same pull request only |
+| Draft pull request opened or updated | The change's lane, on the merge commit, then **Lane Gate** | A newer update to the same pull request only |
+| Pull request opened, updated, reopened or marked ready, when it is not a draft | Every suite, on the merge commit, then **Development Gate** | A newer update to the same pull request only |
 | Push to `main` (after a merge) | Every suite on what landed, then **Development Gate** | Nothing |
+| Every night, 01:00 UTC | Every suite on `main`, installed from the registry with no cache, then **Development Gate** | Nothing |
 | Called by `release-gate.yml` (needs `candidate` and `production_base`, both full commits) | Every suite on the exact candidate, then **Release Gate** | Nothing |
 
 Feature-branch pushes no longer start a second run. The four suite jobs and their names are
@@ -176,8 +183,11 @@ is left is spread over parallel jobs, and each job does as little as it can befo
   first shard also runs pgTAP, lint and the advisors. The gate adds the shards' counterexamples up
   against the floor and refuses a missing shard. The chain grows by a proof with every release, so
   one job would only get slower.
-- **Setup is cut where it repeated work.** Installed packages are restored by lockfile and `npm
-  ci` runs only on a miss. Every stack starts without the services no suite uses
+- **Setup is cut where it repeated work.** Installed packages are restored from a cache keyed by
+  `package.json` and `package-lock.json`, and `npm ci` runs only on a miss. Because a hit skips
+  `npm ci`, every job first runs `scripts/testing/lock-check.mjs`, which refuses a `package.json`
+  whose dependencies the lockfile does not match. The nightly run and a release candidate skip the
+  cache and install from the registry. Every stack starts without the services no suite uses
   (`SUPABASE_EXCLUDE` in `ci.yml`: the dashboard and its metadata API, log collection, edge
   functions, image resizing and realtime; the database, Auth, the Data API, storage, the gateway
   and the mail catcher start as before). An E2E shard fetches its browser while the stack starts,
@@ -187,25 +197,32 @@ What that should cost, worked out from the last full run on `main` (14 October 2
 minutes in one job, the database job 16, HTTP 7, static 2). The repository is public, so runner
 minutes are free and each runner has four cores; the limit is wall time, not cost.
 
-| Lane | Jobs | Expected wall time |
+| Run | Jobs | Expected wall time |
 | --- | --- | --- |
-| docs, or unit tests only | static | about 2 to 3 minutes |
-| screen | static, one to four E2E shards | about 6 to 8 minutes |
-| app-wide and app-critical | static, eight E2E shards | about 7 to 9 minutes |
-| critical, every push to `main`, and the nightly run | all four, E2E in eight shards, the chain in four | about 8 to 10 minutes |
+| Draft, docs or unit tests only | static | about 2 to 3 minutes |
+| Draft, one area's screens | static, one to four E2E shards | about 6 to 8 minutes |
+| Draft, app-wide or app-critical | static, eight E2E shards | about 7 to 9 minutes |
+| Any pull request that is not a draft, every push to `main`, the nightly run, and a draft in the critical lane | all four, E2E in eight shards, the chain in four | about 8 to 10 minutes |
 
-Those are estimates until the first runs are measured. Before this change every update took about
-33 minutes, and ran twice.
+Those are estimates, and GitHub has not run this workflow yet. Before this change every update took
+about 33 minutes, and ran twice.
 
-**Every night at 01:00 UTC every suite runs on `main`**, with nothing changed since the last run. A
-test that fails there failed on a commit it has already passed on, which is how a flaky or
-date-dependent test is told from a broken change before it costs someone a rerun.
+**What stands between a change and production.** A draft's lane run is feedback for its author. It
+is not a merge check: it has its own name, Lane Gate, and `gate.mjs` refuses a lane plan under the
+Development Gate name, so a green lane run cannot be read as the full one. Marking the pull request
+ready starts the full run, on GitHub's merge of the branch into its base as it stood at that
+moment. Two gaps remain, and both are closed only by branch protection the Owner sets (section 9):
+nothing forces a merge to wait for Development Gate, and a base that moved after the run makes
+that run stale.
 
-A push to `main` runs everything whatever the pull request ran. If a lane missed a regression, that
-run finds it, and its gate report names the failing test the lane would have left out. Fix it
-forward, and add the missing rule to the manifest. Production deploys from `main` without waiting
-for that run (section 7), so the lanes accept this much: a regression in a screen-lane change, in a
-spec outside that area and outside the smoke specs, can be live for the length of one run.
+**After a merge.** A push to `main` runs everything on what landed, and so does the nightly run. A
+failure there is a report. It does not roll production back and it does not bound how long a fault
+is live: production deploys from `main` as soon as the merge lands (section 7), and stays as it is
+until someone fixes or reverts the change. These runs are a second look at what the pull request
+already ran in full, a check on a base that moved, and the measurement of the lanes: each gate
+report names any failing test the change's lane would not have run, compared against what the lane
+really executes. A nightly failure on an unchanged commit says a test or its environment is not
+stable; it does not say why, and someone still has to read it.
 
 The gate job runs after every other job, whatever their outcome. It passes only when all of these
 hold:
@@ -375,15 +392,21 @@ Until that exercise passes, every release review records restoration as **unveri
 | 0 Baseline | Timings and the skip and flake inventory | Comparable measured runs; production boundaries understood |
 | 1 Duplicate runs | This routing, same broad coverage | Routing and refusal tests pass (done in #99); the first PR shows one run per update |
 | 2 Isolation | Run and shard target contract; hosted settings proposal | Independent review; authorised isolated dry runs with zero production effect |
-| 3 Lanes | Pull requests run their lane; `main` runs everything and reports what the lane would have missed | In force on merge (Owner's direction, 10 November 2026). Every push to `main` is a comparison |
+| 3 Lanes | Draft pull requests run their lane as Lane Gate; every other run requires everything and reports what the lane would have missed | Built. Lanes for a pull request that can be merged stay off until phase 3b |
+| 3b A blocking full check | Branch protection on `main`: Development Gate required, branch up to date with `main`, no bypass | **Owner's action, not taken.** Until then a merge on red, or on a stale green, is prevented only by the person merging |
 | 4 Development environment | `develop` and a development environment | Owner approves the concrete settings |
 | 5 Candidate release | Release Gate, promotion hold, restoration | Exact-candidate evidence and a tested hold and restore |
 
 Settings proposed for the Owner's decision. None of them are applied.
 
 - Branch protection or a ruleset on `main`: require **Development Gate**; require branches to be up
-  to date; no bypass for administrators. The four suite checks can stay required alongside it
-  during the switch, so there is no gap.
+  to date; no bypass for administrators. This is the one setting that makes the full check block a
+  merge: with it, a pull request merges only when every suite passed on the exact combination of
+  its head and the current `main`. Do not require Lane Gate, and do not require the four suite
+  checks by name: a draft skips some of them, and GitHub counts a skipped check as passed.
+- Lanes for pull requests that can be merged (running a lane first and the full suite only at the
+  end) are possible once that protection is on, by changing `MODE` in `ci.yml`. They are not built
+  into the default, and should not be turned on before it.
 - On activation of `develop`: add `develop` to the push trigger, require **Development Gate** there,
   and require **Release Gate** for `release/*` promotion.
 - Vercel: production branch moved off automatic `main` deploys, or an ignored-build step that
@@ -393,10 +416,10 @@ Settings proposed for the Owner's decision. None of them are applied.
 
 ## 10. Turning it off
 
-- If a lane picks the wrong tests, the next push to `main` says so. Add the rule the manifest was
-  missing. To stop using lanes altogether, set `activation.selectiveEnforcement` to `false` in the
-  manifest. Every plan then requires every suite again, and that edit forces full coverage by
-  itself.
+- If a lane picks the wrong tests, the full run on the same pull request says so once it is marked
+  ready, and names the test. Add the rule the manifest was missing. To stop using lanes altogether,
+  set `activation.selectiveEnforcement` to `false` in the manifest. Drafts then run every suite as
+  well, and that edit forces full coverage by itself.
 - If the selector throws, the planner already writes a full plan with the error as its reason.
 - If the gate itself misbehaves, remove it from the required checks. The four suite checks remain.
 - If isolation fails, stop development deployments and releases. Never fall back to a shared or

@@ -19,6 +19,11 @@
  * evidence: while the base has no selector (this transition), it is the base's full inventory
  * (select.mjs --baseline), and a run without one is refused.
  *
+ * There are three gates. A Development Gate is what a merge waits for, and it requires every
+ * suite: a plan made in enforce mode is refused under that name, whatever it would run. A Lane Gate
+ * is a draft pull request's check and a local `npm run check`; a draft cannot be merged, so it may
+ * follow its lane. A Release Gate requires a full plan and the benchmarks.
+ *
  * A plan made in enforce mode with no reason for full coverage follows its lane (select.mjs): it
  * may leave out the database, HTTP or E2E suites, and then the jobs that run them are not required.
  * The gate does not take the plan's word for that. It works out the required jobs from the plan's
@@ -83,7 +88,9 @@ function textMatches(pattern, value) {
  */
 /** @param {any} entry @param {any} test @param {string} [gate] */
 export function skipMatches(entry, test, gate = "Development Gate") {
-  if (entry.gates && !entry.gates.includes(gate)) return false;
+  // A Lane Gate skips what a Development Gate may skip: it is the same check on fewer suites.
+  const reviewedFor = gate === "Lane Gate" ? "Development Gate" : gate;
+  if (entry.gates && !entry.gates.includes(reviewedFor)) return false;
   if (entry.suite !== test.suite || !textMatches(entry.file, test.file)) return false;
   if (entry.projects && entry.projects !== "*" && !entry.projects.includes(test.project)) return false;
   return textMatches(entry.title, test.title);
@@ -139,6 +146,11 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     refusals.push(`plan was made on ${plan.identity.executedCommit}, not on ${expect.head}`);
   }
   if (gate === "Release Gate" && plan.mode !== "full") refusals.push("a Release Gate requires a full plan");
+  // Development Gate is the check a merge waits for. A lane plan never earns that name, so a
+  // draft's green run cannot be taken for the full one.
+  if (gate === "Development Gate" && plan.mode === "enforce") {
+    refusals.push("a Development Gate requires every suite, and this plan was made for a draft's lane; a lane run reports as Lane Gate");
+  }
 
   // The minimum is whatever the approved base requires, planned over the base's own file tree
   // (select.mjs baselinePlan), so a test the change deletes is still required here. It stops being
@@ -149,7 +161,7 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
   // A plan that follows a lane is held to its own execution instead. It deletes and renames nothing
   // and changes no test rule (each of those forces full coverage), so the base has nothing to add;
   // the check just below refuses a lane plan that claims otherwise.
-  const lane = gate !== "Release Gate" && followsLane(plan);
+  const lane = gate === "Lane Gate" && followsLane(plan);
   const needed = (suite) => !lane || (plan.execution[suite]?.mode ?? "full") !== "none";
   if (lane) {
     const partial = REPORTED_SUITES.filter((suite) => !needed(suite) || plan.execution[suite]?.mode === "selected");
@@ -366,13 +378,20 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     }
   }
 
-  // Shadow comparison: a failing test the selection would have left out is the one thing that
-  // blocks activating selection. It is recorded on every run, pass or fail.
+  // The lane comparison: a failing test that the change's lane would not have run. It is measured
+  // against what the lane really executes (`laneExecution`, select.mjs), never the older selection
+  // list: the lane runs the whole unit suite whatever the selection names, and runs no database or
+  // HTTP suite the selection's smoke files would suggest. A plan made before lanes existed holds no
+  // lane, and is read as one that runs everything. Recorded on every run, pass or fail.
+  const wouldRun = plan.laneExecution ?? plan.execution;
   const omissions = [];
-  for (const suite of SUITES) {
-    const selected = new Set(plan.selection?.[suite]?.files ?? []);
+  for (const suite of REPORTED_SUITES) {
+    const lane = wouldRun[suite] ?? { mode: "full" };
+    // The chain has no file list: the lane runs all of it or none of it.
+    const files = suite === "migrationChain" || lane.mode === "full" ? null : new Set(lane.files ?? []);
     for (const test of bySuite[suite]?.flatMap((report) => report.tests) ?? []) {
-      if ((test.status === "failed" || test.status === "flaky") && !selected.has(test.file)) omissions.push(test.id);
+      if (test.status !== "failed" && test.status !== "flaky") continue;
+      if (lane.mode === "none" || (files && !files.has(test.file))) omissions.push(test.id);
     }
   }
 
@@ -403,8 +422,10 @@ export function evaluateGate({ plan, basePlan = null, jobs = {}, reports = [], l
     notRequired,
     shadow: {
       risk: plan.risk,
+      lane: plan.lane ?? "critical",
       fullReasons: plan.fullReasons ?? [],
-      selected: Object.fromEntries(SUITES.map((suite) => [suite, plan.selection?.[suite]?.files?.length ?? null])),
+      selected: Object.fromEntries(SUITES.map((suite) => [suite, wouldRun[suite]?.mode === "none" ? 0 : (wouldRun[suite]?.files?.length ?? null)])),
+      migrationChain: wouldRun.migrationChain?.mode === "none" ? "not run" : "run",
       inventory: Object.fromEntries(SUITES.map((suite) => [suite, plan.inventory[suite].length])),
       omissions,
     },
@@ -433,15 +454,16 @@ export function renderSummary(decision) {
   }
   if (decision.shadow && !decision.lane) {
     lines.push(
-      "### Shadow selection",
+      "### What the lane would have run",
       "",
-      `Risk ${decision.shadow.risk}. The selection would have run:`,
+      `Lane ${decision.shadow.lane}, risk ${decision.shadow.risk}. This run required everything. The lane alone would have run:`,
       "",
       ...Object.entries(decision.shadow.selected).map(([suite, count]) => `- ${suite}: ${count} of ${decision.shadow.inventory[suite]}`),
+      `- migration chain: ${decision.shadow.migrationChain}`,
       "",
       decision.shadow.omissions.length === 0
-        ? "No failing test fell outside the selection."
-        : `Failing tests the selection would have missed: ${decision.shadow.omissions.join("; ")}`,
+        ? "No failing test fell outside the lane."
+        : `Failing tests the lane would have missed: ${decision.shadow.omissions.join("; ")}`,
       "",
     );
     if (decision.shadow.fullReasons.length > 0) {

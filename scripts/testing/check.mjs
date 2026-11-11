@@ -3,13 +3,13 @@
  * `npm run check [-- --all] [--base <ref>]`
  *
  * The check to run before a pull request. It plans the working tree against the branch's base the
- * way CI will plan the pull request (enforce mode), says which lane the change is in and which
- * suites CI will hold it to, and then runs the static checks: lint, types, the unit suite and the
+ * way CI plans a draft pull request (enforce mode), says which lane the change is in and which
+ * suites a draft will run, and then runs the static checks: lint, types, the unit suite and the
  * build. Those need no database and take a few minutes.
  *
  * `--all` also runs the database-backed suites the plan requires, in CI's order, against this
- * checkout's own local stack. Use it when you want the proof before pushing; CI runs the same plan
- * either way, and a push to main runs every suite.
+ * checkout's own local stack. Use it when you want the proof before pushing. A draft runs the
+ * same lane on GitHub, and a pull request that is not a draft runs every suite before it can merge.
  *
  * The base is where this branch left `origin/main` (or `main` when there is no remote), unless
  * `--base` names another commit.
@@ -36,7 +36,7 @@ export function checkBase(git, requested) {
   throw new Error(`no base: none of ${candidates.join(", ")} shares history with this branch`);
 }
 
-/** What the plan will hold a pull request to, one line per suite. */
+/** What the lane runs for a draft pull request, one line per suite. */
 /** @param {any} plan @returns {string[]} */
 export function describePlan(plan) {
   const lines = [`lane: ${plan.lane} (risk ${plan.risk})`];
@@ -89,7 +89,7 @@ if (invokedDirectly) {
       console.log(`${step.ok ? "ok  " : "FAIL"} ${step.name} ${Math.round(step.durationMs / 1000)} s${step.refused ? ` — ${step.refused}` : ""}`);
     }
     if (!result.ranAll && result.left > 0) {
-      console.log(`\nCI runs the rest of this plan on the pull request. To run it here first: npm run check -- --all`);
+      console.log(`\nA draft pull request runs the rest of this lane; marking it ready runs every suite. To run the lane here first: npm run check -- --all`);
     }
     process.exit(result.ok ? 0 : 1);
   } catch (error) {

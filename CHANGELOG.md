@@ -15,9 +15,9 @@ make saving and the stock screens faster.
   has a Show more button for the rest. It used to draw up to two hundred every time.
 - Supplier receiving, Internal transfers and Stock corrections ask the server for less and get
   their answer in fewer steps.
-- A small change is now tested in minutes instead of half an hour. A change to one screen runs that
-  screen's tests, and a change to sign-in, permissions, money, stock or the database still runs
-  every test. After each change lands, every test runs again on the result.
+- Changes are tested faster. While a change is still a draft, only the tests it can affect run, so
+  the answer comes in minutes. Before a change can go live, every test runs, split across many
+  machines at once instead of one after another.
 - Each update to a pull request is now tested once, not twice. A newer update stops the older
   test run for the same pull request, and never any other run.
 - One final check, Development Gate, now says whether everything that had to run did run and pass.

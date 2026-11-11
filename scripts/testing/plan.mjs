@@ -95,6 +95,8 @@ export function runPlanCli(argv, root = process.cwd()) {
       reportProblems: problems,
       knownSkips: readJson(resolve(root, "scripts/testing/known-skips.json")).skips,
       expect: { head, selectorDigest: selectorDigest(root) },
+      // A plan made in enforce mode is a lane's, and is judged as a draft's would be.
+      gate: plan.mode === "enforce" ? "Lane Gate" : "Development Gate",
     });
     writeFileSync(resolve(resultsDir, "gate-report.json"), `${canonicalJson(decision)}\n`);
   }

@@ -80,6 +80,7 @@ function event(name: string, extra: Context = {}): Context {
 }
 
 const pr = (number: number, run: string) => event("pull_request", { run_id: run, event: { pull_request: { number } } });
+const draft = (number: number, run: string) => event("pull_request", { run_id: run, event: { pull_request: { number, draft: true } } });
 const push = (run: string) => event("push", { run_id: run });
 const called = (run: string) => ({ ...event("workflow_dispatch", { run_id: run, inputs: { gate: "release" } }), github: { workflow: "Release Gate", event_name: "workflow_dispatch", run_id: run, event: {} } });
 
@@ -143,6 +144,19 @@ describe("CI routing", () => {
     expect(release.jobs.suites).toMatchObject({ uses: "./.github/workflows/ci.yml", with: { gate: "release" } });
   });
 
+  it("gives a draft's lane run a different check name, so its green cannot stand in for the full run", () => {
+    expect(render(ci.jobs.gate.name, draft(7, "1"))).toBe("Lane Gate");
+    const decide = ci.jobs.gate.steps.find((step: { name?: string }) => step.name === "Decide");
+    // The decision is told the same name the check carries, for every kind of event.
+    for (const context of [draft(7, "1"), pr(7, "1"), push("1"), called("1"), event("schedule")]) {
+      expect(render(decide.env.GATE, context)).toBe(render(ci.jobs.gate.name, context));
+    }
+    // A draft and its ready form are the same pull request: a newer run cancels the older one.
+    expect(group(draft(7, "1"))).toBe(group(pr(7, "2")));
+    // Marking a draft ready is an event that starts a run, and that run is the full one.
+    expect(ci.on.pull_request.types).toContain("ready_for_review");
+  });
+
   it("the gate always runs, after every job, and decides from what they left", () => {
     expect(ci.jobs.gate.if).toBe("always()");
     expect(ci.jobs.gate.needs).toEqual(["plan", "static", "database", "integration", "e2e"]);
@@ -188,11 +202,15 @@ describe("CI routing", () => {
     expect(release.jobs.bind.steps.some((step: { with?: { name?: string } }) => step.with?.name === "results-e2e")).toBe(true);
   });
 
-  it("holds a pull request to its lane, and runs everything on main and for a release", () => {
+  it("runs every suite for any pull request that can be merged, and a lane only for a draft", () => {
     const select = ci.jobs.plan.steps.find((step: { name?: string }) => step.name === "Select tests");
     const mode = (context: Context) => render(select.env.MODE, context);
-    expect(mode(pr(7, "1"))).toBe("enforce");
+    // GitHub does not merge a draft, so a lane never stands between a change and main.
+    expect(mode(draft(7, "1"))).toBe("enforce");
+    expect(mode(pr(7, "1"))).toBe("shadow");
+    expect(mode(event("pull_request", { event: { pull_request: { number: 7, draft: false } } }))).toBe("shadow");
     expect(mode(push("1"))).toBe("shadow");
+    expect(mode(event("schedule"))).toBe("shadow");
     expect(mode(called("1"))).toBe("full");
     // One E2E job for a release, so one build is the evidence the candidate is bound to.
     expect(render(select.env.MAX_SHARDS, called("1"))).toBe("1");
@@ -281,15 +299,39 @@ describe("CI routing", () => {
     expect(scripts["db:start"]).toBe("supabase start");
   });
 
-  it("restores installed packages by the lockfile, and installs only on a miss", () => {
+  it("restores installed packages by both files that decide them, and installs only on a miss", () => {
     for (const job of ["static", "database", "integration", "e2e"]) {
       const steps = ci.jobs[job].steps;
       const restore = steps.find((step: { id?: string }) => step.id === "packages");
       expect(restore.uses, job).toBe("actions/cache@v4");
-      expect(restore.with).toEqual({ path: "node_modules", key: "node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}" });
+      // package.json is in the key: a dependency changed there must not hit the old installation.
+      expect(restore.with).toEqual({ path: "node_modules", key: "node-modules-${{ runner.os }}-node22-${{ hashFiles('package.json', 'package-lock.json') }}" });
       const install = steps.find((step: { run?: string }) => step.run === "npm ci");
       expect(install.if, job).toBe("steps.packages.outputs.cache-hit != 'true'");
       expect(steps.indexOf(restore)).toBeLessThan(steps.indexOf(install));
+    }
+  });
+
+  it("checks the lockfile against package.json in every job, before any cache is read", () => {
+    // A cache hit skips `npm ci`, which is the only other thing that would refuse a stale lockfile.
+    for (const job of ["static", "database", "integration", "e2e"]) {
+      const steps = ci.jobs[job].steps;
+      const check = steps.find((step: { run?: string }) => step.run === "node scripts/testing/lock-check.mjs");
+      expect(check, job).toBeDefined();
+      expect(check.if, job).toBeUndefined();
+      expect(steps.indexOf(check)).toBeLessThan(steps.findIndex((step: { id?: string }) => step.id === "packages"));
+    }
+  });
+
+  it("installs from the registry, with no cache, for the nightly run and for a release candidate", () => {
+    for (const job of ["static", "database", "integration", "e2e"]) {
+      const restore = ci.jobs[job].steps.find((step: { id?: string }) => step.id === "packages");
+      const used = (context: Context) => evaluate(restore.if, context);
+      expect(used(pr(7, "1")), job).toBe(true);
+      expect(used(draft(7, "1")), job).toBe(true);
+      expect(used(push("1")), job).toBe(true);
+      expect(used(event("schedule")), job).toBe(false);
+      expect(used(called("1")), job).toBe(false);
     }
   });
 

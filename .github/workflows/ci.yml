@@ -7,7 +7,11 @@ name: CI
 # (the combination that would actually land), and pushes are tested only on main, which is the
 # post-merge check of what really landed. Draft pull requests are validated like any other.
 #
-# A pull request runs what its change can affect (scripts/testing/select.mjs, enforce mode):
+# A pull request that can be merged runs every suite, on GitHub's merge of the branch into its
+# base, and reports as Development Gate. Nothing reaches main on a partial run.
+#
+# A DRAFT pull request cannot be merged, so while it is a draft it runs only what its change can
+# affect (scripts/testing/select.mjs, enforce mode), and reports as Lane Gate, a different check:
 #
 #   docs       documentation only: the static job
 #   screen     one area's screens: static, that area's E2E specs and the E2E smoke specs
@@ -16,8 +20,9 @@ name: CI
 #              configuration, CI and the tests' own infrastructure, and every doubt: every suite
 #
 # A job the plan does not need is skipped, and the gate accepts that skip only because the plan it
-# checks says so. A push to main runs every suite on what landed, whatever the pull request ran, so
-# a regression a lane missed is caught within one run. E2E specs are split between parallel jobs.
+# checks says so. Marking the pull request ready starts the full run. A push to main and the nightly
+# run also run every suite, and report any failing test a lane would have left out. E2E specs and
+# the migration chain's proofs are split between parallel jobs.
 #
 # The Release Gate (release-gate.yml) calls this same workflow for an exact candidate commit, in
 # full, so the release check and the feature check can never run different suites.
@@ -127,13 +132,14 @@ jobs:
           echo "head=$head" >> "$GITHUB_OUTPUT"
           echo "base=$base" >> "$GITHUB_OUTPUT"
       - name: Select tests
-        # A pull request is held to its lane. A push to main runs everything and reports what the
-        # lane would have run beside it (shadow), so the rules keep being measured against full
-        # runs. A release candidate runs everything, in one E2E job, so one build is the evidence.
+        # Only a draft pull request is held to its lane: it cannot be merged. Everything else runs
+        # every suite and reports what the lane would have run beside it (shadow), so the rules
+        # keep being measured against full runs. A release candidate runs everything, in one E2E
+        # job, so one build is the evidence.
         env:
           BASE: ${{ steps.identity.outputs.base }}
           HEAD_SHA: ${{ steps.identity.outputs.head }}
-          MODE: ${{ inputs.gate == 'release' && 'full' || github.event_name == 'pull_request' && 'enforce' || 'shadow' }}
+          MODE: ${{ inputs.gate == 'release' && 'full' || github.event_name == 'pull_request' && github.event.pull_request.draft && 'enforce' || 'shadow' }}
           MAX_SHARDS: ${{ inputs.gate == 'release' && '1' || '8' }}
         run: |
           mkdir -p oms-test/plan
@@ -169,13 +175,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check the lockfile matches package.json
+        # `npm ci` refuses a lockfile that is out of step, but a cache hit below skips `npm ci`. So
+        # the same check runs here first, on every run, and a dependency changed without its
+        # lockfile fails instead of being tested against the previous installation.
+        run: node scripts/testing/lock-check.mjs
       - name: Restore installed packages
-        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        # Keyed by both files that decide what is installed. The nightly run and a release
+        # candidate skip the cache and install from the registry, so a stale or damaged cache
+        # cannot be what they verified.
         id: packages
+        if: github.event_name != 'schedule' && inputs.gate != 'release'
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package.json', 'package-lock.json') }}
       - name: Install packages
         if: steps.packages.outputs.cache-hit != 'true'
         run: npm ci
@@ -218,13 +232,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check the lockfile matches package.json
+        # `npm ci` refuses a lockfile that is out of step, but a cache hit below skips `npm ci`. So
+        # the same check runs here first, on every run, and a dependency changed without its
+        # lockfile fails instead of being tested against the previous installation.
+        run: node scripts/testing/lock-check.mjs
       - name: Restore installed packages
-        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        # Keyed by both files that decide what is installed. The nightly run and a release
+        # candidate skip the cache and install from the registry, so a stale or damaged cache
+        # cannot be what they verified.
         id: packages
+        if: github.event_name != 'schedule' && inputs.gate != 'release'
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package.json', 'package-lock.json') }}
       - name: Install packages
         if: steps.packages.outputs.cache-hit != 'true'
         run: npm ci
@@ -307,13 +329,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check the lockfile matches package.json
+        # `npm ci` refuses a lockfile that is out of step, but a cache hit below skips `npm ci`. So
+        # the same check runs here first, on every run, and a dependency changed without its
+        # lockfile fails instead of being tested against the previous installation.
+        run: node scripts/testing/lock-check.mjs
       - name: Restore installed packages
-        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        # Keyed by both files that decide what is installed. The nightly run and a release
+        # candidate skip the cache and install from the registry, so a stale or damaged cache
+        # cannot be what they verified.
         id: packages
+        if: github.event_name != 'schedule' && inputs.gate != 'release'
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package.json', 'package-lock.json') }}
       - name: Install packages
         if: steps.packages.outputs.cache-hit != 'true'
         run: npm ci
@@ -370,13 +400,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check the lockfile matches package.json
+        # `npm ci` refuses a lockfile that is out of step, but a cache hit below skips `npm ci`. So
+        # the same check runs here first, on every run, and a dependency changed without its
+        # lockfile fails instead of being tested against the previous installation.
+        run: node scripts/testing/lock-check.mjs
       - name: Restore installed packages
-        # Keyed by the lockfile, so a hit is exactly what `npm ci` would install.
+        # Keyed by both files that decide what is installed. The nightly run and a release
+        # candidate skip the cache and install from the registry, so a stale or damaged cache
+        # cannot be what they verified.
         id: packages
+        if: github.event_name != 'schedule' && inputs.gate != 'release'
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package.json', 'package-lock.json') }}
       - name: Install packages
         if: steps.packages.outputs.cache-hit != 'true'
         run: npm ci
@@ -450,13 +488,17 @@ jobs:
           retention-days: 14
 
   gate:
-    # The one required check. It runs whatever happened above (`always()`), and passes only when it
+    # The one check a merge waits for is Development Gate, and it is only ever the name of a run
+    # that required every suite. A draft's lane run reports as Lane Gate, so its green can never
+    # stand in for it (gate.mjs refuses a lane plan under the Development Gate name as well).
+    #
+    # It runs whatever happened above (`always()`), and passes only when it
     # can see that every job the plan requires succeeded and every required test ran and passed
     # (scripts/testing/gate.mjs). A failed, cancelled, timed-out or missing job, a missing report, a
     # test that never ran, an unexplained skip or a suite with zero tests all refuse it. A skipped
     # job is accepted only when the plan's own execution leaves its suites out, and the gate works
     # that out from the plan itself.
-    name: ${{ inputs.gate == 'release' && 'Release Gate' || 'Development Gate' }}
+    name: ${{ inputs.gate == 'release' && 'Release Gate' || github.event_name == 'pull_request' && github.event.pull_request.draft && 'Lane Gate' || 'Development Gate' }}
     if: always()
     needs: [plan, static, database, integration, e2e]
     runs-on: ubuntu-latest
@@ -484,7 +526,7 @@ jobs:
       - name: Decide
         env:
           OMS_GATE_NEEDS: ${{ toJSON(needs) }}
-          GATE: ${{ inputs.gate == 'release' && 'Release Gate' || 'Development Gate' }}
+          GATE: ${{ inputs.gate == 'release' && 'Release Gate' || github.event_name == 'pull_request' && github.event.pull_request.draft && 'Lane Gate' || 'Development Gate' }}
         run: |
           mkdir -p oms-test/results
           node scripts/testing/gate.mjs \

@@ -1,4 +1,4 @@
-import { requireRows } from "@/lib/supabase/query";
+import { DATA_UNAVAILABLE, requireRows } from "@/lib/supabase/query";
 import { userApi } from "@/lib/supabase/api";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/auth/roles";
@@ -163,7 +163,8 @@ function nameOf(profile: unknown): string {
  * supabase/config.toml) and does not say when it stopped there, so a read keyed by nothing returns
  * an arbitrary thousand once the table outgrows it: receipts would lose their lines, and an approved
  * record would fall back to "pending". Every read below is therefore keyed by the records the board
- * actually shows, a hundred at a time, which also keeps the request line short.
+ * actually shows, a hundred at a time, which also keeps the request line short. Keying bounds the
+ * parents only, so the child rows are read in pages as well (`everyRow`).
  */
 const ID_CHUNK = 100;
 
@@ -171,6 +172,67 @@ function chunksOf(ids: string[]): string[][] {
   const out: string[][] = [];
   for (let start = 0; start < ids.length; start += ID_CHUNK) out.push(ids.slice(start, start + ID_CHUNK));
   return out;
+}
+
+/** The most child rows one request asks for. The API may answer with fewer: its own `max_rows`. */
+export const LINE_PAGE_SIZE = 1000;
+
+type Page<T> = { data: T[] | null; error: { message: string } | null; count: number | null };
+
+/**
+ * Every child row of a set of parents, read in pages.
+ *
+ * Keying a read by a hundred parents bounds the parents, not the children: a hundred deliveries of
+ * eleven lines each is 1,100 rows, and the API returns the first thousand with no error. Nine
+ * deliveries would show no items and a tenth would show some. So the children are read the way the
+ * report alerts are (lib/reports/alerts.ts), by the same three rules:
+ *
+ *   1. KEYSET, NOT OFFSET. Each page starts strictly after the last id already read, in id order,
+ *      and the id is the primary key. A row cannot be skipped or returned twice.
+ *   2. THE COUNT DECIDES COMPLETION. Every page carries the exact number of rows at or after its
+ *      cursor, from the same statement as the rows. The read ends only when a page holds every row
+ *      that remained, never because a page looked short. That holds whatever the API's own row
+ *      cap is, so no limit is assumed and none is imposed on the business.
+ *   3. ANY DOUBT FAILS THE WHOLE READ. A refused page, a missing count, a row out of order or
+ *      repeated, or an empty page while rows remain throws `DATA_UNAVAILABLE`. A board is never
+ *      drawn from part of its rows.
+ *
+ * `page` builds one request: the rows after `afterId`, in id order, at most `LINE_PAGE_SIZE`, with
+ * an exact count.
+ */
+async function everyRow<T extends { id: unknown }>(
+  page: (afterId: string | null) => PromiseLike<Page<T>>,
+  what: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const result = await page(cursor);
+    const batch = requireRows(result, what);
+    const remaining = result.count;
+
+    if (typeof remaining !== "number" || !Number.isInteger(remaining) || remaining < 0) {
+      console.error(`[data] ${what} returned a page without an exact count`);
+      throw new Error(`${DATA_UNAVAILABLE}: ${what}`);
+    }
+    if (batch.length > remaining || (batch.length === 0 && remaining > 0)) {
+      console.error(`[data] ${what} returned ${batch.length} rows against a count of ${remaining}`);
+      throw new Error(`${DATA_UNAVAILABLE}: ${what}`);
+    }
+
+    for (const row of batch) {
+      const id = row.id;
+      if (typeof id !== "string" || (cursor !== null && id <= cursor)) {
+        console.error(`[data] ${what} returned a row out of order or twice`);
+        throw new Error(`${DATA_UNAVAILABLE}: ${what}`);
+      }
+      rows.push(row);
+      cursor = id;
+    }
+
+    if (batch.length === remaining) return rows;
+  }
 }
 
 /**
@@ -410,19 +472,27 @@ export async function loadReceipts(): Promise<StockReceipt[]> {
   const [lineParts, approvals, paidFrom] = await Promise.all([
     Promise.all(
       chunksOf(receiptIds).map((ids) =>
-        supabase
-          .from("stock_receipt_lines")
-          .select(`
-            id, receipt_id, product_id, expected_quantity, received_quantity, damaged_quantity,
-            short_quantity, excess_quantity, accepted_quantity, damage_note
-          `)
-          .in("receipt_id", ids),
+        everyRow((afterId) => {
+          const query = supabase
+            .from("stock_receipt_lines")
+            .select(
+              `
+              id, receipt_id, product_id, expected_quantity, received_quantity, damaged_quantity,
+              short_quantity, excess_quantity, accepted_quantity, damage_note
+            `,
+              { count: "exact" },
+            )
+            .in("receipt_id", ids)
+            .order("id", { ascending: true })
+            .limit(LINE_PAGE_SIZE);
+          return afterId ? query.gt("id", afterId) : query;
+        }, "inventory.receipt_lines"),
       ),
     ),
     approvalsFor(supabase, "stock_receipt", receiptIds),
     imprestLinksFor(receiptIds),
   ]);
-  const lines = lineParts.flatMap((part) => requireRows(part, "inventory.receipt_lines"));
+  const lines = lineParts.flat();
 
   const linesByReceipt = new Map<string, ReceiptLine[]>();
   for (const row of lines) {
@@ -561,12 +631,20 @@ export async function loadTransfers(): Promise<StockTransfer[]> {
   const [lineParts, approvals] = await Promise.all([
     Promise.all(
       chunksOf(transferIds).map((ids) =>
-        supabase.from("stock_transfer_lines").select("id, transfer_id, product_id, quantity").in("transfer_id", ids),
+        everyRow((afterId) => {
+          const query = supabase
+            .from("stock_transfer_lines")
+            .select("id, transfer_id, product_id, quantity", { count: "exact" })
+            .in("transfer_id", ids)
+            .order("id", { ascending: true })
+            .limit(LINE_PAGE_SIZE);
+          return afterId ? query.gt("id", afterId) : query;
+        }, "inventory.transfer_lines"),
       ),
     ),
     approvalsFor(supabase, "stock_transfer", transferIds),
   ]);
-  const lines = lineParts.flatMap((part) => requireRows(part, "inventory.transfer_lines"));
+  const lines = lineParts.flat();
 
   const linesByTransfer = new Map<string, TransferLine[]>();
   for (const row of lines) {

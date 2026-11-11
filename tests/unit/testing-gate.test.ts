@@ -387,7 +387,9 @@ describe("the aggregate gate", () => {
     expect(decide({ plan: head, basePlan, reports: replace("unit", onlyMoney) }).refusals).toContain("unit: required file tests/unit/report.test.ts did not run");
   });
 
-  describe("a pull request on a lane", () => {
+  describe("a draft pull request on a lane", () => {
+    // A draft cannot be merged, so its check is a Lane Gate and may follow the lane.
+    const laneGate = (options: Parameters<typeof evaluateGate>[0]) => evaluateGate({ gate: "Lane Gate", ...options });
     // The fixture's manifest with enforcement on, one screen domain, and the paths a real manifest
     // sends to full coverage.
     const lanes = {
@@ -408,7 +410,7 @@ describe("the aggregate gate", () => {
       expect(followsLane(plan)).toBe(true);
       expect(plan.expectedJobs).toEqual(["static", "e2e"]);
       const reports = unitAndE2e();
-      const decision = evaluateGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      const decision = laneGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(decision.refusals).toEqual([]);
       expect(decision.pass).toBe(true);
       expect(decision.lane).toBe("screen");
@@ -419,14 +421,14 @@ describe("the aggregate gate", () => {
 
     it("needs no base plan, because a lane deletes no test and changes no rule", () => {
       const reports = unitAndE2e();
-      const decision = evaluateGate({ plan: screen(), basePlan: null, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      const decision = laneGate({ plan: screen(), basePlan: null, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(decision.pass).toBe(true);
     });
 
     it("still refuses when a job the plan needs was skipped, failed or never arrived", () => {
       const reports = unitAndE2e();
       const run = (jobs: Record<string, { result: string }>) =>
-        evaluateGate({ plan: screen(), jobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } }).refusals;
+        laneGate({ plan: screen(), jobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } }).refusals;
       expect(run({ ...laneJobs, e2e: { result: "skipped" } })).toContain("job e2e finished as skipped");
       expect(run({ ...laneJobs, static: { result: "failure" } })).toContain("job static finished as failure");
       const withoutPlanner = Object.fromEntries(Object.entries(laneJobs).filter(([job]) => job !== "plan"));
@@ -435,7 +437,7 @@ describe("the aggregate gate", () => {
 
     it("refuses a job it did not need, if that job ran and did not succeed", () => {
       const reports = unitAndE2e();
-      const decision = evaluateGate({ plan: screen(), jobs: { ...laneJobs, database: { result: "failure" } }, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      const decision = laneGate({ plan: screen(), jobs: { ...laneJobs, database: { result: "failure" } }, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(decision.refusals).toContain("job database was not required for this change, but it ran and finished as failure");
     });
 
@@ -445,14 +447,14 @@ describe("the aggregate gate", () => {
       const plan = { ...altered, digest: planDigest(altered) };
       const reports = unitAndE2e();
       const jobs = { plan: { result: "success" }, static: { result: "success" }, e2e: { result: "skipped" } };
-      const decision = evaluateGate({ plan, jobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      const decision = laneGate({ plan, jobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(decision.refusals).toContain("job e2e finished as skipped");
     });
 
     it("refuses a required spec that did not run on every project", () => {
       const mobileOnly = normalisePlaywright(playwrightJson(allE2e.filter(([, project]) => project === "mobile")));
       const reports = [...unitAndE2e().filter((report) => report.suite !== "e2e"), mobileOnly];
-      const decision = evaluateGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      const decision = laneGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(decision.refusals).toContain("e2e: e2e/sales.spec.ts did not run on tablet");
     });
 
@@ -463,7 +465,7 @@ describe("the aggregate gate", () => {
       altered.changes = [...altered.changes, { status: "M", path: "supabase/migrations/001_first.sql" }];
       const plan = { ...altered, digest: planDigest(altered) };
       const reports = unitAndE2e();
-      const decision = evaluateGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      const decision = laneGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(decision.refusals.some((line: string) => /runs only part of .*supabase\/migrations\/001_first\.sql changed, which needs every suite/.test(line))).toBe(true);
     });
 
@@ -471,14 +473,14 @@ describe("the aggregate gate", () => {
       const plan = lanePlan([{ status: "M", path: "supabase/tests/database/001_auth.sql" }]);
       expect(followsLane(plan)).toBe(false);
       expect(plan.lane).toBe("critical");
-      expect(decide({ plan, jobs: laneJobs }).refusals).toEqual(expect.arrayContaining(["job database finished as skipped", "job integration finished as skipped"]));
-      expect(decide({ plan, basePlan: null }).refusals[0]).toMatch(/^no baseline/);
-      expect(decide({ plan }).pass).toBe(true);
+      expect(decide({ plan, jobs: laneJobs, gate: "Lane Gate" }).refusals).toEqual(expect.arrayContaining(["job database finished as skipped", "job integration finished as skipped"]));
+      expect(decide({ plan, basePlan: null, gate: "Lane Gate" }).refusals[0]).toMatch(/^no baseline/);
+      expect(decide({ plan, gate: "Lane Gate" }).pass).toBe(true);
     });
 
     it("a Release Gate never follows a lane", () => {
       const reports = unitAndE2e();
-      const decision = evaluateGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], artifact: ARTIFACT, expect: { head: HEAD, selectorDigest: SELECTOR }, gate: "Release Gate" });
+      const decision = laneGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], artifact: ARTIFACT, expect: { head: HEAD, selectorDigest: SELECTOR }, gate: "Release Gate" });
       expect(decision.refusals).toEqual(expect.arrayContaining(["a Release Gate requires a full plan", "job database finished as skipped"]));
     });
 
@@ -489,10 +491,30 @@ describe("the aggregate gate", () => {
       const others = unitAndE2e().filter((report) => report.suite !== "e2e");
       const both = [...others, shard("sales.spec.ts", 1), shard("shell.spec.ts", 2)];
       const run = (reports: ReturnType<typeof unitAndE2e>) =>
-        evaluateGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+        laneGate({ plan, jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
       expect(run(both).pass).toBe(true);
       expect(run(unitAndE2e()).refusals).toContain("e2e: the plan splits the specs into 2 shards, and the reports are not those shards");
       expect(run([...others, shard("sales.spec.ts", 1)]).refusals).toContain("e2e: shard 2 of 2 is missing");
+    });
+
+    it("never passes as a Development Gate, which is the check a merge waits for", () => {
+      const reports = unitAndE2e();
+      const asDevelopment = evaluateGate({ plan: screen(), jobs: laneJobs, reports, listings: listingsOf(reports), knownSkips: [], expect: { head: HEAD, selectorDigest: SELECTOR } });
+      expect(asDevelopment.pass).toBe(false);
+      expect(asDevelopment.refusals).toContain("a Development Gate requires every suite, and this plan was made for a draft's lane; a lane run reports as Lane Gate");
+      // Under that name it is also held to every job and every suite, not to its lane.
+      expect(asDevelopment.refusals).toEqual(expect.arrayContaining(["job database finished as skipped", "pgtap: no report arrived from job database"]));
+      // Even a draft's plan that runs everything is not a Development Gate: it was planned as a lane.
+      const everything = lanePlan([{ status: "M", path: "supabase/tests/database/001_auth.sql" }]);
+      expect(decide({ plan: everything }).refusals).toContain("a Development Gate requires every suite, and this plan was made for a draft's lane; a lane run reports as Lane Gate");
+    });
+
+    it("skips under a Lane Gate what a Development Gate may skip, and nothing a Release Gate may not", () => {
+      const entry = { suite: "e2e", file: "e2e/sales.spec.ts", title: "bench", gates: ["Development Gate"] };
+      const test = { suite: "e2e", file: "e2e/sales.spec.ts", project: "mobile", title: "bench" };
+      expect(skipMatches(entry, test, "Lane Gate")).toBe(true);
+      expect(skipMatches(entry, test, "Development Gate")).toBe(true);
+      expect(skipMatches(entry, test, "Release Gate")).toBe(false);
     });
   });
 
@@ -501,12 +523,67 @@ describe("the aggregate gate", () => {
     expect(decide({ gate: "Release Gate", plan: makePlan({ mode: "full" }), artifact: ARTIFACT }).pass).toBe(true);
   });
 
-  it("reports a failing test the shadow selection would have missed", () => {
-    // README only: the selection is the smoke set, so a failing sales spec is an omission.
-    const failing = normalisePlaywright(playwrightJson([...allE2e.filter(([file]) => file !== "sales.spec.ts"), ["sales.spec.ts", "mobile", "works", "unexpected"], ["sales.spec.ts", "tablet", "works"], ["sales.spec.ts", "desktop", "works"]], 1));
-    const decision = decide({ reports: replace("e2e", failing) });
-    expect(decision.shadow.omissions).toEqual(["e2e:e2e/sales.spec.ts:mobile:works"]);
-    expect(renderSummary(decision)).toContain("Failing tests the selection would have missed");
+  describe("a full run compared with the lane the change would have had", () => {
+    // README only: the docs lane runs the whole unit suite and nothing else. The older selection
+    // list beside it names no unit file, and names the HTTP smoke file and every pgTAP file, so a
+    // comparison against that list reports the wrong tests in both directions.
+    const failingE2e = normalisePlaywright(playwrightJson([...allE2e.filter(([file]) => file !== "sales.spec.ts"), ["sales.spec.ts", "mobile", "works", "unexpected"], ["sales.spec.ts", "tablet", "works"], ["sales.spec.ts", "desktop", "works"]], 1));
+    const failingUnit = normaliseVitest("unit", vitestJson([["tests/unit/money.test.ts", "adds", "failed"], ["tests/unit/report.test.ts", "pages"]]), ROOT);
+    const failingHttp = normaliseVitest("integration", vitestJson([["tests/integration/authority.test.ts", "refuses", "failed"]]), ROOT);
+    const failingPgTap = normalisePgTap(PGTAP.replace("001_auth.sql .. ok", "001_auth.sql .. Failed 1/20 subtests").replace("Result: PASS", "Result: FAIL"));
+    const failingChain = normaliseMigrationChain(CHAIN.replace("migration-chain: PASS", "!! migration-chain: FAIL"));
+
+    it("carries what the docs lane would run, which is not what the selection list names", () => {
+      const plan = makePlan();
+      expect(plan.lane).toBe("docs");
+      expect(plan.selection.unit.files).toEqual([]);
+      expect(plan.selection.integration.files).toEqual(["tests/integration/authority.test.ts"]);
+      expect(plan.selection.pgtap.files).toHaveLength(2);
+      expect(plan.laneExecution.unit).toEqual({ mode: "full", files: ["tests/unit/money.test.ts", "tests/unit/report.test.ts"] });
+      for (const suite of ["integration", "e2e", "pgtap", "migrationChain"]) expect(plan.laneExecution[suite].mode, suite).toBe("none");
+      // This run itself still requires everything.
+      expect(plan.execution.pgtap.mode).toBe("full");
+    });
+
+    it("does not call a failing unit test missed: the lane runs the whole unit suite", () => {
+      const decision = decide({ reports: replace("unit", failingUnit) });
+      expect(decision.pass).toBe(false);
+      expect(decision.shadow.omissions).toEqual([]);
+    });
+
+    it("reports a failing HTTP test, database test or chain proof the lane would not have run", () => {
+      expect(decide({ reports: replace("integration", failingHttp) }).shadow.omissions).toEqual(["integration:tests/integration/authority.test.ts:suite > refuses"]);
+      expect(decide({ reports: replace("pgtap", failingPgTap) }).shadow.omissions).toEqual(["pgtap:supabase/tests/database/001_auth.sql"]);
+      expect(decide({ reports: replace("migrationChain", failingChain) }).shadow.omissions).toHaveLength(3);
+    });
+
+    it("reports a failing E2E spec outside the lane, and not one inside it", () => {
+      const decision = decide({ reports: replace("e2e", failingE2e) });
+      expect(decision.shadow.omissions).toEqual(["e2e:e2e/sales.spec.ts:mobile:works"]);
+      expect(renderSummary(decision)).toContain("Failing tests the lane would have missed");
+      // A change to the sales screens has the sales spec in its lane.
+      const withSales = { ...manifest, domains: { sales: { risk: "medium", sources: ["app/sales/**"], e2e: ["e2e/sales.spec.ts"] } } };
+      const plan = selectTests({ manifest: withSales, files: [...files, "app/sales/page.tsx"], edges: new Map(), changes: [{ status: "M", path: "app/sales/page.tsx" }], identity, selector: { selectorDigest: SELECTOR } });
+      const basePlan = selectTests({ manifest: withSales, files: [...files, "app/sales/page.tsx"], edges: new Map(), changes: [], mode: "full", identity: { ...identity, inventoryRev: identity.base }, selector: { selectorDigest: SELECTOR } });
+      expect(decide({ plan, basePlan, reports: replace("e2e", failingE2e) }).shadow.omissions).toEqual([]);
+    });
+
+    it("says in the summary what the lane alone would have run", () => {
+      const decision = decide();
+      expect(decision.shadow).toMatchObject({ lane: "docs", selected: { unit: 2, integration: 0, e2e: 0, pgtap: 0 }, migrationChain: "not run" });
+      const text = renderSummary(decision);
+      expect(text).toContain("Lane docs, risk low. This run required everything. The lane alone would have run:");
+      expect(text).toContain("- unit: 2 of 2");
+      expect(text).toContain("- pgtap: 0 of 2");
+      expect(text).toContain("- migration chain: not run");
+    });
+
+    it("reads a plan with no lane as one that runs everything, so it misses nothing", () => {
+      const old = makePlan();
+      delete old.laneExecution;
+      const plan = { ...old, digest: planDigest(old) };
+      expect(decide({ plan, reports: replace("integration", failingHttp) }).shadow.omissions).toEqual([]);
+    });
   });
 
   it("matches reviewed skips by exact text or by /pattern/, file and title alike", () => {
