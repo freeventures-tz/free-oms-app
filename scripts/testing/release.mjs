@@ -14,6 +14,9 @@
  * responsive E2E projects, with the opt-in benchmarks on) and checks the identity again afterwards,
  * so nothing can change under a run that is still reported as the candidate's.
  *
+ * Each run writes to a folder of its own, a new one under `oms-test/runs/` unless `--results` names
+ * a new or empty folder, so the decision reads only what this run produced.
+ *
  * Evidence is bound to the build it tested. The E2E step records that build (`--describe-artifact`);
  * a passing Release Gate on it produces the final manifest (`candidate-final.json` locally, `--bind`
  * in CI), which names the build and the decision. `--check-only` on a final manifest refuses any
@@ -30,7 +33,7 @@ import { fileURLToPath } from "node:url";
 import { canonicalJson, FULL_SHA, gitRunner, listFiles, parseArgs, readJson, repositoryFiles, selectorDigest, sha256 } from "./common.mjs";
 import { evaluateGate, renderSummary } from "./gate.mjs";
 import { readResults } from "./reports.mjs";
-import { buildSteps, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs";
+import { assertUnusedResults, buildSteps, freshResultsDir, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs";
 import { baselinePlan, selectTests } from "./select.mjs";
 import { buildGraph } from "./graph.mjs";
 import { testEnvironment } from "./target-guard.mjs";
@@ -358,7 +361,8 @@ function option(args, name) {
   return typeof args[name] === "string" ? args[name] : null;
 }
 
-export function runReleaseCli(argv, root = process.cwd()) {
+/** @param {string[]} argv @param {string} [root] @param {any} [deps] git, spawn, guard, now, print and baselineRun (how the base's selector is started), for tests */
+export function runReleaseCli(argv, root = process.cwd(), deps = {}) {
   const args = parseArgs(argv);
   const known = new Set([
     "prepare", "output", "manifest", "check-only", "results", "keep-going",
@@ -366,7 +370,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
     "describe-artifact", "bind", "gate-report", "artifact", "run-id",
   ]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
-  const git = gitRunner(root);
+  const git = deps.git ?? gitRunner(root);
   const env = testEnvironment(root);
 
   if (args["describe-artifact"] === true) {
@@ -426,6 +430,8 @@ export function runReleaseCli(argv, root = process.cwd()) {
   if (before.length > 0) throw new Error(`candidate refused:\n  - ${before.join("\n  - ")}`);
   if (args["check-only"] === true) return { checked: true };
   if (manifest.artifact) throw new Error("this manifest already holds a tested build; prepare a new one to test again");
+  // A named results folder that already holds anything is refused before any other work.
+  if (option(args, "results")) assertUnusedResults(root, option(args, "results"));
 
   const files = repositoryFiles(git).filter((path) => existsSync(join(root, path)));
   const { edges, unresolved } = buildGraph(files, (path) => readFileSync(join(root, path), "utf8"));
@@ -450,14 +456,16 @@ export function runReleaseCli(argv, root = process.cwd()) {
   // has none, and is refused before anything runs rather than gated against its own rules.
   let basePlan;
   try {
-    basePlan = baselinePlan({ root, git, base: manifest.production.base, head: manifest.identity.candidate.commit });
+    basePlan = baselinePlan({ root, git, base: manifest.production.base, head: manifest.identity.candidate.commit, ...(deps.baselineRun ? { run: deps.baselineRun } : {}) });
   } catch (error) {
     throw new Error(`candidate refused: no baseline: ${error.message}`);
   }
 
-  const resultsDir = resolve(root, option(args, "results") ?? "oms-test/release");
+  // This run's own folder: a candidate is bound only to evidence this run produced.
+  const resultsDir = freshResultsDir({ root, explicit: option(args, "results"), kind: "release", now: deps.now });
+  (deps.print ?? console.log)(`results: ${resultsDir}`);
   const { steps } = buildSteps(plan, "release");
-  const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true });
+  const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true, ...deps });
 
   const after = candidateRefusals(manifest, describeCandidate(root, git, testEnvironment(root)));
   const { reports, listings, artifact, problems } = readResults(resultsDir, root);
@@ -486,7 +494,7 @@ export function runReleaseCli(argv, root = process.cwd()) {
   };
   writeFileSync(join(resultsDir, "release-evidence.json"), `${canonicalJson(evidence)}\n`);
   if (final) writeFileSync(join(resultsDir, "candidate-final.json"), `${canonicalJson(final)}\n`);
-  return { ok: ok && decision.pass && Boolean(final), evidence, decision };
+  return { ok: ok && decision.pass && Boolean(final), evidence, decision, resultsDir };
 }
 
 const invokedDirectly = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

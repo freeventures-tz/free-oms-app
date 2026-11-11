@@ -13,6 +13,11 @@
  * passed in its isolated pass here.
  *
  * The reviewed list of benchmark files is `benchmarks` in scripts/testing/manifest.json.
+ *
+ * This entry adds to the results folder it is given and never asks for an empty one: `test:plan`
+ * and `test:release` start it as a step of their own run, and CI starts it after the main suite in
+ * the same job, so the main reports are already there. Keeping one run's folder apart from
+ * another's is the job of whatever starts the run (run.mjs, freshResultsDir).
  */
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,17 +57,21 @@ export function benchmarkSteps(manifest, suite) {
   return steps;
 }
 
+/** @param {string[]} argv @param {string} [root] @param {any} [deps] spawn, guard, now and print, for tests @param {Record<string, string | undefined>} [env] */
+export function runBenchmarksCli(argv, root = process.cwd(), deps = {}, env = process.env) {
+  const args = parseArgs(argv);
+  if (args.suite !== "e2e" && args.suite !== "integration") throw new Error("--suite must be e2e or integration");
+  const resultsDir = resolve(root, typeof args.results === "string" ? args.results : env.OMS_TEST_RESULTS_DIR || "oms-test/results");
+  const steps = benchmarkSteps(readJson(resolve(root, "scripts/testing/manifest.json")), args.suite);
+  // Every pass runs even when one fails, so a slow benchmark does not hide the others.
+  return runSteps(steps, { root, resultsDir, keepGoing: true, ...deps });
+}
+
 const invokedDirectly = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (invokedDirectly) {
   try {
-    const args = parseArgs(process.argv.slice(2));
-    if (args.suite !== "e2e" && args.suite !== "integration") throw new Error("--suite must be e2e or integration");
-    const root = process.cwd();
-    const resultsDir = resolve(root, typeof args.results === "string" ? args.results : process.env.OMS_TEST_RESULTS_DIR || "oms-test/results");
-    const steps = benchmarkSteps(readJson(resolve(root, "scripts/testing/manifest.json")), args.suite);
-    // Every pass runs even when one fails, so a slow benchmark does not hide the others.
-    const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: true });
+    const { ok, outcomes } = runBenchmarksCli(process.argv.slice(2));
     for (const outcome of outcomes) console.log(`${outcome.ok ? "ok  " : "FAIL"} ${outcome.name}`);
     process.exit(ok ? 0 : 1);
   } catch (error) {

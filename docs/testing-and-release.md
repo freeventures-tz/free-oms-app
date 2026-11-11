@@ -43,7 +43,7 @@ npm run test:select -- --baseline --base <full-sha> --head <full-sha> --output <
 npm run test:plan   -- --plan <plan.json> --tier local|development [--results <dir>] [--benchmarks] [--keep-going] [--dry-run]
 npm run test:gate   -- --plan <plan.json> --base-plan <base-plan.json> --results <dir> [--jobs <needs.json>] [--head <sha>]
 npm run test:release -- --prepare --output <candidate.json> [--production-base <sha>]
-npm run test:release -- --manifest <candidate.json> [--check-only] [--keep-going]
+npm run test:release -- --manifest <candidate.json> [--check-only] [--results <dir>] [--keep-going]
 npm run test:release -- --describe-artifact --output <artifact.json>
 npm run test:release -- --manifest <candidate.json> --bind --gate-report <file> --artifact <file> --output <final.json>
 ```
@@ -77,6 +77,15 @@ npm run test:release -- --manifest <candidate.json> --bind --gate-report <file> 
 
 Result files go to `oms-test/` (ignored by git). Setting `OMS_TEST_RESULTS_DIR` makes Vitest and
 Playwright write JSON reports there; unset, the runners behave as before.
+
+**Each run has its own results folder.** `check`, `test:plan` and `test:release` each write to a
+new folder, `oms-test/runs/<UTC time>-<kind>`, and print its path when they start. A gate reads
+every report in its folder, so a shared one let an earlier run's failure refuse a run that passed,
+and let an earlier run's passing report stand in for one this run never wrote. `--results <dir>` is
+accepted only when the folder is new or empty; one that holds anything is refused before a step
+runs, and is left as it was. Nothing is deleted: earlier runs stay under `oms-test/runs/` until you
+remove them. A benchmark pass is part of the run that starts it and adds its reports to that run's
+folder.
 
 ## 3. How selection decides
 
@@ -331,7 +340,7 @@ values. The digest also covers the build id and `.next/prerender-manifest.json`,
 the incremental-cache entries of the routes that manifest lists (`.html`, `.rsc`, `.meta`, `.body`,
 `.segments/`). `next start` rewrites those after a revalidation, so with them in, the build was a
 different artifact once E2E had served it. `test:release` describes the build again after every
-step has run and refuses the run if it no longer matches the recorded one. When the Release Gate passes on it, the run writes `candidate-final.json`: the manifest
+step has run and refuses the run if it no longer matches the recorded one. When the Release Gate passes on it, the run writes `candidate-final.json` into its results folder: the manifest
 plus that build and the decision. Run `--check-only` against the final manifest and it refuses any
 other build, including a fresh build of the same commit, because Next.js builds differ. An
 approval recorded in a manifest stands only while nothing has drifted and only with passing

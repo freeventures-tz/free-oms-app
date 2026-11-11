@@ -19,7 +19,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson, gitRunner, parseArgs } from "./common.mjs";
-import { buildSteps, runSteps, timingReport } from "./run.mjs";
+import { buildSteps, freshResultsDir, runSteps, timingReport } from "./run.mjs";
 import { SUITES, runSelectCli } from "./select.mjs";
 
 /** The commit the branch is measured from. */
@@ -54,12 +54,14 @@ export function describePlan(plan) {
   return lines;
 }
 
-export function runCheckCli(argv, root = process.cwd(), print = console.log) {
+/** @param {string[]} argv @param {string} [root] @param {any} [deps] git, spawn, guard, now and print, for tests */
+export function runCheckCli(argv, root = process.cwd(), deps = {}) {
+  const print = deps.print ?? console.log;
   const args = parseArgs(argv);
   const known = new Set(["all", "base", "keep-going"]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
 
-  const git = gitRunner(root);
+  const git = deps.git ?? gitRunner(root);
   const head = git(["rev-parse", "HEAD"]);
   const base = checkBase(git, typeof args.base === "string" ? args.base : undefined);
   const planPath = resolve(root, "oms-test/plan/check-plan.json");
@@ -72,11 +74,13 @@ export function runCheckCli(argv, root = process.cwd(), print = console.log) {
   const { steps: planned, skipped } = buildSteps(plan, "local");
   const steps = planned.filter((step) => !step.name.startsWith("list "));
   const chosen = args.all === true ? steps : steps.filter((step) => step.job === "static");
-  const resultsDir = resolve(root, "oms-test/results");
-  const { ok, outcomes } = runSteps(chosen, { root, resultsDir, keepGoing: args["keep-going"] === true, print });
+  // A folder of this run's own, so its reports are never read as another run's (freshResultsDir).
+  const resultsDir = freshResultsDir({ root, kind: "check", now: deps.now });
+  print(`results: ${resultsDir}`);
+  const { ok, outcomes } = runSteps(chosen, { root, resultsDir, keepGoing: args["keep-going"] === true, ...deps });
   const timing = timingReport(outcomes, skipped);
   writeFileSync(resolve(resultsDir, "timing.json"), `${canonicalJson(timing)}\n`);
-  return { ok, plan, timing, ranAll: args.all === true, left: steps.length - chosen.length };
+  return { ok, plan, timing, ranAll: args.all === true, left: steps.length - chosen.length, resultsDir };
 }
 
 const invokedDirectly = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

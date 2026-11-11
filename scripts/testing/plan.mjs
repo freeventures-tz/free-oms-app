@@ -8,6 +8,9 @@
  *
  * The development tier finishes with the same gate decision CI makes, so a local run and a CI run
  * are judged by one function. Timings for every step go to `<results>/timing.json`.
+ *
+ * Each run writes to a folder of its own: a new one under `oms-test/runs/` unless `--results` names
+ * a new or empty folder. A folder that already holds results is refused (run.mjs, freshResultsDir).
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -16,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { PLAN_SCHEMA_VERSION, canonicalJson, gitRunner, parseArgs, readJson, selectorDigest } from "./common.mjs";
 import { evaluateGate, renderSummary } from "./gate.mjs";
 import { readResults } from "./reports.mjs";
-import { buildSteps, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs";
+import { assertUnusedResults, buildSteps, freshResultsDir, jobsFromOutcomes, runSteps, timingReport } from "./run.mjs";
 import { baselinePlan, collectIdentity, planDigest } from "./select.mjs";
 
 /** Every reason this checkout may not run this plan. Empty means it may. */
@@ -39,7 +42,8 @@ export function planRefusals(plan, { head, digest, worktreeDigest, dirty = false
   return refusals;
 }
 
-export function runPlanCli(argv, root = process.cwd()) {
+/** @param {string[]} argv @param {string} [root] @param {any} [deps] git, spawn, guard, now, print and baselineRun (how the base's selector is started), for tests */
+export function runPlanCli(argv, root = process.cwd(), deps = {}) {
   const args = parseArgs(argv);
   const known = new Set(["plan", "tier", "results", "dry-run", "benchmarks", "keep-going"]);
   for (const name of Object.keys(args)) if (!known.has(name)) throw new Error(`unknown option --${name}`);
@@ -47,7 +51,7 @@ export function runPlanCli(argv, root = process.cwd()) {
   if (args.tier !== "local" && args.tier !== "development") throw new Error("--tier must be local or development");
 
   const plan = readJson(args.plan);
-  const git = gitRunner(root);
+  const git = deps.git ?? gitRunner(root);
   const head = git(["rev-parse", "HEAD"]);
   const worktreeDigest = plan.identity?.worktreeDigest
     ? collectIdentity({
@@ -65,19 +69,25 @@ export function runPlanCli(argv, root = process.cwd()) {
   const { steps, skipped } = buildSteps(plan, args.tier, { benchmarks: args.benchmarks === true });
   if (args["dry-run"] === true) return { dryRun: true, steps, skipped };
 
+  // A named results folder that already holds anything is refused before any other work.
+  const named = typeof args.results === "string" ? args.results : null;
+  if (named) assertUnusedResults(root, named);
+
   // The development tier is gated against the plan's base, planned over the base's own tree. A plan
   // whose base cannot be planned is refused before anything runs.
   let basePlan = null;
   if (args.tier === "development") {
     try {
-      basePlan = baselinePlan({ root, git, base: plan.identity?.base, head: plan.identity?.head });
+      basePlan = baselinePlan({ root, git, base: plan.identity?.base, head: plan.identity?.head, ...(deps.baselineRun ? { run: deps.baselineRun } : {}) });
     } catch (error) {
       throw new Error(`no baseline: ${error.message}`);
     }
   }
 
-  const resultsDir = resolve(root, typeof args.results === "string" ? args.results : "oms-test/results");
-  const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true });
+  // This run's own folder, so nothing an earlier run left can be read as this run's.
+  const resultsDir = freshResultsDir({ root, explicit: named, kind: `plan-${args.tier}`, now: deps.now });
+  (deps.print ?? console.log)(`results: ${resultsDir}`);
+  const { ok, outcomes } = runSteps(steps, { root, resultsDir, keepGoing: args["keep-going"] === true, ...deps });
   const timing = timingReport(outcomes, skipped);
   writeFileSync(resolve(resultsDir, "timing.json"), `${canonicalJson(timing)}\n`);
 
@@ -100,7 +110,7 @@ export function runPlanCli(argv, root = process.cwd()) {
     });
     writeFileSync(resolve(resultsDir, "gate-report.json"), `${canonicalJson(decision)}\n`);
   }
-  return { ok: ok && (decision ? decision.pass : true), outcomes, skipped, timing, decision };
+  return { ok: ok && (decision ? decision.pass : true), outcomes, skipped, timing, decision, resultsDir };
 }
 
 const invokedDirectly = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

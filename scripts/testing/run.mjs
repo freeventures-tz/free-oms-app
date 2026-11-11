@@ -18,8 +18,8 @@
  * and Playwright both treat "no paths" as "every test".
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import { assertSafeTargets, testEnvironment } from "./target-guard.mjs";
 
@@ -182,9 +182,73 @@ export function stepEnvironment(inherited, resultsDir, own) {
   return { ...inherited, OMS_TEST_RESULTS_DIR: resultsDir, FV_BENCHMARK: "0", ...own };
 }
 
+/** Where a run's results go when no folder is named: one new folder per run, under this one. */
+export const RUNS_DIR = "oms-test/runs";
+
+/**
+ * Throws when a named results folder cannot be this run's own: it is a file, or it holds anything.
+ * Returns its full path otherwise, and changes nothing either way, so an entry point can refuse a
+ * used folder before it does any other work.
+ */
+/** @param {string} root @param {string} explicit @returns {string} */
+export function assertUnusedResults(root, explicit) {
+  const dir = resolve(root, explicit);
+  if (!existsSync(dir)) return dir;
+  if (!statSync(dir).isDirectory()) throw new Error(`--results ${dir} is a file, not a folder`);
+  const held = readdirSync(dir).length;
+  if (held > 0) {
+    throw new Error(
+      `--results ${dir} already holds ${held} ${held === 1 ? "entry" : "entries"} from an earlier run, and a gate would read them as this run's; ` +
+        "name a new or empty folder, or leave --results out for a fresh one",
+    );
+  }
+  return dir;
+}
+
+/**
+ * The results folder for one top-level run (`test:plan`, `check`, `test:release`): a folder that
+ * holds nothing when the run starts.
+ *
+ * A gate reads every report in the folder it is given. In a shared folder, a failed report, a
+ * shard, a listing or a benchmark pass left by an earlier run refuses a run whose own checks
+ * passed, and an earlier passing report is read as this run's when a runner exits successfully
+ * without writing one. So no run writes where another has written:
+ *
+ *   no folder named   a new one, `oms-test/runs/<UTC time>-<kind>`. Creating it fails if it exists,
+ *                     and the name then takes a counter, so two runs started in the same
+ *                     millisecond still get one each
+ *   a folder named    used as given when it is new or empty; refused when it holds anything
+ *
+ * Nothing is ever cleared or deleted: earlier runs stay where they are, as their evidence. Call
+ * this once per top-level run and never from `runSteps`, which a benchmark pass calls again to add
+ * its reports to the same run's folder.
+ */
+/** @param {{ root: string, explicit?: string | null, kind: string, now?: () => number }} options @returns {string} */
+export function freshResultsDir({ root, explicit = null, kind, now = () => Date.now() }) {
+  if (explicit) {
+    const dir = assertUnusedResults(root, explicit);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  const parent = resolve(root, RUNS_DIR);
+  mkdirSync(parent, { recursive: true });
+  const stamp = new Date(now()).toISOString().replace(/[:.]/g, "-");
+  for (let attempt = 1; attempt <= 1000; attempt++) {
+    const dir = join(parent, `${stamp}-${kind}${attempt === 1 ? "" : `-${attempt}`}`);
+    try {
+      mkdirSync(dir);
+      return dir;
+    } catch (error) {
+      if (/** @type {any} */ (error)?.code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`no fresh results folder could be made under ${parent}`);
+}
+
 /**
  * Runs the steps in order. Each step's time is measured, and steps with a `log` keep their output in
- * the results directory for the gate to count.
+ * the results directory for the gate to count. The directory is used as it is, never emptied: the
+ * caller chose it (`freshResultsDir`), and a benchmark pass adds to the one its run already filled.
  *
  * By default the first failure stops the run. With `keepGoing`, a failure ends only its own job and
  * the other jobs still run, which is how CI's independent jobs behave; the gate still refuses. A
