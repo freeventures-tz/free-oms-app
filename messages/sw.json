@@ -16,7 +16,8 @@
     "pager": {
       "showing": "Inaonyesha {first}–{last} kati ya {total}",
       "previous": "Iliyotangulia",
-      "next": "Ifuatayo"
+      "next": "Ifuatayo",
+      "more": "Onyesha zaidi"
     },
     "actionFailed": "Haikufanikiwa. Jaribu tena.",
     "shell": {

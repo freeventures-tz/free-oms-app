@@ -1,0 +1,125 @@
+name: Release Gate
+
+# Full verification of one exact release candidate, started by hand. It is evidence for the Owner's
+# release decision and nothing more: it does not merge, tag, deploy, link a hosted project, apply a
+# hosted migration or publish anything, and it holds no secret.
+#
+# It first records the candidate's identity (scripts/testing/release.mjs --prepare), refusing a
+# commit whose version, lockfile and changelog disagree. Then it runs the same suites as every pull
+# request, in full and followed by each benchmark in its own pass, through ci.yml, whose final job reports as "Release
+# Gate". Last, it binds that decision and the build the E2E job tested into candidate-final.json.
+# Nothing cancels a run of this workflow: it has no concurrency group, and pull-request activity
+# cannot reach it.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Full 40-character commit of the release candidate
+        type: string
+        required: true
+      production_base:
+        # Required: the Release Gate holds the candidate to this commit's tests and floors, and
+        # refuses a run without it (scripts/testing/select.mjs --baseline).
+        description: Full commit production runs today
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  identity:
+    name: Release candidate identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse anything but a full commit name
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          PRODUCTION_BASE: ${{ inputs.production_base }}
+        run: |
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::candidate must be a full commit"; exit 1; }
+          [[ "$PRODUCTION_BASE" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::production_base is required and must be a full commit"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Record the candidate
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          PRODUCTION_BASE: ${{ inputs.production_base }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "$CANDIDATE" ] || { echo "::error::checkout is not the candidate"; exit 1; }
+          mkdir -p oms-test
+          node scripts/testing/release.mjs --prepare --output oms-test/candidate.json --production-base "$PRODUCTION_BASE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: oms-test/candidate.json
+          retention-days: 90
+
+  suites:
+    needs: identity
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.candidate }}
+      gate: release
+      base: ${{ inputs.production_base }}
+
+  bind:
+    # Binds the Release Gate's decision and the build the E2E job tested to the candidate manifest.
+    # The result, candidate-final.json, is what an approval names; it refuses any other build later.
+    # It runs whatever happened above and refuses unless the Release Gate passed on this commit.
+    name: Release candidate evidence
+    needs: [identity, suites]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse unless the suites and the Release Gate succeeded
+        env:
+          IDENTITY: ${{ needs.identity.result }}
+          SUITES: ${{ needs.suites.result }}
+        run: |
+          [ "$IDENTITY" = success ] || { echo "::error::candidate identity finished as $IDENTITY"; exit 1; }
+          [ "$SUITES" = success ] || { echo "::error::the suites and Release Gate finished as $SUITES"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate
+          path: oms-test
+      - uses: actions/download-artifact@v4
+        with:
+          name: gate-report
+          path: oms-test
+      - uses: actions/download-artifact@v4
+        with:
+          name: results-e2e
+          path: oms-test/e2e
+      - name: Bind the evidence
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          node scripts/testing/release.mjs --manifest oms-test/candidate.json --bind \
+            --gate-report oms-test/gate-report.json --artifact oms-test/e2e/artifact.json \
+            --run-id "$RUN_ID" --output oms-test/candidate-final.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-final
+          path: oms-test/candidate-final.json
+          retention-days: 90

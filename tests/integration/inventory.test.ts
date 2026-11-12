@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   SECRET_KEY,
+  SUPABASE_URL,
   callApiRpc,
   createLiveStaff,
   ensureDirector,
@@ -403,7 +404,7 @@ describe("the ledger, from outside the database", () => {
       "opening_stock_entries",
     ]) {
       const response = await fetch(
-        `${process.env.SUPABASE_URL ?? "http://127.0.0.1:54321"}/rest/v1/${table}?select=*`,
+        `${SUPABASE_URL}/rest/v1/${table}?select=*`,
         { headers: { apikey: SECRET_KEY, Authorization: `Bearer ${SECRET_KEY}` } },
       );
       expect(response.status, `the secret key read ${table}`).toBe(403);

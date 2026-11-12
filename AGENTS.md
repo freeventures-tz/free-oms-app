@@ -25,7 +25,15 @@ The repo is complete on its own: everything it needs is committed, and it holds 
 - Real customer records stay out of git and out of evidence. Screens, recordings and tests use the seeded fixture data and the seeded test account.
 - Upload images with `IMAGE_ADAPTER=gist`. Post videos through the PR comment box in the signed-in browser.
 ## Checks
-`npm run lint`, `npm run typecheck`, `npm run test`, `npm run test:e2e`, `npm run build`. Run all of them before opening a PR and again after rebasing.
+`npm run check`. Run it before opening a PR and again after rebasing. It says which lane the change is in (docs, tests, screen, app-wide, app-critical or critical), then runs lint, types, the unit suite and the build. Add `-- --all` to run the lane's database-backed suites locally first.
+
+Open the PR as a **draft** while you iterate. A draft runs only its lane and reports as **Lane Gate**, in minutes. When the work is done, mark it ready: that starts every suite, in parallel jobs, and reports as **Development Gate**. Present the PR only once Development Gate is green on its latest commit. Lane Gate is feedback, never a reason to merge.
+
+The lane comes from the paths changed, never from a flag. Authentication, permissions, server actions, and money and stock commands always run every E2E spec. The database, dependencies, CI and the tests' own infrastructure always run every suite.
+
+Start the local stack with `npm run db:start:fast`. It leaves out the dashboard, log collection and the other services no suite uses, as CI does. Use `npm run db:start` when you want the dashboard.
+
+`docs/testing-and-release.md` is the authoritative reference for lanes, the Development Gate and Release Gate. *Releasing* below is unchanged.
 ## Multi-agent rules
 - Work on your own task branch; `main` changes only by merged PR.
 - Leave other agents' worktrees, branches and uncommitted work untouched.

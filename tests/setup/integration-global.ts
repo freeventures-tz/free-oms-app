@@ -10,6 +10,7 @@ config({ path: ".env.local", quiet: true });
 import { provisionBootstrapDirector } from "@/lib/admin/provisioning";
 import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
 import { adminApi, createAdminClient } from "@/lib/supabase/admin";
+import { assertSafeTargets } from "@/scripts/testing/target-guard.mjs";
 
 export const DIRECTOR_FIXTURE_PATH = join(process.cwd(), "tests", ".director.json");
 
@@ -21,10 +22,8 @@ export const DIRECTOR_FIXTURE_PATH = join(process.cwd(), "tests", ".director.jso
  * `npm run test:integration` resets the database first, so this always starts from nothing.
  */
 export default async function globalSetup(): Promise<void> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  if (!url.includes("127.0.0.1") && !url.includes("localhost")) {
-    throw new Error(`Integration tests refuse to run against ${url || "(unset)"}.`);
-  }
+  // Before the bootstrap, which is the first write: exact hosts, and this checkout's own ports.
+  assertSafeTargets("Integration tests");
 
   let digits = "7";
   for (let i = 0; i < 8; i++) digits += String(randomInt(0, 10));

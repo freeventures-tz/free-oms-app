@@ -16,7 +16,8 @@
     "pager": {
       "showing": "Showing {first}–{last} of {total}",
       "previous": "Previous",
-      "next": "Next"
+      "next": "Next",
+      "more": "Show more"
     },
     "actionFailed": "That did not work. Try again.",
     "shell": {

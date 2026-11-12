@@ -1,6 +1,22 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
+ * When OMS_TEST_RESULTS_DIR is set (CI, `npm run test:plan`, `npm run test:release`), Playwright
+ * also writes its JSON report there, one file per shard, which is what the Development Gate and
+ * Release Gate count. Unset, the reporters are unchanged.
+ */
+const RESULTS_DIR = process.env.OMS_TEST_RESULTS_DIR;
+const shard = (process.argv.find((arg) => arg.startsWith("--shard="))?.slice(8) ?? "").match(/^(\d+)\/(\d+)$/);
+// A benchmark pass (scripts/testing/benchmarks.mjs) names its own file, so it never overwrites the
+// main run's report.
+const RESULTS_FILE =
+  process.env.OMS_E2E_RESULTS_NAME ??
+  (shard ? `e2e.playwright.shard-${shard[1]}-of-${shard[2]}.json` : "e2e.playwright.json");
+const BASE_REPORTERS: Array<[string] | [string, Record<string, unknown>]> = process.env.CI
+  ? [["github"], ["list"]]
+  : [["list"]];
+
+/**
  * The three device tiers are separate projects, because the interface is intentionally different on
  * each one and "it works on desktop" says nothing about the drawer (design.md §3.2–§3.5).
  */
@@ -11,7 +27,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
+  reporter: RESULTS_DIR
+    ? [...BASE_REPORTERS, ["json", { outputFile: `${RESULTS_DIR}/${RESULTS_FILE}` }]]
+    : BASE_REPORTERS,
   timeout: 60_000,
   expect: { timeout: 10_000 },
 

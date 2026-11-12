@@ -1,0 +1,117 @@
+{
+  "about": "Every skip a gate accepts. A skipped test that matches no entry refuses the gate, so a required case cannot be waived by relabelling it skipped. An entry with `gates` applies only to the gates it names: the opt-in benchmarks may be skipped for a Development Gate. A Release Gate runs each benchmark file alone in its own pass (benchmarks.mjs) and accepts the main run's skip only for a test that passed there. Each entry names why the skip is correct and where the behaviour is otherwise covered; review the list at every release candidate.",
+  "reviewedAt": "2026-10-05",
+  "skips": [
+    {
+      "suite": "integration",
+      "file": "tests/integration/stock-benchmark.test.ts",
+      "title": "/^stock command timings on a loaded ledger > /",
+      "projects": "*",
+      "gates": ["Development Gate"],
+      "reason": "Opt-in benchmark (FV_BENCHMARK=1). Measures timings; stock correctness is covered by stock-invariant and inventory. Every Release Gate runs it.",
+      "owner": "Owner",
+      "review": "At every release candidate, which runs it."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/stock-mobile-benchmark.spec.ts",
+      "title": "/^stock commands on a phone over 4G > /",
+      "projects": "*",
+      "gates": ["Development Gate"],
+      "reason": "Opt-in benchmark (FV_BENCHMARK=1). Stock journeys are covered by inventory, production and stock-invariant on all three tiers. Every Release Gate runs it.",
+      "owner": "Owner",
+      "review": "At every release candidate, which runs it."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/stock-mobile-benchmark.spec.ts",
+      "title": "/^stock commands on a phone over 4G > /",
+      "projects": ["tablet", "desktop"],
+      "reason": "Measured on the mobile profile only, by design; with benchmarks on, the mobile run is required.",
+      "owner": "Owner",
+      "review": "Permanent: the benchmark defines a phone over 4G."
+    },
+    {
+      "suite": "e2e",
+      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
+      "title": "/mobile benchmark > /",
+      "projects": "*",
+      "gates": ["Development Gate"],
+      "reason": "Opt-in benchmarks (FV_BENCHMARK=1). The journeys they time run unskipped in the same files on all three tiers. Every Release Gate runs them.",
+      "owner": "Owner",
+      "review": "At every release candidate, which runs them."
+    },
+    {
+      "suite": "e2e",
+      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
+      "title": "/mobile benchmark > /",
+      "projects": ["tablet", "desktop"],
+      "reason": "Measured on the mobile profile only, by design; with benchmarks on, the mobile run is required.",
+      "owner": "Owner",
+      "review": "Permanent: the benchmarks define a phone profile."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the rail or sidebar sits beside the page, not above it",
+      "projects": ["mobile", "tablet"],
+      "reason": "Phones and portrait tablets have a drawer, not a rail or sidebar. The drawer is tested on both tiers by \"the navigation matches the device tier\" in the same file; this test runs on desktop at the rail (1100px) and sidebar (1440px) widths.",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the icon rail fits its items and names them on focus",
+      "projects": ["mobile", "tablet"],
+      "reason": "The icon rail is the `lg` tier, which neither the phone nor the portrait tablet reaches; they have a drawer, tested on both by \"the navigation matches the device tier\" in the same file. This test runs on desktop, resized to the rail width (1100px).",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the sidebar stays in reach at the bottom of a long page",
+      "projects": ["mobile", "tablet"],
+      "reason": "Phones and portrait tablets have no sidebar; their drawer opens from the top bar and is tested on both by \"the navigation matches the device tier\" in the same file. This test runs on desktop.",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "the phone top bar fits a 320px screen",
+      "projects": ["tablet", "desktop"],
+      "reason": "The test sets its own 320px viewport, the narrowest phone, and runs on the mobile tier with phone touch emulation. On tablet or desktop it would repeat the same 320px check without the phone profile, so the mobile run of this test is its coverage.",
+      "owner": "Owner",
+      "review": "Permanent: the narrowest phone is a phone (design.md §3)."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/responsive-shell.spec.ts",
+      "title": "touch targets on the sign-in form meet the 44px floor",
+      "projects": ["desktop"],
+      "reason": "The 44px floor applies to touch tiers only (design.md §9.9).",
+      "owner": "Owner",
+      "review": "Permanent: by design."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/production.spec.ts",
+      "title": "/every control a thumb reaches is at least 44 pixels tall on a touch tier$/",
+      "projects": ["desktop"],
+      "reason": "The 44px floor applies to touch tiers only (design.md §9.9); desktop controls are 40px and 32px by design.",
+      "owner": "Owner",
+      "review": "Permanent: by design."
+    },
+    {
+      "suite": "e2e",
+      "file": "e2e/sales.spec.ts",
+      "title": "/^the three-step order on a phone > /",
+      "projects": ["tablet", "desktop"],
+      "reason": "The three-step order exists only below the md breakpoint; tablet and desktop order entry is covered elsewhere in the same file.",
+      "owner": "Owner",
+      "review": "Permanent: the layout differs by design."
+    }
+  ]
+}

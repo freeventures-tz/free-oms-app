@@ -13,6 +13,7 @@ import {
 import { DecisionControls } from "@/components/inventory/decision-controls";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FormError, FormSuccess, Help, Input, Label, Select } from "@/components/ui/field";
+import { Reveal } from "@/components/ui/reveal";
 import { Card, StatusChip } from "@/components/ui/surface";
 import type { CatalogueProduct, Unit } from "@/lib/catalogue/catalogue";
 import { unitLabel } from "@/lib/catalogue/unit-label";
@@ -177,16 +178,18 @@ export function ReceivingBoard({
             <p className="text-sm text-muted-foreground">{t("noPending")}</p>
           </Card>
         ) : (
-          pending.map((receipt) => (
-            <ReceiptCard
-              key={receipt.id}
-              receipt={receipt}
-              products={products}
-              units={units}
-              canApprove={canApprove}
-              canOpenImprest={canOpenImprest}
-            />
-          ))
+          <Reveal rows={pending} label={t("pendingHeading", { count: pending.length })} name="pending">
+            {(receipt) => (
+              <ReceiptCard
+                key={receipt.id}
+                receipt={receipt}
+                products={products}
+                units={units}
+                canApprove={canApprove}
+                canOpenImprest={canOpenImprest}
+              />
+            )}
+          </Reveal>
         )}
       </section>
 
@@ -197,16 +200,18 @@ export function ReceivingBoard({
             <p className="text-sm text-muted-foreground">{t("noSettled")}</p>
           </Card>
         ) : (
-          settled.map((receipt) => (
-            <ReceiptCard
-              key={receipt.id}
-              receipt={receipt}
-              products={products}
-              units={units}
-              canApprove={false}
-              canOpenImprest={canOpenImprest}
-            />
-          ))
+          <Reveal rows={settled} label={t("settledHeading")} name="settled">
+            {(receipt) => (
+              <ReceiptCard
+                key={receipt.id}
+                receipt={receipt}
+                products={products}
+                units={units}
+                canApprove={false}
+                canOpenImprest={canOpenImprest}
+              />
+            )}
+          </Reveal>
         )}
       </section>
     </div>

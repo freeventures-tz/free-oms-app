@@ -1,6 +1,12 @@
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
+import { parseShard, runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
+import { normaliseMigrationChain } from "@/scripts/testing/reports.mjs";
+import { describeCandidate } from "@/scripts/testing/release.mjs";
 
 /**
  * What the migration-chain command REPORTS, as opposed to what it proves.
@@ -20,11 +26,33 @@ import { runMigrationChainCheck } from "@/scripts/migration-chain-check.mjs";
 
 type Call = { command: string; args: string[] };
 
+const MIGRATIONS = join("supabase", "migrations");
+const MANIFEST = join("supabase", "release-checks", "v0121_migration_manifest.txt");
+
+/**
+ * A disposable copy of what the command reads and moves: the migrations and the released-history
+ * manifest. Parking a release's later migrations renames real files, so it happens here and never
+ * in the checkout, where other unit files read the migrations at the same time.
+ */
+function disposableRoot() {
+  const root = mkdtempSync(join(tmpdir(), "oms-migration-chain-"));
+  cpSync(MIGRATIONS, join(root, MIGRATIONS), { recursive: true });
+  cpSync(MANIFEST, join(root, MANIFEST));
+  return root;
+}
+
+const sqlFiles = (dir: string) =>
+  readdirSync(dir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+
 /**
  * A stand-in for the real command surface.
  *
  * `failOn` names the step that should blow up: `"proof"` fails the partial reset that starts the
- * proof, `"restore"` fails the full reset at the end, and both may be named at once.
+ * proof, `"restore"` fails the full reset at the end, and both may be named at once. `during` runs
+ * inside every supabase call, with the disposable root, so a test can look at the filesystem while
+ * the command has migrations parked.
  */
 function harness(
   failOn: Array<
@@ -35,14 +63,17 @@ function harness(
     | "counterexample-unseen"
     | "masked-rename"
   > = [],
+  during: (args: string[], root: string) => void = () => {},
 ) {
   const calls: Call[] = [];
   const out: string[] = [];
   const errors: string[] = [];
   let reads = 0;
+  const root = disposableRoot();
 
   const supabase = (args: string[]) => {
     calls.push({ command: "supabase", args });
+    during(args, root);
     // The partial reset — `db reset --version <migration 21>` — is the first thing the proof does.
     if (failOn.includes("proof") && args.includes("--version")) {
       throw new Error("supabase db reset --version exited 1");
@@ -54,6 +85,7 @@ function harness(
   };
 
   const code = runMigrationChainCheck({
+    root,
     supabase,
     psqlFile: (path: string) => calls.push({ command: "psql", args: [path] }),
     // Stands in for the psql line the real query returns. Its price count follows whether this
@@ -113,6 +145,8 @@ function harness(
     log: (line: string) => out.push(line),
     error: (line: string) => errors.push(line),
   });
+  // The command catches its own failures, including one thrown by `during`, so it always returns.
+  rmSync(root, { recursive: true, force: true });
 
   return { code, calls, out: out.join("\n"), errors: errors.join("\n") };
 }
@@ -468,5 +502,132 @@ describe("the migration-chain command's verdict", () => {
     expect(errors).toContain("migration-chain: FAIL");
     expect(errors).toContain("supabase db reset --version exited 1");
     expect(errors).toContain("could not restore the local database");
+  });
+});
+
+/**
+ * The same command with a gate that works: its answer moves with every counterexample and every
+ * permitted write, and with nothing else. `shard` runs one part of the proofs, as a CI job does.
+ */
+function proofs(shard?: { index: number; total: number }) {
+  const calls: Call[] = [];
+  const out: string[] = [];
+  const errors: string[] = [];
+  const root = disposableRoot();
+  const code = runMigrationChainCheck({
+    root,
+    shard,
+    supabase: (args: string[]) => calls.push({ command: "supabase", args }),
+    psqlFile: (path: string) => calls.push({ command: "psql", args: [path] }),
+    preservation: () => {
+      const priced = calls.some((call) => call.args[0]?.includes("01b_write_price"));
+      const moves = calls.filter((call) => /counterexample|09_compatibility/.test(call.args[0] ?? "")).length;
+      return `21|${priced ? 1 : 0}|${moves.toString(16).padStart(32, "0")}|d751713988987e9331980363e24189ce|[]|[]`;
+    },
+    log: (line: string) => out.push(line),
+    error: (line: string) => errors.push(line),
+  });
+  rmSync(root, { recursive: true, force: true });
+  const text = out.join("\n");
+  return {
+    code,
+    text,
+    errors: errors.join("\n"),
+    headers: [...text.matchAll(/^=== (.+) ===$/gm)].map((match) => match[1]),
+    counterexamples: [...text.matchAll(/^--- counterexample: (.+?) ---$/gm)].length,
+    partialResets: calls.filter((call) => call.command === "supabase" && call.args.includes("--version")).length,
+    restores: fullResets(calls).length,
+  };
+}
+
+describe("the chain split between parallel jobs", () => {
+  // Each run copies the migrations to a disposable folder, so the runs are made once here and
+  // read by every test below: the whole command, and the four shards CI deals it into.
+  const whole = proofs();
+  const four = [1, 2, 3, 4].map((index) => proofs({ index, total: 4 }));
+
+  it("runs, across its shards, exactly the proofs the whole command runs, each once", () => {
+    expect(whole.code).toBe(0);
+    for (const shard of four) {
+      expect(shard.errors).toBe("");
+      expect(shard.code).toBe(0);
+      expect(shard.text).toContain("migration-chain: PASS");
+    }
+    // Every proof announces itself with a header, and each proof starts with one partial reset.
+    expect(four.flatMap((shard) => shard.headers).sort()).toEqual([...whole.headers].sort());
+    expect(four.reduce((sum, shard) => sum + shard.partialResets, 0)).toBe(whole.partialResets);
+    expect(four.reduce((sum, shard) => sum + shard.counterexamples, 0)).toBe(whole.counterexamples);
+  });
+
+  it("checks the released history and restores the database in every shard", () => {
+    four.forEach((shard, at) => {
+      expect(shard.text).toMatch(/released migrations unchanged/);
+      expect(shard.restores).toBe(1);
+      expect(shard.text).toContain(`--- shard ${at + 1} of 4 ---`);
+    });
+  });
+
+  it("deals the proofs out in turn, so no shard is left with nothing", () => {
+    const sizes = four.map((shard) => shard.headers.length);
+    expect(Math.min(...sizes)).toBeGreaterThan(0);
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+  });
+
+  it("still holds the counterexample floor when the gate adds the shards' logs up", () => {
+    const logs = four.map((shard, at) => normaliseMigrationChain(shard.text, { index: at + 1, total: 4 }));
+    const ids = logs.flatMap((report) => report.tests.map((test: { id: string }) => test.id));
+    expect(ids).toHaveLength(whole.counterexamples);
+    // The same counterexample name recurs in many phases; the shard in the ID keeps them apart.
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(logs.every((report) => report.runnerSuccess)).toBe(true);
+    expect(logs.map((report) => report.shard)).toEqual([1, 2, 3, 4].map((index) => ({ index, total: 4 })));
+  });
+
+  it("reads --shard 2/4 from the command line, and refuses anything else that names a shard", () => {
+    expect(parseShard([])).toBeNull();
+    expect(parseShard(["--shard", "2/4"])).toEqual({ index: 2, total: 4 });
+    for (const bad of [["--shard"], ["--shard", "5/4"], ["--shard", "0/4"], ["--shard", "two"]]) {
+      expect(() => parseShard(bad)).toThrow(/--shard must look like 2\/4/);
+    }
+  });
+});
+
+describe("where the command parks migrations", () => {
+  // Identity reads the checkout's migrations, as `testing-release-identity.test.ts` does when it is
+  // imported. Unit files run in parallel, so that read can land while a run here has a release's
+  // later migrations parked. Reading at exactly that moment, on every parked step, makes the race
+  // deterministic: the checkout must still hold every migration.
+  const git = (args: string[]) => {
+    const key = args.join(" ");
+    if (key === "status --porcelain=v1 --untracked-files=all") return "";
+    if (key === "rev-parse HEAD") return "b".repeat(40);
+    if (key === "rev-parse HEAD^{tree}") return "c".repeat(40);
+    throw new Error(`unexpected git ${key}`);
+  };
+
+  it("leaves the checkout's migrations in place while fixture migrations are parked", () => {
+    const checkout = sqlFiles(MIGRATIONS);
+    const reads: Array<{ parked: number; identity: string[] }> = [];
+
+    // Every apply step reads identity from the checkout. On the steps that measure one release, the
+    // command has that release's later migrations parked at that moment.
+    const { code, errors } = harness([], (args, root) => {
+      if (args[0] !== "migration" || args[1] !== "up") return;
+      const held = join(root, "supabase", ".migration-chain-held");
+      const candidate = describeCandidate(process.cwd(), git, {});
+      reads.push({
+        parked: existsSync(held) ? sqlFiles(held).length : 0,
+        identity: candidate.identity.migrations.files.map((entry: { file: string }) => entry.file),
+      });
+    });
+
+    expect(errors).toBe("");
+    expect(code).toBe(0);
+    for (const read of reads) expect(read.identity).toEqual(checkout);
+    // And the parking really happened, in the disposable root, at more than one boundary, so those
+    // reads were taken while files were out.
+    expect(reads.filter((read) => read.parked > 0).length).toBeGreaterThan(1);
+    expect(sqlFiles(MIGRATIONS)).toEqual(checkout);
+    expect(readdirSync("supabase")).not.toContain(".migration-chain-held");
   });
 });

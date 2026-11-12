@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 
 /**
  * The interaction feedback contract (design.md §12.7) for a mutation, in one hook.
@@ -69,7 +69,12 @@ export function useGuardedAction<TName extends string, TResult extends ActionRes
   /** The message shown when the request never reached a verdict. */
   failureKey?: string;
 }): GuardedActionController<TName, TResult> {
-  const [pending, startTransition] = useTransition();
+  // Plain state, not `useTransition`. A transition's pending flag and anything set inside it wait
+  // for every transition in flight, and a Server Action that revalidates starts one for the
+  // refreshed page. On a long board that render takes seconds on a phone, so the verdict sat behind
+  // it: the server had answered and the screen still said "working" (measured on the receiving
+  // board, where the wait grew with every receipt already listed).
+  const [pending, setPending] = useState(false);
   const [running, setRunning] = useState<TName | null>(null);
   const [result, setResult] = useState<TResult>({} as TResult);
   const [attempt, setAttempt] = useState<Attempt<TName, TResult> | null>(null);
@@ -81,26 +86,33 @@ export function useGuardedAction<TName extends string, TResult extends ActionRes
     if (inFlight.current) return;
     inFlight.current = true;
 
+    setPending(true);
     setRunning(name);
     setResult({} as TResult);
     setAttempt({ name, action, data });
 
-    startTransition(async () => {
+    void (async () => {
+      let outcome: TResult;
+      let thrown = false;
       try {
-        const outcome = await action({} as TResult, data);
-        setResult(outcome);
-        // Nothing to retry once it worked; the next interaction is a new command, not a replay.
-        if (!outcome.error) setAttempt(null);
-        options?.onSettled?.(outcome);
+        outcome = await action({} as TResult, data);
       } catch {
         // Thrown, not returned: no verdict was reached. `attempt` is kept on purpose so the retry
         // carries the same request — and therefore the same idempotency key.
-        setResult({ error: failureKey } as TResult);
-      } finally {
-        inFlight.current = false;
-        setRunning(null);
+        thrown = true;
+        outcome = { error: failureKey } as TResult;
       }
-    });
+      // One synchronous batch, so React commits the verdict, whatever `onSettled` changes, and the
+      // end of pending together, and at once. A verdict beside a control still disabled and still
+      // saying it is working loses the tap on Try again or Go back made in that moment.
+      inFlight.current = false;
+      setPending(false);
+      setRunning(null);
+      setResult(outcome);
+      // Nothing to retry once it worked; the next interaction is a new command, not a replay.
+      if (!outcome.error) setAttempt(null);
+      if (!thrown) options?.onSettled?.(outcome);
+    })();
   }
 
   return {

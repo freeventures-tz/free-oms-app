@@ -1,6 +1,6 @@
 {
   "name": "free-oms-app",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13,13 +13,19 @@
     "test:integration": "supabase db reset && vitest run --project integration",
     "test:e2e": "supabase db reset && playwright test",
     "db:start": "supabase start",
+    "db:start:fast": "supabase start -x studio,postgres-meta,logflare,vector,edge-runtime,imgproxy,realtime",
     "db:reset": "supabase db reset",
     "db:lint": "supabase db lint --level warning",
     "test:db": "supabase test db",
     "test:migration-chain": "node scripts/migration-chain-check.mjs",
     "bootstrap:director": "tsx scripts/bootstrap-director.ts",
     "verify": "npm run lint && npm run typecheck && npm run test:unit && npm run build",
-    "db:advisors": "supabase db lint --level warning && node scripts/run-advisors.mjs"
+    "db:advisors": "supabase db lint --level warning && node scripts/run-advisors.mjs",
+    "check": "node scripts/testing/check.mjs",
+    "test:select": "node scripts/testing/select.mjs",
+    "test:plan": "node scripts/testing/plan.mjs",
+    "test:release": "node scripts/testing/release.mjs",
+    "test:gate": "node scripts/testing/gate.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
@@ -54,6 +60,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "2.9.0"
   }
 }

@@ -21,7 +21,9 @@ import {
  *
  * A business day takes one confirmed count, and the integration files share one database and one
  * day. So this file is one day, in order: counts, recounts and races first, then the one
- * confirmation and everything that follows from it. No other file enters a count.
+ * confirmation and everything that follows from it. No other file enters a count on the live fund;
+ * `report-imprest.test.ts` confirms one on a fund of its own and retires that fund afterwards, so its
+ * row stays in the table and this file makes no claim about counts on retired funds.
  */
 
 type Count = {
@@ -125,6 +127,24 @@ async function postFunding(amount: number): Promise<void> {
   if (received.reason !== "received") throw new Error(`funding not received: ${received.reason}`);
 }
 
+async function countIds(): Promise<string[]> {
+  const { data, error } = await manager.read.from("imprest_counts").select("id").order("id");
+  if (error) throw new Error(`counts: ${error.message}`);
+  return (data ?? []).map((row) => row.id as string);
+}
+
+async function liveFundCounts(): Promise<string[]> {
+  const { data: funds, error } = await manager.read.from("imprest_funds").select("id").eq("is_active", true);
+  if (error) throw new Error(`funds: ${error.message}`);
+  expect(funds).toHaveLength(1);
+  const { data, error: countError } = await manager.read
+    .from("imprest_counts")
+    .select("id")
+    .eq("fund_id", funds![0].id);
+  if (countError) throw new Error(`counts: ${countError.message}`);
+  return (data ?? []).map((row) => row.id as string);
+}
+
 async function auditRows(entityId: string | null, action: string) {
   let query = director.read
     .from("audit_events")
@@ -156,6 +176,7 @@ describe("one business day of counting, over HTTP", () => {
   let before: Position;
 
   it("refuses a count from anybody but a live Cashier", async () => {
+    const existing = await countIds();
     for (const who of [director, manager, salesRep]) {
       const { error } = await who.api.rpc("staff_enter_imprest_count", {
         p_business_date: today,
@@ -195,8 +216,10 @@ describe("one business day of counting, over HTTP", () => {
     );
     expect(response.status).toBeGreaterThanOrEqual(400);
 
-    const { data: counts } = await manager.read.from("imprest_counts").select("id");
-    expect(counts).toEqual([]);
+    // None of those refusals added a count anywhere, and the live fund this file counts holds none.
+    // Not "the table is empty": a file that ran earlier may have left a count on a fund it retired.
+    expect(await countIds()).toEqual(existing);
+    expect(await liveFundCounts()).toEqual([]);
   });
 
   it("refuses yesterday's date and a bad amount, and records each refusal", async () => {

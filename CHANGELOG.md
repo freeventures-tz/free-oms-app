@@ -2,6 +2,43 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.12.4] — 2026-11-10
+
+A change to how the app is tested, so a small change can ship in minutes, and three changes that
+make saving and the stock screens faster.
+
+### IMPROVED
+
+- After you save, the confirmation appears as soon as the server answers. On a long list it used to
+  wait until the whole list had been drawn again, which took several seconds on a phone.
+- Supplier receiving shows the newest twenty deliveries in each list, says how many there are, and
+  has a Show more button for the rest. It used to draw up to two hundred every time.
+- Supplier receiving, Internal transfers and Stock corrections ask the server for less and get
+  their answer in fewer steps.
+- Changes are tested faster. While a change is still a draft, only the tests it can affect run, so
+  the answer comes in minutes. Before a change can go live, every test runs, split across many
+  machines at once instead of one after another.
+- Each update to a pull request is now tested once, not twice. A newer update stops the older
+  test run for the same pull request, and never any other run.
+- One final check, Development Gate, now says whether everything that had to run did run and pass.
+  A missing result, a run with no tests, or a test skipped without a reviewed reason counts as a
+  failure.
+- A release candidate can now be tested in full against its exact commit, version, migrations and
+  settings, with a separate Release Gate that also runs the performance benchmarks. Its result
+  names the exact build that was tested. It deploys nothing.
+- Before a test creates accounts or resets a database, it now checks that the database is the
+  local test copy for that checkout, and stops if it is anything else.
+
+### FIXED
+
+- Supplier receiving, Internal transfers and Stock corrections would have gone wrong once the
+  business held more than a thousand delivery lines or approvals: a delivery could show without its
+  items, and an approved record could show as still waiting. Each screen now asks only for the
+  records it shows, so the size of the history no longer matters.
+- When a save fails or is refused, the Try again and Go back buttons now work the moment the message
+  appears. For an instant they used to stay disabled and still say Loading, so a quick tap did
+  nothing.
+
 ## [0.12.3] — 2026-10-14
 
 The menu and the dashboard work on every screen size and from the keyboard, and a few screens read
