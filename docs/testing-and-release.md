@@ -251,7 +251,7 @@ hold:
   missing file;
 - every skipped test matches `scripts/testing/known-skips.json` for this gate;
 - shards, if any, all arrived, do not overlap, and are the shards the plan split the specs into;
-- the migration chain ran at least 155 counterexamples, and pgTAP ran at least 28 files and 1,926
+- the migration chain ran at least 164 counterexamples, and pgTAP ran at least 29 files and 2,018
   assertions (five pgTAP files declare no plan count, so the total is the floor);
 - for a Release Gate, the E2E job recorded a clean build of this exact commit.
 
