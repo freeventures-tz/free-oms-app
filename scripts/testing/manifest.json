@@ -12,10 +12,10 @@
     "pgtap": ["supabase/tests/database/*.sql"]
   },
   "minimums": {
-    "migrations": 55,
-    "pgtapFiles": 28,
-    "pgtapAssertions": 1926,
-    "migrationChainCounterexamples": 155,
+    "migrations": 56,
+    "pgtapFiles": 29,
+    "pgtapAssertions": 2018,
+    "migrationChainCounterexamples": 164,
     "responsiveProjects": ["mobile", "tablet", "desktop"]
   },
   "retiredTests": [],
@@ -46,7 +46,8 @@
     "e2e/sales.spec.ts": 4.2,
     "e2e/settlement.spec.ts": 5.5,
     "e2e/stock-invariant.spec.ts": 1.0,
-    "e2e/stock-mobile-benchmark.spec.ts": 0.1
+    "e2e/stock-mobile-benchmark.spec.ts": 0.1,
+    "e2e/till-count.spec.ts": 2.0
   },
   "benchmarks": {
     "flag": "FV_BENCHMARK=1",
@@ -65,7 +66,8 @@
       { "file": "e2e/imprest-stock-receipt-link.spec.ts", "grep": "mobile benchmark" },
       { "file": "e2e/imprest-verification.spec.ts", "grep": "mobile benchmark" },
       { "file": "e2e/report-imprest.spec.ts", "grep": "mobile benchmark" },
-      { "file": "e2e/stock-mobile-benchmark.spec.ts", "grep": "phone over 4G" }
+      { "file": "e2e/stock-mobile-benchmark.spec.ts", "grep": "phone over 4G" },
+      { "file": "e2e/till-count.spec.ts", "grep": "mobile benchmark" }
     ],
     "integration": [{ "file": "tests/integration/stock-benchmark.test.ts" }]
   },
@@ -85,7 +87,7 @@
   "appCritical": [
     { "pattern": "{next.config.ts,proxy.ts,tsconfig.json,eslint.config.mjs,postcss.config.mjs,components.json}", "reason": "application or build configuration" },
     { "pattern": "lib/{auth,admin,supabase}/**", "reason": "authentication, authorization or the database client" },
-    { "pattern": "lib/{imprest,inventory,production,sales,settlement,validation}/**", "reason": "financial or stock commands and their validation" },
+    { "pattern": "lib/{imprest,inventory,production,sales,settlement,till,validation}/**", "reason": "financial or stock commands and their validation" },
     { "pattern": "lib/{money.ts,time/**,stock-refusal.ts}", "reason": "business money, date or stock helpers" },
     { "pattern": "lib/env.ts", "reason": "environment the server and the build read" },
     { "pattern": "app/**/actions.ts", "reason": "server actions run financial, stock or account commands" },
@@ -164,6 +166,11 @@
       "sources": ["app/(app)/dashboard/**"],
       "e2e": ["e2e/role-routing.spec.ts", "e2e/responsive-shell.spec.ts"]
     },
+    "till-ui": {
+      "risk": "medium",
+      "sources": ["app/(app)/till/**"],
+      "e2e": ["e2e/till-count.spec.ts"]
+    },
     "pwa": {
       "risk": "low",
       "sources": ["app/manifest.ts", "app/favicon.ico", "components/pwa/**", "public/icons/**", "public/brand/**", "public/*.svg"],
@@ -235,7 +242,8 @@
       "tests/integration/authority.test.ts",
       "tests/integration/director-set-concurrency.test.ts",
       "tests/integration/provisioning.test.ts",
-      "tests/integration/recovery.test.ts"
+      "tests/integration/recovery.test.ts",
+      "tests/integration/till-count.test.ts"
     ],
     "e2e": [
       "e2e/authentication.spec.ts",
@@ -260,7 +268,8 @@
       "e2e/sales.spec.ts",
       "e2e/settlement.spec.ts",
       "e2e/stock-invariant.spec.ts",
-      "e2e/stock-mobile-benchmark.spec.ts"
+      "e2e/stock-mobile-benchmark.spec.ts",
+      "e2e/till-count.spec.ts"
     ]
   },
   "smoke": {

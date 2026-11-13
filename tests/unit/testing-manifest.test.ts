@@ -53,8 +53,9 @@ describe("the reviewed test manifest", () => {
     const migrations = readdirSync(join(root, "supabase/migrations")).filter((name) => name.endsWith(".sql"));
     expect(migrations).toHaveLength(manifest.minimums.migrations);
     expect(migrations).toContain("20261006000100_report_imprest_section.sql");
+    expect(migrations).toContain("20261007000100_till_count.sql");
     expect(inventory.pgtap).toHaveLength(manifest.minimums.pgtapFiles);
-    expect(manifest.minimums.migrationChainCounterexamples).toBe(155);
+    expect(manifest.minimums.migrationChainCounterexamples).toBe(164);
     expect(manifest.minimums.responsiveProjects).toEqual(["mobile", "tablet", "desktop"]);
   });
 
@@ -124,6 +125,7 @@ describe("the reviewed test manifest", () => {
       "lib/inventory/inventory.ts",
       "lib/sales/sales.ts",
       "lib/settlement/settlement.ts",
+      "lib/till/commands.ts",
       "lib/money.ts",
       "app/(app)/inventory/actions.ts",
       "app/(app)/admin/accounts/page.tsx",

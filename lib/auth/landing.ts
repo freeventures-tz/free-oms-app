@@ -58,6 +58,9 @@ export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   // rejects and cancels them. What each role may see and do there is decided by the database.
   { prefix: "/imprest", roles: ["cashier", "manager", "director"] },
 
+  // The till count (issue #83): the Cashier counts, the Manager confirms, Directors read.
+  { prefix: "/till", roles: ["cashier", "manager", "director"] },
+
   // Suppliers: Director registers, Manager reads (product.md §9 requires the record; who creates
   // one is a derived decision recorded in the Stage 10D plan).
   { prefix: "/settings/suppliers", roles: ["manager", "director"] },

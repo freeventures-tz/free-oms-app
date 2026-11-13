@@ -33,7 +33,7 @@
     },
     {
       "suite": "e2e",
-      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
+      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest|till-count)\\.spec\\.ts$/",
       "title": "/mobile benchmark > /",
       "projects": "*",
       "gates": ["Development Gate"],
@@ -43,7 +43,7 @@
     },
     {
       "suite": "e2e",
-      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest)\\.spec\\.ts$/",
+      "file": "/^e2e\\/(imprest-[a-z-]+|report-imprest|till-count)\\.spec\\.ts$/",
       "title": "/mobile benchmark > /",
       "projects": ["tablet", "desktop"],
       "reason": "Measured on the mobile profile only, by design; with benchmarks on, the mobile run is required.",
