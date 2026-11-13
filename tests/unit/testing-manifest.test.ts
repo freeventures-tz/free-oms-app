@@ -55,7 +55,7 @@ describe("the reviewed test manifest", () => {
     expect(migrations).toContain("20261007000100_till_count.sql");
     expect(migrations).toContain("20261008000100_accountability_decisions.sql");
     expect(inventory.pgtap).toHaveLength(manifest.minimums.pgtapFiles);
-    expect(manifest.minimums.migrationChainCounterexamples).toBe(173);
+    expect(manifest.minimums.migrationChainCounterexamples).toBe(174);
     expect(manifest.minimums.responsiveProjects).toEqual(["mobile", "tablet", "desktop"]);
   });
 

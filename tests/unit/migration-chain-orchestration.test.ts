@@ -210,7 +210,7 @@ describe("the migration-chain command's verdict", () => {
     // rewritten. Issue #73's v0.11.0 phase adds seventeen: those sixteen again and a stock receipt's
     // delivery note rewritten. Issue #82's v0.12.1 phase adds those seventeen again. Issue #83's
     // till phase adds nine: eight of those again and a delivery's imprest payment repointed, and
-    // issue #84's v0.13.0 phase those nine once more. An exact count, so a phase that silently
+    // issue #84's v0.13.0 phase those nine once more and a till send-back's reason rewritten. An exact count, so a phase that silently
     // stopped running its counterexamples is a failure rather than a quieter pass.
     expect(out).toContain("a disputed imprest handover's amount rewritten in place");
     expect(out).toContain("a delivered report's content rewritten in place");
@@ -228,7 +228,7 @@ describe("the migration-chain command's verdict", () => {
     expect(
       calls.filter((call) => call.args[0]?.includes("counterexample")),
       "the gate's counterexamples never ran",
-    ).toHaveLength(173);
+    ).toHaveLength(174);
 
     // Issue #84: the v0.13.0 phase reset to the last released migration, built the till phase's
     // ground on it, and asserted the accountability upgrade, deciding a released loss and shortage.
@@ -237,6 +237,10 @@ describe("the migration-chain command's verdict", () => {
     expect(
       calls.filter((call) => call.args[0]?.includes("84b_assert_accountability_upgrade")),
     ).toHaveLength(1);
+    expect(out).toContain("the till counted, sent back and confirmed");
+    expect(out).toContain("a till send-back's reason rewritten in place");
+    expect(calls.filter((call) => call.args[0]?.includes("84c_build_v0130_till_counts"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args[0]?.includes("84d_counterexample_till_return"))).toHaveLength(1);
 
     // Issue #83: the till phase reset to the last released migration, built the v0.12.1 ground and
     // a delivery paid from imprest, asserted the till upgrade by counting a released day, and ran

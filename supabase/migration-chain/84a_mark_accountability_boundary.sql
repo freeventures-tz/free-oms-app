@@ -2,9 +2,9 @@
 --
 -- Runs against a database reset to `20261007000100_till_count` — the 56th and last released
 -- migration (v0.13.0), which is what hosted Supabase holds today. The phase then builds the v0.12.2
--- phase's ground (steps 11 to 61 and 83b), so the accountability
--- migration meets a database carrying every kind of record production can hold, unexplained losses,
--- a reversed loss, a replacement and confirmed count shortages among them.
+-- phase's ground (steps 11 to 61 and 83b) and a till counted, sent back and confirmed (step 84c), so
+-- the accountability migration meets a database carrying every kind of record production can hold:
+-- unexplained losses, a reversed loss, a replacement, confirmed count shortages and till counts.
 --
 -- It pins, exactly, the one released function the accountability migration replaces. The
 -- preservation query leaves it out of its digests, so its released form is required here and its

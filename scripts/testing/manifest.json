@@ -15,7 +15,7 @@
     "migrations": 57,
     "pgtapFiles": 30,
     "pgtapAssertions": 2073,
-    "migrationChainCounterexamples": 173,
+    "migrationChainCounterexamples": 174,
     "responsiveProjects": ["mobile", "tablet", "desktop"]
   },
   "retiredTests": [],

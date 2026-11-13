@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Issue #84 adds THE v0.13.0 PHASE. It resets to the 56th and last released migration (the till
- * count), builds the v0.12.2 phase's ground, and applies the accountability decisions migration.
+ * count), builds the v0.12.2 phase's ground and a till counted, sent back and confirmed, and applies
+ * the accountability decisions migration.
  * Its preservation query adds every till count to the business rows, brings the till objects and
  * the report migration's functions into the released surface, and leaves out the new decision
  * tables, enum and functions by name. The one released
@@ -318,6 +319,8 @@ const ASSERT_TILL = join(SQL_DIR, "83c_assert_till_upgrade.sql");
 // claim the same names.
 const MARK_ACCOUNTABILITY = join(SQL_DIR, "84a_mark_accountability_boundary.sql");
 const ASSERT_ACCOUNTABILITY = join(SQL_DIR, "84b_assert_accountability_upgrade.sql");
+const BUILD_V0130_TILL_COUNTS = join(SQL_DIR, "84c_build_v0130_till_counts.sql");
+const COUNTEREXAMPLE_TILL_RETURN = join(SQL_DIR, "84d_counterexample_till_return.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -1071,7 +1074,7 @@ const PHASES = [
     query: V0130_PRESERVATION,
     fixtures: [
       {
-        name: "everything the v0.12.2 phase builds, a delivery paid from imprest, AND losses and shortages decided",
+        name: "everything the v0.12.2 phase builds, a delivery paid from imprest, the till counted, sent back and confirmed, AND losses and shortages decided",
         setup: [
           MARK_ACCOUNTABILITY,
           BUILD_V005,
@@ -1087,6 +1090,7 @@ const PHASES = [
           BUILD_V0100_REVERSALS,
           BUILD_V0110_RECEIPTS,
           BUILD_TILL_GROUND,
+          BUILD_V0130_TILL_COUNTS,
         ],
         assertions: [ASSERT_ACCOUNTABILITY],
         counterexamples: [
@@ -1099,6 +1103,7 @@ const PHASES = [
           { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
           { name: "a stock receipt's delivery note rewritten in place", file: COUNTEREXAMPLE_RECEIPT_NOTE },
           { name: "a delivery's imprest payment repointed in place", file: COUNTEREXAMPLE_RECEIPT_LINK },
+          { name: "a till send-back's reason rewritten in place", file: COUNTEREXAMPLE_TILL_RETURN },
         ],
       },
     ],
