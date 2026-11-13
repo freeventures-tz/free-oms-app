@@ -22,6 +22,8 @@ export function landingPathFor(role: AppRole): string {
  */
 export const ROUTE_ROLES: { prefix: string; roles: readonly AppRole[] }[] = [
   { prefix: "/admin", roles: ["director"] },
+  // Accountability decisions (issue #84): Directors alone, as the database decides.
+  { prefix: "/accountability", roles: ["director"] },
   { prefix: "/dashboard", roles: ["manager", "director"] },
 
   // Daily reports: both Directors and the Manager, and nobody else (product.md §18.1). Unlike the

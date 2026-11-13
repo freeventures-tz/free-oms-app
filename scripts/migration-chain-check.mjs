@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 /**
+ * Issue #84 adds THE v0.13.0 PHASE. It resets to the 56th and last released migration (the till
+ * count), builds the v0.12.2 phase's ground and a till counted, sent back and confirmed, and applies
+ * the accountability decisions migration.
+ * Its preservation query adds every till count to the business rows, brings the till objects and
+ * the report migration's functions into the released surface, and leaves out the new decision
+ * tables, enum and functions by name. The one released
+ * function the migration replaces, `private.imprest_fund_unresolved`, is pinned exactly on both
+ * sides instead, and a Director must be able to decide a released loss and a released shortage
+ * without moving a figure.
+ *
  * Issue #82 adds THE v0.12.1 PHASE. It resets to the 54th and last released migration (the stock
  * receipt link), builds the v0.11.0 phase's ground, and applies the report imprest section
  * migration. Its preservation query adds every stock receipt link to the business rows and brings
@@ -241,10 +251,17 @@ const RETIREMENT_VERSION = "20261004000100";
  * RELEASED migration.
  */
 const RECEIPT_LINK_VERSION = "20261005000100";
-/** Issue #82: the report imprest section migration, the last of this release. */
+/**
+ * Issue #82: the report imprest section migration. Since v0.12.2 it is also the 55th and last
+ * RELEASED migration.
+ */
 const REPORT_IMPREST_VERSION = "20261006000100";
-/** Issue #83: the till count migration. */
+/**
+ * Issue #83: the till count migration. Since v0.13.0 it is also the 56th and last RELEASED migration.
+ */
 const TILL_COUNT_VERSION = "20261007000100";
+/** Issue #84: the accountability decisions migration, the last of this release. */
+const ACCOUNTABILITY_VERSION = "20261008000100";
 // Deliberately NOT under `supabase/tests/`: `supabase test db` globs every .sql in that tree and
 // runs it as pgTAP, and these are fixtures and assertions for a different harness with no plan
 // to report. Putting them there turned the whole pgTAP job red.
@@ -298,6 +315,12 @@ const ASSERT_REPORT_IMPREST = join(SQL_DIR, "65_assert_report_imprest_upgrade.sq
 const MARK_TILL = join(SQL_DIR, "83a_mark_till_boundary.sql");
 const BUILD_TILL_GROUND = join(SQL_DIR, "83b_build_till_ground.sql");
 const ASSERT_TILL = join(SQL_DIR, "83c_assert_till_upgrade.sql");
+// Issue #84's files carry its number rather than the next free step, so a parallel phase cannot
+// claim the same names.
+const MARK_ACCOUNTABILITY = join(SQL_DIR, "84a_mark_accountability_boundary.sql");
+const ASSERT_ACCOUNTABILITY = join(SQL_DIR, "84b_assert_accountability_upgrade.sql");
+const BUILD_V0130_TILL_COUNTS = join(SQL_DIR, "84c_build_v0130_till_counts.sql");
+const COUNTEREXAMPLE_TILL_RETURN = join(SQL_DIR, "84d_counterexample_till_return.sql");
 
 /** The success → retry boundary: a database that has already produced a report. */
 const REPORT_FIXTURE = join(SQL_DIR, "17_report_fixture.sql");
@@ -368,12 +391,14 @@ const V0100_PRESERVATION = join("supabase", "release-checks", "v0100_preservatio
 const V0110_PRESERVATION = join("supabase", "release-checks", "v0110_preservation.sql");
 const V0121_PRESERVATION = join("supabase", "release-checks", "v0121_preservation.sql");
 const V0122_TILL_PRESERVATION = join("supabase", "release-checks", "v0122_till_preservation.sql");
+const V0130_PRESERVATION = join("supabase", "release-checks", "v0130_preservation.sql");
 
 /**
- * All 54 released migrations (issue #82). Its first 53 lines are the v0.11.0 manifest unchanged, so
- * this checks everything that one did and the stock receipt link migration v0.12.0 released since.
+ * All 56 released migrations (issue #84). Its first 54 lines are the v0.12.1 manifest unchanged, so
+ * this checks everything that one did, the report imprest section migration v0.12.2 released and
+ * the till count migration v0.13.0 released.
  */
-const MIGRATION_MANIFEST = join("supabase", "release-checks", "v0121_migration_manifest.txt");
+const MIGRATION_MANIFEST = join("supabase", "release-checks", "v0130_migration_manifest.txt");
 
 /**
  * The two phases of the proof, each with its own starting migration and its own preservation query.
@@ -1036,6 +1061,49 @@ const PHASES = [
           { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
           { name: "a stock receipt's delivery note rewritten in place", file: COUNTEREXAMPLE_RECEIPT_NOTE },
           { name: "a delivery's imprest payment repointed in place", file: COUNTEREXAMPLE_RECEIPT_LINK },
+        ],
+      },
+    ],
+  },
+  {
+    subject: "the accountability decisions migration",
+    what: "the v0.13.0 database",
+    version: TILL_COUNT_VERSION,
+    upTo: ACCOUNTABILITY_VERSION,
+    describes: "v0.13.0, before the accountability decisions",
+    query: V0130_PRESERVATION,
+    fixtures: [
+      {
+        name: "everything the v0.12.2 phase builds, a delivery paid from imprest, the till counted, sent back and confirmed, AND losses and shortages decided",
+        setup: [
+          MARK_ACCOUNTABILITY,
+          BUILD_V005,
+          BUILD_V010_FUNDING,
+          BUILD_V020_REPORT,
+          BUILD_V030_DISBURSEMENTS,
+          BUILD_V040_SETTLEMENTS,
+          BUILD_V050_VERIFICATIONS,
+          BUILD_V060_SEND_BACK,
+          BUILD_V070_COUNTS,
+          BUILD_V080_LATE_COUNT,
+          BUILD_V090_RAISES,
+          BUILD_V0100_REVERSALS,
+          BUILD_V0110_RECEIPTS,
+          BUILD_TILL_GROUND,
+          BUILD_V0130_TILL_COUNTS,
+        ],
+        assertions: [ASSERT_ACCOUNTABILITY],
+        counterexamples: [
+          { name: "one existing customer renamed", file: COUNTEREXAMPLE_CUSTOMER },
+          { name: "a reversal repointed at another payment", file: COUNTEREXAMPLE_REVERSAL },
+          { name: "a settlement attributed to somebody else", file: COUNTEREXAMPLE_SETTLEMENT },
+          { name: "a delivered report's content rewritten in place", file: COUNTEREXAMPLE_REPORT },
+          { name: "a label added to a released enum", file: COUNTEREXAMPLE_ENUM },
+          { name: "a released table's grant widened", file: COUNTEREXAMPLE_GRANT },
+          { name: "a count confirmation's reason rewritten in place", file: COUNTEREXAMPLE_COUNT },
+          { name: "a stock receipt's delivery note rewritten in place", file: COUNTEREXAMPLE_RECEIPT_NOTE },
+          { name: "a delivery's imprest payment repointed in place", file: COUNTEREXAMPLE_RECEIPT_LINK },
+          { name: "a till send-back's reason rewritten in place", file: COUNTEREXAMPLE_TILL_RETURN },
         ],
       },
     ],

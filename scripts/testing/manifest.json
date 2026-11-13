@@ -12,10 +12,10 @@
     "pgtap": ["supabase/tests/database/*.sql"]
   },
   "minimums": {
-    "migrations": 56,
-    "pgtapFiles": 29,
-    "pgtapAssertions": 2018,
-    "migrationChainCounterexamples": 164,
+    "migrations": 57,
+    "pgtapFiles": 30,
+    "pgtapAssertions": 2073,
+    "migrationChainCounterexamples": 174,
     "responsiveProjects": ["mobile", "tablet", "desktop"]
   },
   "retiredTests": [],
@@ -87,7 +87,7 @@
   "appCritical": [
     { "pattern": "{next.config.ts,proxy.ts,tsconfig.json,eslint.config.mjs,postcss.config.mjs,components.json}", "reason": "application or build configuration" },
     { "pattern": "lib/{auth,admin,supabase}/**", "reason": "authentication, authorization or the database client" },
-    { "pattern": "lib/{imprest,inventory,production,sales,settlement,till,validation}/**", "reason": "financial or stock commands and their validation" },
+    { "pattern": "lib/{accountability,imprest,inventory,production,sales,settlement,till,validation}/**", "reason": "financial or stock commands and their validation" },
     { "pattern": "lib/{money.ts,time/**,stock-refusal.ts}", "reason": "business money, date or stock helpers" },
     { "pattern": "lib/env.ts", "reason": "environment the server and the build read" },
     { "pattern": "app/**/actions.ts", "reason": "server actions run financial, stock or account commands" },
@@ -108,6 +108,16 @@
   ],
   "docsOnly": ["README.md", "CHANGELOG.md", "AGENTS.md", "CLAUDE.md", "docs/**"],
   "domains": {
+    "accountability-ui": {
+      "risk": "medium",
+      "sources": [
+        "app/(app)/accountability/**"
+      ],
+      "e2e": [
+        "e2e/role-routing.spec.ts",
+        "e2e/responsive-shell.spec.ts"
+      ]
+    },
     "reports-ui": {
       "risk": "medium",
       "sources": ["app/(app)/reports/**", "lib/reports/**"],
@@ -185,8 +195,9 @@
   "groups": {
     "integration": {
       "imprest-fund": {
-        "why": "One active fund, one Auth instance and one database. Funding must run first so its first-open race starts with no fund; the not-counted file runs late and retirement runs last (vitest.config.mts).",
+        "why": "One active fund, one Auth instance and one database. Funding must run first so its first-open race starts with no fund; the not-counted file runs late and retirement runs last, followed only by accountability decisions on a fund of their own (vitest.config.mts).",
         "files": [
+          "tests/integration/accountability-decisions.test.ts",
           "tests/integration/imprest-daily-count.test.ts",
           "tests/integration/imprest-disbursements.test.ts",
           "tests/integration/imprest-funding.test.ts",

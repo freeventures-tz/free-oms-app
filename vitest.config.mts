@@ -16,9 +16,15 @@ const RUN_FIRST = ["tests/integration/imprest-funding.test.ts"];
  * Integration files that run after every other file, in this order. `imprest-not-counted.test.ts`
  * counts past days late, and `imprest-daily-count.test.ts` begins by proving the fund holds no count
  * at all, so the late counts must come after it. `imprest-retirement.test.ts` closes the shared fund
- * and opens funds of its own (issue #72), so nothing may follow it.
+ * and opens funds of its own (issue #72), so nothing may follow it except
+ * `accountability-decisions.test.ts` (issue #84), which opens a fund of its own the same way and needs
+ * nothing from the shared one.
  */
-const RUN_LAST = ["tests/integration/imprest-not-counted.test.ts", "tests/integration/imprest-retirement.test.ts"];
+const RUN_LAST = [
+  "tests/integration/imprest-not-counted.test.ts",
+  "tests/integration/imprest-retirement.test.ts",
+  "tests/integration/accountability-decisions.test.ts",
+];
 
 function rank(spec: TestSpecification): number {
   const path = spec.moduleId.replaceAll("\\", "/");

@@ -2,6 +2,28 @@
 
 What each release of Free Ventures OMS adds, in plain language.
 
+## [0.14.0] — 2026-11-13
+
+A Director can now record who is accountable for an imprest loss or a count shortage.
+
+### NEW
+
+- A new Accountability screen, for Directors only, lists every imprest unexplained loss and every
+  confirmed imprest count shortage that still waits for a decision, oldest first, with the payment
+  or count it came from.
+- A Director records a decision on each one: a written explanation of who is responsible and how it
+  is resolved, and either the staff responsible or a statement that nobody has been identified. The
+  screen says that the decision has no payroll effect, and nothing is posted or changed by it.
+- A decision is permanent. Each loss or shortage gets one, and it cannot be edited, replaced or
+  deleted. A decided item leaves the list, and the screen shows the latest decisions below it.
+
+### IMPROVED
+
+- On a payment's page, a decided loss now says that a Director has recorded the decision, instead
+  of still waiting for one. A retired fund no longer lists a decided loss or shortage as unresolved.
+- Only Directors can record a decision. When the Manager, a Cashier or a Sales Representative
+  tries, the database refuses it and records the attempt.
+
 ## [0.13.0] — 2026-11-13
 
 The Cashier can now count the till at the end of the day, and the Manager confirms the count or

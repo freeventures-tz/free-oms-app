@@ -500,7 +500,9 @@ reset role;
 select throws_ok(format($$ delete from public.imprest_count_confirmations where count_id = %L $$,
                         tests.cid('c2')), '23001', null, 'a confirmation is never deleted');
 set constraints all immediate;
-select throws_ok($$ truncate public.imprest_count_postings $$, '23001', null,
+-- Since issue #84 an accountability decision references a shortage posting, so the foreign key
+-- refuses the truncate (0A000) before the table's own no-truncate trigger is reached.
+select throws_ok($$ truncate public.imprest_count_postings $$, '0A000', null,
                  'the postings are never truncated');
 set constraints all deferred;
 
