@@ -51,7 +51,7 @@ vi.mock("@/app/actions/locale", () => ({ setLocale: vi.fn() }));
 
 const { AppShell } = await import("@/components/app-shell");
 const { FALLBACK_NAV_ICON, activeHrefFor, navIconFor } = await import("@/components/nav-icons");
-const { Boxes, PackagePlus } = await import("lucide-react");
+const { Boxes, Calculator, PackagePlus } = await import("lucide-react");
 
 const DIRECTOR_STOCK = [
   { href: "/dashboard", labelKey: "nav.dashboard" },
@@ -114,9 +114,10 @@ describe("the icon rail", () => {
     expect(navIconFor("/inventory/receiving")).toBe(PackagePlus);
     // An unmapped child borrows its parent's mark, and an unknown destination gets the fallback.
     expect(navIconFor("/inventory/counts")).toBe(Boxes);
-    expect(navIconFor("/till")).toBe(FALLBACK_NAV_ICON);
+    expect(navIconFor("/till")).toBe(Calculator);
+    expect(navIconFor("/not-yet-built")).toBe(FALLBACK_NAV_ICON);
 
-    render(shell([{ href: "/till", labelKey: "nav.dashboard" }]));
+    render(shell([{ href: "/not-yet-built", labelKey: "nav.dashboard" }]));
     expect(screen.getByRole("link", { name: en.nav.dashboard }).querySelector("svg")).not.toBeNull();
   });
 
