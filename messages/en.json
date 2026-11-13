@@ -78,6 +78,62 @@
       }
     }
   },
+  "accountability": {
+    "nav": "Accountability",
+    "title": "Accountability decisions",
+    "description": "Unexplained losses and count shortages wait here until a Director records who is accountable. A decision is a record only. It has no payroll effect.",
+    "subject": {
+      "imprest_unexplained_loss": "Imprest unexplained loss",
+      "imprest_count_shortage": "Imprest count shortage"
+    },
+    "undecided": {
+      "title": "Waiting for a decision ({count})",
+      "empty": "Nothing is waiting for a decision.",
+      "replacement": "Replacement after a reversal",
+      "retiredFund": "Retired fund",
+      "proposedBy": "proposed by {name}",
+      "countedOn": "Count of {date}, counted by {counted}, confirmed by {confirmed}",
+      "countExplanation": "Manager's reason: {reason}. {note}",
+      "settlementExplanation": "Explanation when settled: {text}",
+      "posted": "Posted {when}"
+    },
+    "form": {
+      "open": "Record decision",
+      "noPayroll": "This decision has no payroll effect. It records who is accountable and how the matter is resolved. Nobody's pay changes because of it, and nothing is posted.",
+      "decision": "Decision",
+      "decisionHelp": "Explain who is responsible and how it is resolved, in 3 to 2,000 characters.",
+      "who": "Who is responsible",
+      "whoHelp": "Name the staff responsible, or state that nobody has been identified.",
+      "named": "Name the staff responsible",
+      "nobody": "Nobody has been identified",
+      "inactive": "no longer active",
+      "permanent": "A decision is permanent. It cannot be changed or replaced once recorded.",
+      "submit": "Record decision permanently"
+    },
+    "decided": {
+      "title": "Recent decisions",
+      "empty": "No decision has been recorded yet.",
+      "by": "Decided by {name}, {when}",
+      "nobody": "Nobody identified",
+      "responsible": "Responsible: {names}",
+      "countOf": "Count of {date}"
+    },
+    "success": "Decision recorded. The item has left the list."
+  },
+  "accountabilityErrors": {
+    "director_only": "Only a Director can record an accountability decision.",
+    "no_subject": "This loss or shortage was not found. Refresh the page.",
+    "decision_required": "Write the decision, in 3 to 2,000 characters.",
+    "responsible_required": "Name at least one responsible person, or choose Nobody has been identified.",
+    "responsible_conflict": "Choose either named staff or Nobody has been identified, not both.",
+    "too_many_staff": "Name at most 10 people.",
+    "unknown_staff": "One of the people named is not a member of staff. Refresh the page.",
+    "already_decided": "A Director has already decided this. Refresh the page to see the decision.",
+    "subject_reversed": "This loss has been reversed, so it no longer needs a decision.",
+    "idempotency_key_conflict": "This form was already used for a different request. Open it again.",
+    "unconfirmed": "The answer did not arrive, so the decision may or may not be recorded. Try again to find out.",
+    "generic": "The decision could not be recorded. Try again."
+  },
   "access": {
     "noRole": {
       "title": "You have no role yet",
@@ -1432,6 +1488,7 @@
         "expense": "Imprest expense",
         "loss": "Unexplained loss",
         "lossNote": "Awaiting a Director's decision",
+        "lossDecided": "A Director has recorded the accountability decision",
         "verifiedBy": "Verified by {name} on {at}"
       },
       "verify": {

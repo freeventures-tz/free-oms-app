@@ -75,6 +75,8 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { href: "/settings/suppliers", labelKey: "nav.suppliers" },
     { href: "/settings/storekeepers", labelKey: "nav.storekeepers" },
     { href: "/reports", labelKey: "nav.reports" },
+    // Issue #84: only a Director records an accountability decision (product.md §15).
+    { href: "/accountability", labelKey: "accountability.nav" },
     { href: "/admin/accounts", labelKey: "nav.accounts" },
   ],
 };

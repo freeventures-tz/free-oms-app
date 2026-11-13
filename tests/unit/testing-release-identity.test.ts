@@ -290,14 +290,14 @@ describe("a build that has been served", () => {
 });
 
 describe("this repository as a candidate", () => {
-  it("has consistent 0.13.0 metadata across package, both lockfile fields and the changelog", () => {
+  it("has consistent 0.14.0 metadata across package, both lockfile fields and the changelog", () => {
     expect(described.metadata).toEqual([]);
-    expect(described.identity.version).toEqual({ package: "0.13.0", lockfile: "0.13.0", lockfileRoot: "0.13.0", changelog: "0.13.0" });
+    expect(described.identity.version).toEqual({ package: "0.14.0", lockfile: "0.14.0", lockfileRoot: "0.14.0", changelog: "0.14.0" });
   });
 
-  it("holds all 56 migrations, the till count migration last, and the released manifests", () => {
-    expect(described.identity.migrations.count).toBe(56);
-    expect(described.identity.migrations.files.at(-1).file).toBe("20261007000100_till_count.sql");
+  it("holds all 57 migrations, the accountability migration last, and the released manifests", () => {
+    expect(described.identity.migrations.count).toBe(57);
+    expect(described.identity.migrations.files.at(-1).file).toBe("20261008000100_accountability_decisions.sql");
     expect(described.identity.releasedHistory.map((entry: { file: string }) => entry.file)).toContain("v0121_migration_manifest.txt");
   });
 });

@@ -107,6 +107,8 @@ export type Posting = {
   /** The posting a reversal cancels, or the one a replacement stands in for. */
   correctsPostingId: string | null;
   needsDirectorDecision: boolean;
+  /** True once a Director has recorded the accountability decision on this loss (issue #84). */
+  decided: boolean;
   postedAt: string;
   /** True once a later reversal cancels this posting. A reversal itself is never reversed. */
   reversed: boolean;
@@ -297,7 +299,7 @@ const COLUMNS = `
                           decided_by, decided_at, refusal_reason, handed_out_at, recipient),
   imprest_verifications(settlement_id, verified_by, verified_at),
   imprest_postings(id, kind, entry, amount_tzs, reversal_id, corrects_posting_id,
-                   needs_director_decision, posted_at),
+                   needs_director_decision, posted_at, accountability_decisions(decided_at)),
   imprest_posting_reversals(id, posting_id, status, version, original_tzs, correct_tzs, reason,
                             requested_by, requested_role, requested_at, decided_by, decided_at,
                             rejection_reason),
@@ -373,6 +375,8 @@ type PostingRow = {
   corrects_posting_id: string | null;
   needs_director_decision: boolean;
   posted_at: string;
+  /** A Director's accountability decision (issue #84); unreadable, and so null, for a Cashier. */
+  accountability_decisions?: { decided_at: string } | { decided_at: string }[] | null;
 };
 
 type ReversalRow = {
@@ -522,6 +526,9 @@ function postingsOf(rows: PostingRow[]): Posting[] {
       reversalId: p.reversal_id,
       correctsPostingId: p.corrects_posting_id,
       needsDirectorDecision: p.needs_director_decision,
+      decided: Array.isArray(p.accountability_decisions)
+        ? p.accountability_decisions.length > 0
+        : Boolean(p.accountability_decisions),
       postedAt: p.posted_at,
       reversed: reversed.has(p.id),
     }));

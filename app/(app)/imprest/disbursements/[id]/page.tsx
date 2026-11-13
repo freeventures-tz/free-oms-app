@@ -434,7 +434,9 @@ async function Corrections({
                 <span className="font-medium">{kindLabel(p.kind)}</span>
                 <span className="text-xs text-muted-foreground">{t(`reversal.entry.${p.entry}`)}</span>
                 {p.needsDirectorDecision ? (
-                  <span className="text-xs text-muted-foreground">{t("spending.posted.lossNote")}</span>
+                  <span className="text-xs text-muted-foreground" data-testid="loss-decision-note">
+                    {t(p.decided ? "spending.posted.lossDecided" : "spending.posted.lossNote")}
+                  </span>
                 ) : null}
               </span>
               <span className={`fv-numeric font-semibold ${p.kind === "unexplained_loss" ? "text-danger" : ""}`}>
@@ -575,7 +577,13 @@ async function Postings({ disbursement }: { disbursement: DisbursementDetail }) 
           <div className="flex flex-col gap-1" data-testid="posting-loss">
             <dt className="text-xs text-muted-foreground">{t("posted.loss")}</dt>
             <dd className="fv-numeric font-semibold text-danger">{formatTzs(verification.loss, locale)}</dd>
-            <dd className="text-xs text-muted-foreground">{t("posted.lossNote")}</dd>
+            <dd className="text-xs text-muted-foreground" data-testid="posted-loss-note">
+              {t(
+                disbursement.postings.some((p) => p.kind === "unexplained_loss" && p.entry === "original" && p.decided)
+                  ? "posted.lossDecided"
+                  : "posted.lossNote",
+              )}
+            </dd>
           </div>
         ) : null}
       </dl>

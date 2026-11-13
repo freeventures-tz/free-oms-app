@@ -78,6 +78,62 @@
       }
     }
   },
+  "accountability": {
+    "nav": "Uwajibikaji",
+    "title": "Maamuzi ya uwajibikaji",
+    "description": "Hasara zisizoelezwa na upungufu wa hesabu husubiri hapa hadi Mkurugenzi aandike nani anawajibika. Uamuzi ni kumbukumbu tu. Hauathiri mishahara.",
+    "subject": {
+      "imprest_unexplained_loss": "Hasara ya imprest isiyoelezwa",
+      "imprest_count_shortage": "Upungufu wa hesabu ya imprest"
+    },
+    "undecided": {
+      "title": "Inasubiri uamuzi ({count})",
+      "empty": "Hakuna kinachosubiri uamuzi.",
+      "replacement": "Mbadala baada ya kubatilisha",
+      "retiredFund": "Mfuko uliofungwa",
+      "proposedBy": "imependekezwa na {name}",
+      "countedOn": "Hesabu ya {date}, imehesabiwa na {counted}, imethibitishwa na {confirmed}",
+      "countExplanation": "Sababu ya Meneja: {reason}. {note}",
+      "settlementExplanation": "Maelezo wakati wa kurejesha: {text}",
+      "posted": "Imeingizwa {when}"
+    },
+    "form": {
+      "open": "Andika uamuzi",
+      "noPayroll": "Uamuzi huu hauathiri mishahara. Unaandika nani anawajibika na jambo linamalizwaje. Mshahara wa mtu yeyote haubadiliki kwa sababu yake, na hakuna kinachoingizwa kwenye hesabu.",
+      "decision": "Uamuzi",
+      "decisionHelp": "Eleza nani anawajibika na jambo linamalizwaje, kwa herufi 3 hadi 2,000.",
+      "who": "Nani anawajibika",
+      "whoHelp": "Taja wafanyakazi wanaowajibika, au eleza kwamba hakuna aliyetambuliwa.",
+      "named": "Taja wafanyakazi wanaowajibika",
+      "nobody": "Hakuna aliyetambuliwa",
+      "inactive": "hayupo kazini tena",
+      "permanent": "Uamuzi ni wa kudumu. Hauwezi kubadilishwa wala kuchukuliwa nafasi baada ya kuandikwa.",
+      "submit": "Andika uamuzi wa kudumu"
+    },
+    "decided": {
+      "title": "Maamuzi ya karibuni",
+      "empty": "Bado hakuna uamuzi ulioandikwa.",
+      "by": "Imeamuliwa na {name}, {when}",
+      "nobody": "Hakuna aliyetambuliwa",
+      "responsible": "Wanaowajibika: {names}",
+      "countOf": "Hesabu ya {date}"
+    },
+    "success": "Uamuzi umeandikwa. Kipengele kimeondoka kwenye orodha."
+  },
+  "accountabilityErrors": {
+    "director_only": "Ni Mkurugenzi pekee anayeweza kuandika uamuzi wa uwajibikaji.",
+    "no_subject": "Hasara au upungufu huu haukupatikana. Onyesha upya ukurasa.",
+    "decision_required": "Andika uamuzi, kwa herufi 3 hadi 2,000.",
+    "responsible_required": "Taja angalau mtu mmoja anayewajibika, au chagua Hakuna aliyetambuliwa.",
+    "responsible_conflict": "Chagua wafanyakazi uliowataja au Hakuna aliyetambuliwa, si vyote viwili.",
+    "too_many_staff": "Taja watu wasiozidi 10.",
+    "unknown_staff": "Mmoja wa uliowataja si mfanyakazi. Onyesha upya ukurasa.",
+    "already_decided": "Mkurugenzi ameshaamua hili. Onyesha upya ukurasa kuona uamuzi.",
+    "subject_reversed": "Hasara hii imebatilishwa, kwa hiyo haihitaji uamuzi tena.",
+    "idempotency_key_conflict": "Fomu hii imeshatumika kwa ombi jingine. Ifungue tena.",
+    "unconfirmed": "Jibu halikufika, kwa hiyo huenda uamuzi umeandikwa au haujaandikwa. Jaribu tena kujua.",
+    "generic": "Uamuzi haukuweza kuandikwa. Jaribu tena."
+  },
   "access": {
     "noRole": {
       "title": "Bado huna wadhifa",
@@ -1432,6 +1488,7 @@
         "expense": "Matumizi ya imprest",
         "loss": "Hasara isiyoelezwa",
         "lossNote": "Inasubiri uamuzi wa Mkurugenzi",
+        "lossDecided": "Mkurugenzi ameandika uamuzi wa uwajibikaji",
         "verifiedBy": "Imehakikiwa na {name} tarehe {at}"
       },
       "verify": {
